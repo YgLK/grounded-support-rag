@@ -81,7 +81,9 @@ def _normalize_span(span: dict) -> dict:
     }
 
 
-def load_documents(dataset_root: str | Path, domains: Iterable[str] | str | None = None) -> list[dict]:
+def load_documents(
+    dataset_root: str | Path, domains: Iterable[str] | str | None = None
+) -> list[dict]:
     """Load raw MultiDoc2Dial documents.
 
     The returned records preserve source metadata and add a normalized, sorted
@@ -101,8 +103,12 @@ def load_documents(dataset_root: str | Path, domains: Iterable[str] | str | None
             normalized_spans = sorted(
                 (_normalize_span(span) for span in spans.values()),
                 key=lambda span: (
-                    span.get("start_sec") if span.get("start_sec") is not None else 10**18,
-                    span.get("start_sp") if span.get("start_sp") is not None else 10**18,
+                    span.get("start_sec")
+                    if span.get("start_sec") is not None
+                    else 10**18,
+                    span.get("start_sp")
+                    if span.get("start_sp") is not None
+                    else 10**18,
                     span.get("id_sp", ""),
                 ),
             )

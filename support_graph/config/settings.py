@@ -60,15 +60,21 @@ class Settings:
     @classmethod
     def from_env(cls, dotenv_path: str | Path | None = None) -> "Settings":
         project_root = _repo_root()
-        resolved_dotenv = Path(dotenv_path) if dotenv_path is not None else project_root / ".env"
+        resolved_dotenv = (
+            Path(dotenv_path) if dotenv_path is not None else project_root / ".env"
+        )
         file_values = _read_dotenv(resolved_dotenv)
         env = {**file_values, **os.environ}
 
         dataset_root = Path(
             env.get("SUPPORT_GRAPH_DATASET_ROOT", project_root / "multidoc2dial")
         )
-        trace_dir = Path(env.get("SUPPORT_GRAPH_TRACE_DIR", project_root / "outputs/traces"))
-        eval_dir = Path(env.get("SUPPORT_GRAPH_EVAL_DIR", project_root / "outputs/evals"))
+        trace_dir = Path(
+            env.get("SUPPORT_GRAPH_TRACE_DIR", project_root / "outputs/traces")
+        )
+        eval_dir = Path(
+            env.get("SUPPORT_GRAPH_EVAL_DIR", project_root / "outputs/evals")
+        )
         derived_dir = project_root / "data/derived"
         chunks_dir = derived_dir / "chunks"
         examples_dir = derived_dir / "examples"
@@ -76,15 +82,23 @@ class Settings:
         return cls(
             project_root=project_root,
             dataset_root=dataset_root,
-            enabled_domains=_csv_to_tuple(env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), ("dmv",)),
+            enabled_domains=_csv_to_tuple(
+                env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), ("dmv",)
+            ),
             postgres_dsn=env.get("SUPPORT_GRAPH_POSTGRES_DSN") or None,
             provider_type=env.get("SUPPORT_GRAPH_PROVIDER_TYPE", "ollama"),
-            ollama_base_url=env.get("SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"),
+            ollama_base_url=env.get(
+                "SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"
+            ),
             chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
             embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
             retrieval_top_k=_int_value(env.get("SUPPORT_GRAPH_RETRIEVAL_TOP_K"), 5),
-            retrieval_candidate_k=_int_value(env.get("SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K"), 12),
-            max_retrieval_attempts=_int_value(env.get("SUPPORT_GRAPH_MAX_RETRIEVAL_ATTEMPTS"), 2),
+            retrieval_candidate_k=_int_value(
+                env.get("SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K"), 12
+            ),
+            max_retrieval_attempts=_int_value(
+                env.get("SUPPORT_GRAPH_MAX_RETRIEVAL_ATTEMPTS"), 2
+            ),
             trace_dir=trace_dir,
             eval_dir=eval_dir,
             derived_dir=derived_dir,

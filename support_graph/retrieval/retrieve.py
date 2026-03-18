@@ -49,7 +49,9 @@ def _latest_user_utterance(example: dict, conversation: list[dict]) -> str:
     return ""
 
 
-def _normalize_tokens(text: str, *, minimum_length: int = 1, drop_stopwords: bool = False) -> list[str]:
+def _normalize_tokens(
+    text: str, *, minimum_length: int = 1, drop_stopwords: bool = False
+) -> list[str]:
     normalized: list[str] = []
     for token in re.findall(r"[a-z0-9]+", text.lower()):
         if len(token) < minimum_length:
@@ -76,11 +78,16 @@ def _find_latest_user_index(example: dict, conversation: list[dict]) -> int | No
     if latest_user:
         for index in range(len(conversation) - 1, -1, -1):
             turn = conversation[index]
-            if turn.get("role") == "user" and str(turn.get("utterance", "")).strip() == latest_user:
+            if (
+                turn.get("role") == "user"
+                and str(turn.get("utterance", "")).strip() == latest_user
+            ):
                 return index
 
     for index in range(len(conversation) - 1, -1, -1):
-        if conversation[index].get("role") == "user" and conversation[index].get("utterance"):
+        if conversation[index].get("role") == "user" and conversation[index].get(
+            "utterance"
+        ):
             return index
     return None
 
@@ -116,7 +123,11 @@ def build_query_context(example: dict) -> dict:
 
     user_context: list[dict] = []
     agent_context: list[dict] = []
-    prior_turns = conversation[:latest_user_index] if latest_user_index is not None else conversation[:-1]
+    prior_turns = (
+        conversation[:latest_user_index]
+        if latest_user_index is not None
+        else conversation[:-1]
+    )
     for turn in reversed(prior_turns):
         utterance = str(turn.get("utterance", "")).strip()
         if not utterance or utterance == last_agent_question:
@@ -125,7 +136,10 @@ def build_query_context(example: dict) -> dict:
             continue
         if _is_duplicate_or_substring_variant(utterance, latest_user):
             continue
-        candidate = {"role": str(turn.get("role", "")).strip() or "unknown", "utterance": utterance}
+        candidate = {
+            "role": str(turn.get("role", "")).strip() or "unknown",
+            "utterance": utterance,
+        }
         if candidate["role"] == "user":
             user_context.append(candidate)
         else:
@@ -148,7 +162,9 @@ def _render_query_context(context: dict, *, include_history: bool = True) -> str
         parts.append(f"Latest user need: {context['latest_user_need']}")
     if include_history and context.get("last_agent_question"):
         parts.append(f"Last agent question: {context['last_agent_question']}")
-    carry_forward = list(context.get("carry_forward_context", [])) if include_history else []
+    carry_forward = (
+        list(context.get("carry_forward_context", [])) if include_history else []
+    )
     if carry_forward:
         parts.append("Carry-forward context:")
         for turn in carry_forward:
@@ -208,7 +224,9 @@ def query_context_tokens(context: dict) -> set[str]:
         values.append(str(context["last_agent_question"]))
     for turn in context.get("carry_forward_context", []):
         values.append(str(turn.get("utterance", "")))
-    return set(_normalize_tokens(" ".join(values), minimum_length=3, drop_stopwords=True))
+    return set(
+        _normalize_tokens(" ".join(values), minimum_length=3, drop_stopwords=True)
+    )
 
 
 def build_metadata_filter(
@@ -285,7 +303,11 @@ def _is_heading_like(hit: dict) -> bool:
     normalized_title = section_title.lower().rstrip(".")
     if section_id.startswith("t_"):
         return True
-    if normalized_text and normalized_text == normalized_title and (token_count is None or token_count <= 16):
+    if (
+        normalized_text
+        and normalized_text == normalized_title
+        and (token_count is None or token_count <= 16)
+    ):
         return True
     if len(span_ids) <= 1 and len(text.split()) <= 16 and text.endswith("?"):
         return True
@@ -297,23 +319,34 @@ def _is_heading_like(hit: dict) -> bool:
 def _overlap_count(query_tokens: set[str], text: str) -> int:
     if not query_tokens or not text:
         return 0
-    candidate_tokens = set(_normalize_tokens(text, minimum_length=3, drop_stopwords=True))
+    candidate_tokens = set(
+        _normalize_tokens(text, minimum_length=3, drop_stopwords=True)
+    )
     return len(query_tokens & candidate_tokens)
 
 
-def rerank_retrieval_hits(hits: list[dict], *, query_context: dict | None = None) -> list[dict]:
+def rerank_retrieval_hits(
+    hits: list[dict], *, query_context: dict | None = None
+) -> list[dict]:
     reranked = [dict(hit) for hit in hits]
     query_tokens = query_context_tokens(query_context or {})
 
     def sort_key(hit: dict) -> tuple[float, int]:
         score = hit.get("vector_distance", hit.get("score"))
-        base_score = float(score) if score is not None else float(hit.get("original_rank", hit.get("rank", 0)))
+        base_score = (
+            float(score)
+            if score is not None
+            else float(hit.get("original_rank", hit.get("rank", 0)))
+        )
         section_id = str(hit.get("section_id", "")).strip()
         token_count = int(hit.get("token_count") or 0)
         span_count = len(hit.get("span_ids", []))
         text_overlap_count = _overlap_count(query_tokens, str(hit.get("text", "")))
         title_text = " ".join(
-            [str(hit.get("section_title", "")), *[str(title) for title in hit.get("parent_titles", [])]]
+            [
+                str(hit.get("section_title", "")),
+                *[str(title) for title in hit.get("parent_titles", [])],
+            ]
         )
         title_overlap_count = _overlap_count(query_tokens, title_text)
 
@@ -344,7 +377,9 @@ def get_vectorstore(
     create_extension: bool = True,
 ) -> Any:
     validate_index_config(config)
-    embedding_client = embeddings if embeddings is not None else build_embeddings(config)
+    embedding_client = (
+        embeddings if embeddings is not None else build_embeddings(config)
+    )
     collection_name = getattr(config, "collection_name", None) or build_collection_name(
         getattr(config, "domain", "dmv")
     )
@@ -403,5 +438,7 @@ def retrieve_chunks(
     normalized_hits = normalize_retrieval_hits(hits)
     if not rerank:
         return normalized_hits[:resolved_top_k]
-    reranked_hits = rerank_retrieval_hits(normalized_hits, query_context=resolved_query_context)
+    reranked_hits = rerank_retrieval_hits(
+        normalized_hits, query_context=resolved_query_context
+    )
     return reranked_hits[:resolved_top_k]

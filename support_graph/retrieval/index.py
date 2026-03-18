@@ -62,10 +62,15 @@ def validate_index_config(config: Any) -> None:
         raise ValueError(f"Missing required index config: {joined}")
 
 
-def build_embeddings(config: Any, embeddings_cls: type[OllamaEmbeddings] = OllamaEmbeddings) -> Any:
+def build_embeddings(
+    config: Any, embeddings_cls: type[OllamaEmbeddings] = OllamaEmbeddings
+) -> Any:
     validate_index_config(config)
 
-    if hasattr(config, "embedding_client") and getattr(config, "embedding_client") is not None:
+    if (
+        hasattr(config, "embedding_client")
+        and getattr(config, "embedding_client") is not None
+    ):
         return getattr(config, "embedding_client")
 
     provider_type = getattr(config, "provider_type", None)
@@ -81,7 +86,9 @@ def build_embeddings(config: Any, embeddings_cls: type[OllamaEmbeddings] = Ollam
     )
 
 
-def chunk_record_to_document(chunk_record: dict, document_cls: type[Document] | None = None) -> Document:
+def chunk_record_to_document(
+    chunk_record: dict, document_cls: type[Document] | None = None
+) -> Document:
     resolved_document_cls = document_cls or Document
     metadata = {
         "chunk_id": chunk_record.get("chunk_id"),
@@ -95,14 +102,19 @@ def chunk_record_to_document(chunk_record: dict, document_cls: type[Document] | 
         "subchunk_index": chunk_record.get("subchunk_index"),
         "token_count": chunk_record.get("token_count"),
     }
-    return resolved_document_cls(page_content=chunk_record.get("text", ""), metadata=metadata)
+    return resolved_document_cls(
+        page_content=chunk_record.get("text", ""), metadata=metadata
+    )
 
 
 def chunk_records_to_documents(
     chunk_records: list[dict],
     document_cls: type[Document] | None = None,
 ) -> tuple[list[Document], list[str]]:
-    documents = [chunk_record_to_document(chunk_record, document_cls=document_cls) for chunk_record in chunk_records]
+    documents = [
+        chunk_record_to_document(chunk_record, document_cls=document_cls)
+        for chunk_record in chunk_records
+    ]
     ids = [str(chunk_record.get("chunk_id", "")) for chunk_record in chunk_records]
     return documents, ids
 
@@ -114,7 +126,9 @@ def load_indexed_chunk_ids(connection: str, collection_name: str) -> set[str]:
         join langchain_pg_collection c on e.collection_id = c.uuid
         where c.name = %s
     """
-    with psycopg.connect(psycopg_connection_string(connection), connect_timeout=5) as conn:
+    with psycopg.connect(
+        psycopg_connection_string(connection), connect_timeout=5
+    ) as conn:
         with conn.cursor() as cur:
             cur.execute(query, (collection_name,))
             return {row[0] for row in cur.fetchall() if row[0]}
@@ -127,7 +141,9 @@ def collection_row_count(connection: str, collection_name: str) -> int:
         join langchain_pg_collection c on e.collection_id = c.uuid
         where c.name = %s
     """
-    with psycopg.connect(psycopg_connection_string(connection), connect_timeout=5) as conn:
+    with psycopg.connect(
+        psycopg_connection_string(connection), connect_timeout=5
+    ) as conn:
         with conn.cursor() as cur:
             cur.execute(query, (collection_name,))
             return int(cur.fetchone()[0])
@@ -153,8 +169,12 @@ def index_documents(
             raise ValueError("Missing chunk_artifact_path for indexing.")
         resolved_chunk_records = load_chunk_records(chunk_artifact_path)
 
-    documents, ids = chunk_records_to_documents(resolved_chunk_records, document_cls=document_cls)
-    embedding_client = embeddings if embeddings is not None else build_embeddings(config)
+    documents, ids = chunk_records_to_documents(
+        resolved_chunk_records, document_cls=document_cls
+    )
+    embedding_client = (
+        embeddings if embeddings is not None else build_embeddings(config)
+    )
     collection_name = getattr(config, "collection_name", None) or build_collection_name(
         getattr(config, "domain", "dmv")
     )
@@ -180,7 +200,10 @@ def index_documents(
         stored_ids = load_indexed_chunk_ids(kwargs["connection"], collection_name)
         missing_ids = [chunk_id for chunk_id in ids if chunk_id not in stored_ids]
         if missing_ids:
-            by_chunk_id = {chunk_record["chunk_id"]: chunk_record for chunk_record in resolved_chunk_records}
+            by_chunk_id = {
+                chunk_record["chunk_id"]: chunk_record
+                for chunk_record in resolved_chunk_records
+            }
             missing_records = [by_chunk_id[chunk_id] for chunk_id in missing_ids]
             missing_documents, missing_document_ids = chunk_records_to_documents(
                 missing_records,

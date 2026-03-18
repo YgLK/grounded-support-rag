@@ -157,8 +157,11 @@ def _heuristic_response(state: GraphState) -> dict:
         chunk = _best_retrieved_chunk(chunks)
         return {
             "decision": "answer",
-            "response_text": chunk.get("text", "").strip() or "Relevant documentation was found.",
-            "citation_chunk_ids": [chunk.get("chunk_id")] if chunk.get("chunk_id") else [],
+            "response_text": chunk.get("text", "").strip()
+            or "Relevant documentation was found.",
+            "citation_chunk_ids": [chunk.get("chunk_id")]
+            if chunk.get("chunk_id")
+            else [],
             "confidence_label": "medium",
         }
     if grade.get("verdict") == "partial":
@@ -181,7 +184,9 @@ def _heuristic_non_answer_response(state: GraphState) -> dict:
     grade = state.get("evidence_grade", {})
     chunks = _reasoning_chunks(state)
     if grade.get("verdict") == "partial":
-        missing = grade.get("missing_information") or ["what condition changed in your DMV case"]
+        missing = grade.get("missing_information") or [
+            "what condition changed in your DMV case"
+        ]
         return {
             "decision": "clarify",
             "response_text": f"Need one detail before answering: {missing[0]}.",
@@ -270,9 +275,7 @@ def expand_neighbor_sections(
         return list(chunks[:limit])
 
     direct_chunks_by_id = {
-        chunk.get("chunk_id"): chunk
-        for chunk in chunks
-        if chunk.get("chunk_id")
+        chunk.get("chunk_id"): chunk for chunk in chunks if chunk.get("chunk_id")
     }
     doc_order: list[str] = []
     selected_chunk_ids_by_doc: dict[str, set[str]] = {}
@@ -298,8 +301,13 @@ def expand_neighbor_sections(
         for candidate in chunk_records_by_doc.get(str(doc_id), []):
             candidate_section = _numeric_section_id(candidate.get("section_id"))
             candidate_chunk_id = candidate.get("chunk_id")
-            if candidate_chunk_id and candidate_section in {section_number - 1, section_number + 1}:
-                selected_chunk_ids_by_doc.setdefault(str(doc_id), set()).add(str(candidate_chunk_id))
+            if candidate_chunk_id and candidate_section in {
+                section_number - 1,
+                section_number + 1,
+            }:
+                selected_chunk_ids_by_doc.setdefault(str(doc_id), set()).add(
+                    str(candidate_chunk_id)
+                )
 
     expanded: list[dict] = []
     seen: set[str] = set()
@@ -321,7 +329,9 @@ def expand_neighbor_sections(
             chunk_id = chunk.get("chunk_id")
             if not chunk_id or chunk_id not in selected_chunk_ids or chunk_id in seen:
                 continue
-            expanded.append(direct_chunks_by_id.get(chunk_id, _normalize_chunk_record(chunk)))
+            expanded.append(
+                direct_chunks_by_id.get(chunk_id, _normalize_chunk_record(chunk))
+            )
             seen.add(str(chunk_id))
             if len(expanded) >= limit:
                 return expanded
@@ -371,7 +381,10 @@ def _best_retrieved_chunk(chunks: list[dict]) -> dict | None:
             candidate
             for candidate in chunks
             if not str(candidate.get("section_id", "")).startswith("t_")
-            and (len(str(candidate.get("text", "")).split()) > 12 or len(candidate.get("span_ids", [])) > 1)
+            and (
+                len(str(candidate.get("text", "")).split()) > 12
+                or len(candidate.get("span_ids", [])) > 1
+            )
         ),
         chunks[0],
     )
@@ -433,7 +446,9 @@ def _trace(runtime: Runtime, node: str, event: dict) -> None:
     )
 
 
-def _build_evidence_chunks(*, state: GraphState, runtime: Runtime, ranked_chunks: list[dict]) -> list[dict]:
+def _build_evidence_chunks(
+    *, state: GraphState, runtime: Runtime, ranked_chunks: list[dict]
+) -> list[dict]:
     evidence_chunks = list(ranked_chunks)
     if _content_only_reasoning_enabled(state=state, runtime=runtime):
         evidence_chunks = _content_only_chunks(evidence_chunks)
@@ -450,19 +465,34 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     ablation_options = state.get("ablation_options", {})
     query_example = _query_example_from_state(state)
     if ablation_options.get("query_mode") == "legacy_transcript":
-        return build_legacy_query(query_example, history_turn_limit=4), build_query_context(query_example)
+        return build_legacy_query(
+            query_example, history_turn_limit=4
+        ), build_query_context(query_example)
     if ablation_options.get("query_mode") == "latest_user_only":
         return (
-            build_retrieval_query(query_example, history_turn_limit=0, include_history=False),
+            build_retrieval_query(
+                query_example, history_turn_limit=0, include_history=False
+            ),
             build_query_context(query_example),
         )
-    return build_retrieval_query(query_example, history_turn_limit=4), build_query_context(query_example)
+    return build_retrieval_query(
+        query_example, history_turn_limit=4
+    ), build_query_context(query_example)
 
 
 def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
     ablation_options = state.get("ablation_options", {})
-    rerank_enabled = bool(ablation_options.get("retrieval_rerank", getattr(runtime.config, "retrieval_rerank", True)))
-    candidate_k = int(ablation_options.get("retrieval_candidate_k", getattr(runtime.config, "retrieval_candidate_k", 12)))
+    rerank_enabled = bool(
+        ablation_options.get(
+            "retrieval_rerank", getattr(runtime.config, "retrieval_rerank", True)
+        )
+    )
+    candidate_k = int(
+        ablation_options.get(
+            "retrieval_candidate_k",
+            getattr(runtime.config, "retrieval_candidate_k", 12),
+        )
+    )
     return retrieve_chunks(
         example={
             "domain": state.get("domain"),
@@ -504,7 +534,9 @@ def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
         ]
     )
     try:
-        chain = prompt | runtime.chat_model.with_structured_output(EvidenceGradeModel, method="json_schema")
+        chain = prompt | runtime.chat_model.with_structured_output(
+            EvidenceGradeModel, method="json_schema"
+        )
         result = chain.invoke(
             {
                 "conversation": _render_conversation(state.get("conversation", [])),
@@ -574,7 +606,9 @@ def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
         ]
     )
     try:
-        chain = prompt | runtime.chat_model.with_structured_output(ResponseModel, method="json_schema")
+        chain = prompt | runtime.chat_model.with_structured_output(
+            ResponseModel, method="json_schema"
+        )
         result = chain.invoke(
             {
                 "conversation": _render_conversation(state.get("conversation", [])),
@@ -592,7 +626,10 @@ def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict:
     retrieved_chunks = _reasoning_chunks(state)
     grade = state.get("evidence_grade", {})
     ablation_options = state.get("ablation_options", {})
-    if ablation_options.get("answer_forward_grounding") and grade.get("verdict") == "partial":
+    if (
+        ablation_options.get("answer_forward_grounding")
+        and grade.get("verdict") == "partial"
+    ):
         best_chunk = _best_chunk_for_answer(state)
         if best_chunk is not None and best_chunk.get("chunk_id"):
             return {
@@ -627,7 +664,9 @@ def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict:
         ]
     )
     try:
-        chain = prompt | runtime.chat_model.with_structured_output(FallbackResponseModel, method="json_schema")
+        chain = prompt | runtime.chat_model.with_structured_output(
+            FallbackResponseModel, method="json_schema"
+        )
         result = chain.invoke(
             {
                 "conversation": _render_conversation(state.get("conversation", [])),
@@ -642,7 +681,10 @@ def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict:
 
 
 def finalize(*, state: GraphState, payload: dict) -> dict:
-    payload = {**payload, "response_text": str(payload.get("response_text", "")).strip()}
+    payload = {
+        **payload,
+        "response_text": str(payload.get("response_text", "")).strip(),
+    }
     best_chunk = _best_chunk_for_answer(state)
     chunk_map = {
         chunk.get("chunk_id"): chunk
@@ -700,7 +742,9 @@ def _normalize_final_output(state: GraphState, payload: dict) -> dict:
         "evidence_grade": state.get("evidence_grade", {}),
         "trace_summary": {
             "retrieval_attempts": state.get("retrieval_attempts", 0),
-            "final_query": state.get("final_query") or state.get("refined_query") or state.get("query"),
+            "final_query": state.get("final_query")
+            or state.get("refined_query")
+            or state.get("query"),
             "graph_path": graph_path,
             "latency_ms": state.get("total_latency_ms", 0.0),
         },
@@ -722,7 +766,9 @@ def _chunk_sort_key(chunk: dict) -> tuple[int, int, str, str]:
     start_sec = chunk.get("start_sec")
     section_number = _numeric_section_id(chunk.get("section_id"))
     return (
-        int(start_sec) if start_sec is not None else (section_number if section_number is not None else 10**9),
+        int(start_sec)
+        if start_sec is not None
+        else (section_number if section_number is not None else 10**9),
         int(chunk.get("subchunk_index") or 0),
         str(chunk.get("section_id", "")),
         str(chunk.get("chunk_id", "")),
@@ -751,11 +797,20 @@ def _load_chunk_records_by_doc(config: Any) -> dict[str, list[dict]]:
     return by_doc
 
 
-def _build_runtime(config: Any, trace_dir: str | Path | None = None, vectorstore: Any = None, chat_model: Any = None) -> Runtime:
+def _build_runtime(
+    config: Any,
+    trace_dir: str | Path | None = None,
+    vectorstore: Any = None,
+    chat_model: Any = None,
+) -> Runtime:
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     resolved_trace_dir = Path(trace_dir or getattr(config, "trace_dir"))
     resolved_vectorstore = vectorstore
-    if resolved_vectorstore is None and getattr(config, "postgres_dsn", None) and getattr(config, "embedding_model", None):
+    if (
+        resolved_vectorstore is None
+        and getattr(config, "postgres_dsn", None)
+        and getattr(config, "embedding_model", None)
+    ):
         resolved_vectorstore = get_vectorstore(config)
 
     resolved_chat_model = chat_model
@@ -781,7 +836,9 @@ def run_graph(
     chat_model: Any = None,
 ) -> dict:
     run_started = time.perf_counter()
-    runtime = _build_runtime(config, trace_dir=trace_dir, vectorstore=vectorstore, chat_model=chat_model)
+    runtime = _build_runtime(
+        config, trace_dir=trace_dir, vectorstore=vectorstore, chat_model=chat_model
+    )
     conversation = _conversation_from_example(example)
 
     initial_state: GraphState = {
@@ -933,7 +990,12 @@ def run_graph(
         payload = state.get("response_payload", {})
         finalized_payload = finalize(state=state, payload=payload)
         finalized = _normalize_final_output(
-            {**state, "total_latency_ms": round((time.perf_counter() - run_started) * 1000, 2)},
+            {
+                **state,
+                "total_latency_ms": round(
+                    (time.perf_counter() - run_started) * 1000, 2
+                ),
+            },
             finalized_payload,
         )
         _trace(
@@ -942,7 +1004,9 @@ def run_graph(
             {
                 "decision": finalized.get("decision"),
                 "citations": finalized.get("citations", []),
-                "total_latency_ms": finalized.get("trace_summary", {}).get("latency_ms", 0.0),
+                "total_latency_ms": finalized.get("trace_summary", {}).get(
+                    "latency_ms", 0.0
+                ),
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             },
         )

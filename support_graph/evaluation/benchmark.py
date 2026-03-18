@@ -51,7 +51,9 @@ def benchmark_embeddings(
 
     sample_records = select_benchmark_records(chunk_records, sample_size)
     sample_texts = chunk_records_to_texts(sample_records)
-    embedding_client = embeddings if embeddings is not None else build_embeddings(config)
+    embedding_client = (
+        embeddings if embeddings is not None else build_embeddings(config)
+    )
 
     warmup_seconds = 0.0
     if warmup and sample_texts:

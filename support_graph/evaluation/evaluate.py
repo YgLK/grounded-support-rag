@@ -14,7 +14,11 @@ from typing import Any
 
 from support_graph.data.dataset import load_dialogues
 from support_graph.data.eval_subsets import load_subset_jsonl
-from support_graph.data.examples import build_turn_examples, load_examples_jsonl, write_examples_jsonl
+from support_graph.data.examples import (
+    build_turn_examples,
+    load_examples_jsonl,
+    write_examples_jsonl,
+)
 from support_graph.runtime.graph import run_graph
 
 
@@ -66,15 +70,21 @@ def token_f1(prediction: str, reference: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def doc_recall_at_k(gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 3) -> float | None:
+def doc_recall_at_k(
+    gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 3
+) -> float | None:
     gold = {doc_id for doc_id in gold_doc_ids if doc_id}
     if not gold:
         return None
-    retrieved = {chunk.get("doc_id") for chunk in retrieved_chunks[:k] if chunk.get("doc_id")}
+    retrieved = {
+        chunk.get("doc_id") for chunk in retrieved_chunks[:k] if chunk.get("doc_id")
+    }
     return 1.0 if gold & retrieved else 0.0
 
 
-def span_recall_at_k(gold_span_ids: list[str], retrieved_chunks: list[dict], k: int = 5) -> float | None:
+def span_recall_at_k(
+    gold_span_ids: list[str], retrieved_chunks: list[dict], k: int = 5
+) -> float | None:
     gold = {span_id for span_id in gold_span_ids if span_id}
     if not gold:
         return None
@@ -84,7 +94,9 @@ def span_recall_at_k(gold_span_ids: list[str], retrieved_chunks: list[dict], k: 
     return len(gold & retrieved_spans) / len(gold)
 
 
-def mrr_at_k(gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 5) -> float | None:
+def mrr_at_k(
+    gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 5
+) -> float | None:
     gold = {doc_id for doc_id in gold_doc_ids if doc_id}
     if not gold:
         return None
@@ -104,9 +116,15 @@ def citation_coverage(gold_span_ids: list[str], citations: list[dict]) -> float 
     return len(gold & cited_spans) / len(gold)
 
 
-def citations_map_to_retrieved(citations: list[dict], retrieved_chunks: list[dict]) -> bool:
-    retrieved_chunk_ids = {chunk.get("chunk_id") for chunk in retrieved_chunks if chunk.get("chunk_id")}
-    citation_chunk_ids = [citation.get("chunk_id") for citation in citations if citation.get("chunk_id")]
+def citations_map_to_retrieved(
+    citations: list[dict], retrieved_chunks: list[dict]
+) -> bool:
+    retrieved_chunk_ids = {
+        chunk.get("chunk_id") for chunk in retrieved_chunks if chunk.get("chunk_id")
+    }
+    citation_chunk_ids = [
+        citation.get("chunk_id") for citation in citations if citation.get("chunk_id")
+    ]
     if not citation_chunk_ids:
         return False
     return all(chunk_id in retrieved_chunk_ids for chunk_id in citation_chunk_ids)
@@ -119,16 +137,25 @@ def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None
         if decision == "clarify":
             return "bad_clarification"
         if decision == "abstain":
-            if metrics.get("doc_recall_at_3", 0.0) > 0 or metrics.get("span_recall_at_5", 0.0) > 0:
+            if (
+                metrics.get("doc_recall_at_3", 0.0) > 0
+                or metrics.get("span_recall_at_5", 0.0) > 0
+            ):
                 return "abstained_with_evidence"
             return "wrong_doc"
         if metrics.get("doc_recall_at_3", 0.0) == 0.0:
             if len(example.get("turns_before_target", [])) >= 3:
                 return "missed_history"
             return "wrong_doc"
-        if metrics.get("doc_recall_at_3", 0.0) > 0.0 and metrics.get("span_recall_at_5", 0.0) == 0.0:
+        if (
+            metrics.get("doc_recall_at_3", 0.0) > 0.0
+            and metrics.get("span_recall_at_5", 0.0) == 0.0
+        ):
             return "right_doc_wrong_section"
-        if metrics.get("citations_valid", 0.0) == 0.0 or metrics.get("citation_coverage", 0.0) < 1.0:
+        if (
+            metrics.get("citations_valid", 0.0) == 0.0
+            or metrics.get("citation_coverage", 0.0) < 1.0
+        ):
             return "weak_citations"
         if metrics.get("end_to_end_success", 0.0) == 0.0:
             return "unsupported_answer"
@@ -148,7 +175,9 @@ def _load_or_build_examples(settings: Any, domain: str, split: str) -> list[dict
     return examples
 
 
-def load_eval_examples(settings: Any, domain: str, split: str, subset: str) -> tuple[list[dict], str]:
+def load_eval_examples(
+    settings: Any, domain: str, split: str, subset: str
+) -> tuple[list[dict], str]:
     if subset in {"smoke", "frozen_ablation"}:
         path = settings.project_root / "data/eval_subsets" / f"{subset}.jsonl"
         return load_subset_jsonl(path), subset
@@ -160,7 +189,9 @@ def build_eval_config(settings: Any, domain: str) -> SimpleNamespace:
     if hasattr(settings, "chunk_artifact_path"):
         chunk_artifact_path = settings.chunk_artifact_path(domain)
     else:
-        chunk_artifact_path = settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
+        chunk_artifact_path = (
+            settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
+        )
     return SimpleNamespace(
         postgres_dsn=getattr(settings, "postgres_dsn", None),
         provider_type=getattr(settings, "provider_type", "ollama"),
@@ -228,16 +259,24 @@ def _git_metadata(project_root: Path) -> tuple[str, bool]:
 
 def _prediction_metrics(example: dict, prediction: dict) -> dict:
     target_text = str(example.get("target_turn", {}).get("utterance", ""))
-    retrieval_ranked_chunks = prediction.get("retrieval_ranked_chunks", prediction.get("retrieved_chunks", []))
+    retrieval_ranked_chunks = prediction.get(
+        "retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])
+    )
     retrieved_chunks = prediction.get("retrieved_chunks", retrieval_ranked_chunks)
     citations = prediction.get("citations", [])
-    doc_recall = doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=3)
-    span_recall = span_recall_at_k(example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5)
+    doc_recall = doc_recall_at_k(
+        example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=3
+    )
+    span_recall = span_recall_at_k(
+        example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5
+    )
     mrr = mrr_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=5)
     rouge = rouge_l_f1(str(prediction.get("response_text", "")), target_text)
     f1 = token_f1(str(prediction.get("response_text", "")), target_text)
     citation_cov = citation_coverage(example.get("gold_span_ids", []), citations)
-    citations_valid = 1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
+    citations_valid = (
+        1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
+    )
     retrieved_doc_success = (doc_recall or 0.0) > 0.0 or (span_recall or 0.0) > 0.0
     text_success = max(rouge, f1) >= END_TO_END_TEXT_THRESHOLD
     end_to_end_success = (
@@ -275,14 +314,24 @@ def _rate_map(records: list[dict], key: str) -> dict[str, float]:
 
 
 def _aggregate_metrics(predictions: list[dict]) -> dict:
-    answer_predictions = [record for record in predictions if record.get("target_mode") == "answer"]
-    follow_up_predictions = [record for record in predictions if record.get("target_mode") == "follow_up"]
+    answer_predictions = [
+        record for record in predictions if record.get("target_mode") == "answer"
+    ]
+    follow_up_predictions = [
+        record for record in predictions if record.get("target_mode") == "follow_up"
+    ]
 
     def retrieval_metrics(records: list[dict]) -> dict:
         return {
-            "doc_recall_at_3": _safe_mean([record["metrics"].get("doc_recall_at_3") for record in records]),
-            "span_recall_at_5": _safe_mean([record["metrics"].get("span_recall_at_5") for record in records]),
-            "mrr_at_5": _safe_mean([record["metrics"].get("mrr_at_5") for record in records]),
+            "doc_recall_at_3": _safe_mean(
+                [record["metrics"].get("doc_recall_at_3") for record in records]
+            ),
+            "span_recall_at_5": _safe_mean(
+                [record["metrics"].get("span_recall_at_5") for record in records]
+            ),
+            "mrr_at_5": _safe_mean(
+                [record["metrics"].get("mrr_at_5") for record in records]
+            ),
         }
 
     answer_latencies = [
@@ -293,7 +342,13 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
     ordered_latencies = sorted(float(value) for value in answer_latencies)
     p95_latency = None
     if ordered_latencies:
-        p95_index = max(0, min(len(ordered_latencies) - 1, int(round(0.95 * (len(ordered_latencies) - 1)))))
+        p95_index = max(
+            0,
+            min(
+                len(ordered_latencies) - 1,
+                int(round(0.95 * (len(ordered_latencies) - 1))),
+            ),
+        )
         p95_latency = ordered_latencies[p95_index]
 
     return {
@@ -309,10 +364,24 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
         },
         "generation": {
             "answer": {
-                "rouge_l": _safe_mean([record["metrics"].get("rouge_l") for record in answer_predictions]),
-                "token_f1": _safe_mean([record["metrics"].get("token_f1") for record in answer_predictions]),
-                "citation_coverage": _safe_mean([record["metrics"].get("citation_coverage") for record in answer_predictions]),
-                "end_to_end_success_rate": _safe_mean([record["metrics"].get("end_to_end_success") for record in answer_predictions]),
+                "rouge_l": _safe_mean(
+                    [record["metrics"].get("rouge_l") for record in answer_predictions]
+                ),
+                "token_f1": _safe_mean(
+                    [record["metrics"].get("token_f1") for record in answer_predictions]
+                ),
+                "citation_coverage": _safe_mean(
+                    [
+                        record["metrics"].get("citation_coverage")
+                        for record in answer_predictions
+                    ]
+                ),
+                "end_to_end_success_rate": _safe_mean(
+                    [
+                        record["metrics"].get("end_to_end_success")
+                        for record in answer_predictions
+                    ]
+                ),
             }
         },
         "decision_distribution": {
@@ -329,7 +398,9 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -340,7 +411,14 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
             handle.write("\n")
 
 
-def _summary_lines(run_id: str, subset_label: str, metrics: dict, failure_counts: dict[str, int], notes: str | None, output_dir: Path) -> list[str]:
+def _summary_lines(
+    run_id: str,
+    subset_label: str,
+    metrics: dict,
+    failure_counts: dict[str, int],
+    notes: str | None,
+    output_dir: Path,
+) -> list[str]:
     retrieval = metrics["retrieval"]["answer"]
     generation = metrics["generation"]["answer"]
     lines = [
@@ -367,7 +445,9 @@ def _summary_lines(run_id: str, subset_label: str, metrics: dict, failure_counts
         "## Biggest Regressions",
     ]
     if failure_counts:
-        for label, count in sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:5]:
+        for label, count in sorted(
+            failure_counts.items(), key=lambda item: (-item[1], item[0])
+        )[:5]:
             lines.append(f"- {label}: {count}")
     else:
         lines.append("- No failures recorded in this run.")
@@ -439,7 +519,9 @@ def evaluate_examples(
             "decision": prediction.get("decision"),
             "response_text": prediction.get("response_text"),
             "citations": prediction.get("citations", []),
-            "retrieval_ranked_chunks": prediction.get("retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])),
+            "retrieval_ranked_chunks": prediction.get(
+                "retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])
+            ),
             "retrieved_chunks": prediction.get("retrieved_chunks", []),
             "trace_summary": prediction.get("trace_summary", {}),
             "metrics": metrics,
@@ -451,7 +533,15 @@ def evaluate_examples(
             failures.append(record)
 
     metrics = _aggregate_metrics(predictions)
-    failure_counts = dict(sorted(Counter(record["failure_label"] for record in failures if record.get("failure_label")).items()))
+    failure_counts = dict(
+        sorted(
+            Counter(
+                record["failure_label"]
+                for record in failures
+                if record.get("failure_label")
+            ).items()
+        )
+    )
     resolved_subset_label = subset_label or f"{domain} {split} / {subset_name}"
     commit, dirty = _git_metadata(settings.project_root)
 
@@ -464,7 +554,9 @@ def evaluate_examples(
         "domains": [domain],
         "split": split,
         "eval_subset": subset_name,
-        "target_modes": sorted({example.get("target_mode", "answer") for example in selected_examples}),
+        "target_modes": sorted(
+            {example.get("target_mode", "answer") for example in selected_examples}
+        ),
         "provider": {
             "type": getattr(settings, "provider_type", "ollama"),
             "base_url": getattr(settings, "ollama_base_url", None),
@@ -476,12 +568,28 @@ def evaluate_examples(
             "max_tokens_per_chunk": 512,
         },
         "retrieval": {
-            "top_k": getattr(resolved_config, "retrieval_top_k", getattr(settings, "retrieval_top_k", 5)),
-            "candidate_k": getattr(resolved_config, "retrieval_candidate_k", getattr(settings, "retrieval_candidate_k", 12)),
-            "max_attempts": getattr(resolved_config, "max_retrieval_attempts", getattr(settings, "max_retrieval_attempts", 2)),
+            "top_k": getattr(
+                resolved_config,
+                "retrieval_top_k",
+                getattr(settings, "retrieval_top_k", 5),
+            ),
+            "candidate_k": getattr(
+                resolved_config,
+                "retrieval_candidate_k",
+                getattr(settings, "retrieval_candidate_k", 12),
+            ),
+            "max_attempts": getattr(
+                resolved_config,
+                "max_retrieval_attempts",
+                getattr(settings, "max_retrieval_attempts", 2),
+            ),
             "use_history": True,
-            "content_only_reasoning": bool(getattr(resolved_config, "content_only_reasoning", True)),
-            "neighbor_expansion": bool(getattr(resolved_config, "neighbor_expansion", True)),
+            "content_only_reasoning": bool(
+                getattr(resolved_config, "content_only_reasoning", True)
+            ),
+            "neighbor_expansion": bool(
+                getattr(resolved_config, "neighbor_expansion", True)
+            ),
         },
         "graph": {
             "enable_retry": True,
@@ -498,12 +606,24 @@ def evaluate_examples(
         manifest.update(manifest_overrides)
 
     _write_json(output_dir / "manifest.json", manifest)
-    _write_json(output_dir / "metrics.json", {**metrics, "failure_counts": failure_counts})
+    _write_json(
+        output_dir / "metrics.json", {**metrics, "failure_counts": failure_counts}
+    )
     _write_jsonl(output_dir / "predictions.jsonl", predictions)
     _write_jsonl(output_dir / "failures.jsonl", failures)
     summary_path = output_dir / "summary.md"
     summary_path.write_text(
-        "\n".join(_summary_lines(run_id, resolved_subset_label, metrics, failure_counts, notes, output_dir)) + "\n",
+        "\n".join(
+            _summary_lines(
+                run_id,
+                resolved_subset_label,
+                metrics,
+                failure_counts,
+                notes,
+                output_dir,
+            )
+        )
+        + "\n",
         encoding="utf-8",
     )
 

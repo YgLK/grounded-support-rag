@@ -137,7 +137,9 @@ def classify_variant(control: dict, candidate: dict) -> tuple[str, str]:
     candidate_latency = _metric_value(candidate, "latency_ms", "average")
 
     doc_guardrail = candidate_doc < DOC_RECALL_FLOOR
-    latency_guardrail = candidate_latency > LATENCY_LIMIT_MS and not _material_primary_gain(deltas)
+    latency_guardrail = (
+        candidate_latency > LATENCY_LIMIT_MS and not _material_primary_gain(deltas)
+    )
 
     if improved and not doc_guardrail and not latency_guardrail:
         return "worked", _why_it_moved(candidate, deltas)
@@ -174,7 +176,11 @@ def _variant_score(result: dict) -> tuple[float, float, float, float, float]:
 
 
 def best_smoke_step(results: list[dict]) -> dict:
-    comparisons = [item for item in results if item["variant"]["id"] != "control" and item.get("status") == "worked"]
+    comparisons = [
+        item
+        for item in results
+        if item["variant"]["id"] != "control" and item.get("status") == "worked"
+    ]
     if comparisons:
         return max(comparisons, key=_variant_score)
     return results[0]
@@ -190,10 +196,19 @@ def smoke_step_clears_frozen_gate(result: dict) -> bool:
 def _final_recommendation(results: list[dict]) -> tuple[str, str]:
     best = best_smoke_step(results)
     if best["variant"]["id"] == "control":
-        return "revert", "None of the retrieval-side increments cleared the Smoke-10 guardrails, so keep the content-only control."
+        return (
+            "revert",
+            "None of the retrieval-side increments cleared the Smoke-10 guardrails, so keep the content-only control.",
+        )
     if smoke_step_clears_frozen_gate(best):
-        return "keep", f"Promote {best['variant']['title']} to the Frozen-200 check next."
-    return "investigate", f"{best['variant']['title']} is the strongest Smoke-10 step so far, but it does not clear the Frozen-200 gate."
+        return (
+            "keep",
+            f"Promote {best['variant']['title']} to the Frozen-200 check next.",
+        )
+    return (
+        "investigate",
+        f"{best['variant']['title']} is the strongest Smoke-10 step so far, but it does not clear the Frozen-200 gate.",
+    )
 
 
 def _summary_table_rows(results: list[dict]) -> list[str]:
@@ -210,8 +225,12 @@ def _summary_table_rows(results: list[dict]) -> list[str]:
                 span=_metric_value(result, "retrieval", "answer", "span_recall_at_5"),
                 rouge=_metric_value(result, "generation", "answer", "rouge_l"),
                 f1=_metric_value(result, "generation", "answer", "token_f1"),
-                citation=_metric_value(result, "generation", "answer", "citation_coverage"),
-                e2e=_metric_value(result, "generation", "answer", "end_to_end_success_rate"),
+                citation=_metric_value(
+                    result, "generation", "answer", "citation_coverage"
+                ),
+                e2e=_metric_value(
+                    result, "generation", "answer", "end_to_end_success_rate"
+                ),
                 latency=_metric_value(result, "latency_ms", "average") / 1000.0,
             )
         )
@@ -246,7 +265,11 @@ def write_ablation_summary(
         "Variant Notes",
     ]
     for result in results:
-        deltas = _primary_deltas(control, result) if result["variant"]["id"] != "control" else {}
+        deltas = (
+            _primary_deltas(control, result)
+            if result["variant"]["id"] != "control"
+            else {}
+        )
         lines.extend(
             [
                 f"- {result['variant']['title']}: {result.get('status', 'control')}",
@@ -278,7 +301,9 @@ def write_ablation_summary(
     if frozen_result is None:
         best = best_smoke_step(results)
         lines.append(f"- Skipped. Best Smoke-10 step: {best['variant']['title']}.")
-        lines.append("- Gate not met: need Span Recall@5 >= 0.25, citation coverage >= 0.15, or end-to-end success >= 0.40.")
+        lines.append(
+            "- Gate not met: need Span Recall@5 >= 0.25, citation coverage >= 0.15, or end-to-end success >= 0.40."
+        )
     else:
         lines.append(f"- Ran with {frozen_result['variant']['title']}.")
         lines.append(f"- Artifacts: {frozen_result['artifact_paths']['summary']}")
@@ -352,7 +377,9 @@ def run_smoke10_ablation(
     frozen_result: dict | None = None
     best = best_smoke_step(results)
     if smoke_step_clears_frozen_gate(best):
-        frozen_examples, frozen_subset = load_eval_examples(settings, domain, split, "frozen_ablation")
+        frozen_examples, frozen_subset = load_eval_examples(
+            settings, domain, split, "frozen_ablation"
+        )
         variant = best["variant"]
         variant_config = with_config_overrides(
             base_config,

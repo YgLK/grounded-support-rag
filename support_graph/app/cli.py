@@ -12,11 +12,20 @@ from support_graph.data.chunks import build_chunks, write_chunks_jsonl
 from support_graph.data.dataset import load_dialogues, load_documents
 from support_graph.data.eval_subsets import build_subset, write_subset_jsonl
 from support_graph.data.examples import build_turn_examples, write_examples_jsonl
-from support_graph.data.examples import load_example_record as load_example_record_from_paths
+from support_graph.data.examples import (
+    load_example_record as load_example_record_from_paths,
+)
 from support_graph.evaluation.ablation import run_smoke10_ablation
-from support_graph.evaluation.benchmark import benchmark_embeddings, load_benchmark_chunk_records
+from support_graph.evaluation.benchmark import (
+    benchmark_embeddings,
+    load_benchmark_chunk_records,
+)
 from support_graph.evaluation.evaluate import evaluate_split
-from support_graph.retrieval.index import collection_row_count, index_documents, load_chunk_records
+from support_graph.retrieval.index import (
+    collection_row_count,
+    index_documents,
+    load_chunk_records,
+)
 from support_graph.runtime.graph import run_graph
 
 
@@ -40,7 +49,9 @@ def _run_config(settings: Settings, domain: str) -> SimpleNamespace:
     if hasattr(settings, "chunk_artifact_path"):
         chunk_artifact_path = settings.chunk_artifact_path(domain)
     else:
-        chunk_artifact_path = settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
+        chunk_artifact_path = (
+            settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
+        )
     return SimpleNamespace(
         postgres_dsn=getattr(settings, "postgres_dsn", None),
         provider_type=getattr(settings, "provider_type", "ollama"),
@@ -67,7 +78,9 @@ def _relative_path(path: Path, project_root: Path) -> str:
         return str(path)
 
 
-def load_example_record(example_id: str, settings: Settings, domain: str | None = None) -> dict:
+def load_example_record(
+    example_id: str, settings: Settings, domain: str | None = None
+) -> dict:
     candidate_paths = []
     if domain is not None:
         candidate_paths.append(settings.examples_dir / f"{domain}_validation.jsonl")
@@ -75,7 +88,9 @@ def load_example_record(example_id: str, settings: Settings, domain: str | None 
     existing_paths = [path for path in candidate_paths if path.exists()]
     if not existing_paths:
         selected_domain = domain or settings.selected_domain()
-        dialogues = load_dialogues(settings.dataset_root, split="validation", domains=[selected_domain])
+        dialogues = load_dialogues(
+            settings.dataset_root, split="validation", domains=[selected_domain]
+        )
         examples = build_turn_examples(dialogues)
         output_path = settings.examples_dir / f"{selected_domain}_validation.jsonl"
         write_examples_jsonl(examples, output_path)
@@ -166,7 +181,9 @@ def _format_eval_output(result: dict, settings: Settings) -> list[str]:
         "Failure Snapshot",
     ]
     if failure_counts:
-        for label, count in sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:3]:
+        for label, count in sorted(
+            failure_counts.items(), key=lambda item: (-item[1], item[0])
+        )[:3]:
             lines.append(f"{label}: {count}")
     else:
         lines.append("none: 0")
@@ -255,8 +272,12 @@ def _build_chunks(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
     documents = load_documents(settings.dataset_root, domains=[domain])
-    chunks = build_chunks(documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain])
-    output_path = Path(args.output) if args.output else settings.chunks_dir / f"{domain}.jsonl"
+    chunks = build_chunks(
+        documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
+    )
+    output_path = (
+        Path(args.output) if args.output else settings.chunks_dir / f"{domain}.jsonl"
+    )
     write_chunks_jsonl(chunks, output_path)
     _print_lines(
         [
@@ -273,7 +294,9 @@ def _build_chunks(args: argparse.Namespace) -> int:
 def _build_examples(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
-    dialogues = load_dialogues(settings.dataset_root, split=args.split, domains=[domain])
+    dialogues = load_dialogues(
+        settings.dataset_root, split=args.split, domains=[domain]
+    )
     examples = build_turn_examples(dialogues)
     output_path = (
         Path(args.output)
@@ -297,7 +320,9 @@ def _build_examples(args: argparse.Namespace) -> int:
 def _build_subsets(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
-    dialogues = load_dialogues(settings.dataset_root, split=args.split, domains=[domain])
+    dialogues = load_dialogues(
+        settings.dataset_root, split=args.split, domains=[domain]
+    )
     examples = build_turn_examples(dialogues)
     smoke_examples = build_subset(
         examples,
@@ -311,7 +336,11 @@ def _build_subsets(args: argparse.Namespace) -> int:
         target_mode="answer",
         salt="frozen_ablation",
     )
-    output_dir = Path(args.output_dir) if args.output_dir else settings.project_root / "data/eval_subsets"
+    output_dir = (
+        Path(args.output_dir)
+        if args.output_dir
+        else settings.project_root / "data/eval_subsets"
+    )
     smoke_path = output_dir / "smoke.jsonl"
     frozen_path = output_dir / "frozen_ablation.jsonl"
     write_subset_jsonl(smoke_examples, smoke_path)
@@ -346,10 +375,16 @@ def _index_docs(args: argparse.Namespace) -> int:
         )
         return 1
 
-    chunk_artifact_path = Path(args.chunk_file) if args.chunk_file else settings.chunk_artifact_path(domain)
+    chunk_artifact_path = (
+        Path(args.chunk_file)
+        if args.chunk_file
+        else settings.chunk_artifact_path(domain)
+    )
     if not chunk_artifact_path.exists():
         documents = load_documents(settings.dataset_root, domains=[domain])
-        chunks = build_chunks(documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain])
+        chunks = build_chunks(
+            documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
+        )
         write_chunks_jsonl(chunks, chunk_artifact_path)
 
     chunk_records = load_chunk_records(chunk_artifact_path)
@@ -399,10 +434,16 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
         )
         return 1
 
-    chunk_artifact_path = Path(args.chunk_file) if args.chunk_file else settings.chunk_artifact_path(domain)
+    chunk_artifact_path = (
+        Path(args.chunk_file)
+        if args.chunk_file
+        else settings.chunk_artifact_path(domain)
+    )
     if not chunk_artifact_path.exists():
         documents = load_documents(settings.dataset_root, domains=[domain])
-        chunks = build_chunks(documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain])
+        chunks = build_chunks(
+            documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
+        )
         write_chunks_jsonl(chunks, chunk_artifact_path)
 
     chunk_records = load_benchmark_chunk_records(str(chunk_artifact_path))
@@ -421,7 +462,11 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
         batch_size=args.batch_size,
         warmup=not args.skip_warmup,
     )
-    estimated_minutes = result["estimated_total_seconds"] / 60 if math.isfinite(result["estimated_total_seconds"]) else float("inf")
+    estimated_minutes = (
+        result["estimated_total_seconds"] / 60
+        if math.isfinite(result["estimated_total_seconds"])
+        else float("inf")
+    )
     _print_lines(
         [
             "SupportGraph Benchmark Embeddings",
@@ -459,7 +504,9 @@ def _run_example(args: argparse.Namespace) -> int:
     run_config = _run_config(settings, domain)
     row_count = None
     if getattr(run_config, "postgres_dsn", None):
-        row_count = collection_row_count(run_config.postgres_dsn, run_config.collection_name)
+        row_count = collection_row_count(
+            run_config.postgres_dsn, run_config.collection_name
+        )
     if row_count == 0:
         _print_lines(
             [
@@ -500,7 +547,9 @@ def _eval_split(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count = collection_row_count(settings.postgres_dsn, settings.collection_name(domain))
+    row_count = collection_row_count(
+        settings.postgres_dsn, settings.collection_name(domain)
+    )
     if row_count == 0:
         _print_lines(
             [
@@ -543,7 +592,9 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count = collection_row_count(settings.postgres_dsn, settings.collection_name(domain))
+    row_count = collection_row_count(
+        settings.postgres_dsn, settings.collection_name(domain)
+    )
     if row_count == 0:
         _print_lines(
             [
@@ -569,53 +620,126 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="support-graph")
-    parser.add_argument("--env-file", default=None, help="Optional path to a .env file.")
+    parser.add_argument(
+        "--env-file", default=None, help="Optional path to a .env file."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    build_chunks_parser = subparsers.add_parser("build-chunks", help="Build section-aware chunks.")
-    build_chunks_parser.add_argument("--domain", default=None, help="Domain to build. Defaults to the configured MVP domain.")
+    build_chunks_parser = subparsers.add_parser(
+        "build-chunks", help="Build section-aware chunks."
+    )
+    build_chunks_parser.add_argument(
+        "--domain",
+        default=None,
+        help="Domain to build. Defaults to the configured MVP domain.",
+    )
     build_chunks_parser.add_argument("--max-tokens-per-chunk", type=int, default=512)
-    build_chunks_parser.add_argument("--output", default=None, help="Optional JSONL output path.")
+    build_chunks_parser.add_argument(
+        "--output", default=None, help="Optional JSONL output path."
+    )
     build_chunks_parser.set_defaults(func=_build_chunks)
 
-    build_examples_parser = subparsers.add_parser("build-examples", help="Build turn-level examples.")
-    build_examples_parser.add_argument("--domain", default=None, help="Domain to build. Defaults to the configured MVP domain.")
-    build_examples_parser.add_argument("--split", default="validation", choices=["train", "validation", "test"])
-    build_examples_parser.add_argument("--output", default=None, help="Optional JSONL output path.")
+    build_examples_parser = subparsers.add_parser(
+        "build-examples", help="Build turn-level examples."
+    )
+    build_examples_parser.add_argument(
+        "--domain",
+        default=None,
+        help="Domain to build. Defaults to the configured MVP domain.",
+    )
+    build_examples_parser.add_argument(
+        "--split", default="validation", choices=["train", "validation", "test"]
+    )
+    build_examples_parser.add_argument(
+        "--output", default=None, help="Optional JSONL output path."
+    )
     build_examples_parser.set_defaults(func=_build_examples)
 
-    build_subsets_parser = subparsers.add_parser("build-subsets", help="Build deterministic eval subsets.")
-    build_subsets_parser.add_argument("--domain", default=None, help="Domain to build. Defaults to the configured MVP domain.")
-    build_subsets_parser.add_argument("--split", default="validation", choices=["train", "validation", "test"])
+    build_subsets_parser = subparsers.add_parser(
+        "build-subsets", help="Build deterministic eval subsets."
+    )
+    build_subsets_parser.add_argument(
+        "--domain",
+        default=None,
+        help="Domain to build. Defaults to the configured MVP domain.",
+    )
+    build_subsets_parser.add_argument(
+        "--split", default="validation", choices=["train", "validation", "test"]
+    )
     build_subsets_parser.add_argument("--smoke-size", type=int, default=25)
     build_subsets_parser.add_argument("--frozen-size", type=int, default=200)
-    build_subsets_parser.add_argument("--output-dir", default=None, help="Optional output directory.")
+    build_subsets_parser.add_argument(
+        "--output-dir", default=None, help="Optional output directory."
+    )
     build_subsets_parser.set_defaults(func=_build_subsets)
 
-    benchmark_embeddings_parser = subparsers.add_parser("benchmark-embeddings", help="Benchmark local embedding throughput.")
-    benchmark_embeddings_parser.add_argument("--domain", default=None, help="Domain to benchmark. Defaults to the configured MVP domain.")
-    benchmark_embeddings_parser.add_argument("--chunk-file", default=None, help="Optional chunk artifact path.")
-    benchmark_embeddings_parser.add_argument("--sample-size", type=int, default=100, help="Number of chunks to benchmark.")
-    benchmark_embeddings_parser.add_argument("--batch-size", type=int, default=1, help="Embedding batch size.")
-    benchmark_embeddings_parser.add_argument("--skip-warmup", action="store_true", help="Skip the one-chunk warmup request.")
-    benchmark_embeddings_parser.add_argument("--max-tokens-per-chunk", type=int, default=512)
+    benchmark_embeddings_parser = subparsers.add_parser(
+        "benchmark-embeddings", help="Benchmark local embedding throughput."
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--domain",
+        default=None,
+        help="Domain to benchmark. Defaults to the configured MVP domain.",
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--chunk-file", default=None, help="Optional chunk artifact path."
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--sample-size", type=int, default=100, help="Number of chunks to benchmark."
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--batch-size", type=int, default=1, help="Embedding batch size."
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--skip-warmup", action="store_true", help="Skip the one-chunk warmup request."
+    )
+    benchmark_embeddings_parser.add_argument(
+        "--max-tokens-per-chunk", type=int, default=512
+    )
     benchmark_embeddings_parser.set_defaults(func=_benchmark_embeddings)
 
-    index_docs_parser = subparsers.add_parser("index-docs", help="Index section-aware chunks into pgvector.")
-    index_docs_parser.add_argument("--domain", default=None, help="Domain to index. Defaults to the configured MVP domain.")
-    index_docs_parser.add_argument("--chunk-file", default=None, help="Optional chunk artifact path.")
+    index_docs_parser = subparsers.add_parser(
+        "index-docs", help="Index section-aware chunks into pgvector."
+    )
+    index_docs_parser.add_argument(
+        "--domain",
+        default=None,
+        help="Domain to index. Defaults to the configured MVP domain.",
+    )
+    index_docs_parser.add_argument(
+        "--chunk-file", default=None, help="Optional chunk artifact path."
+    )
     index_docs_parser.add_argument("--max-tokens-per-chunk", type=int, default=512)
-    index_docs_parser.add_argument("--batch-size", type=int, default=1, help="Embedding/index batch size. Default 1 for local Ollama compatibility.")
-    index_docs_parser.add_argument("--recreate", action="store_true", help="Drop and recreate the collection before indexing.")
+    index_docs_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Embedding/index batch size. Default 1 for local Ollama compatibility.",
+    )
+    index_docs_parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Drop and recreate the collection before indexing.",
+    )
     index_docs_parser.set_defaults(func=_index_docs)
 
-    run_parser = subparsers.add_parser("run", help="Run the retrieval-backed graph for one example.")
+    run_parser = subparsers.add_parser(
+        "run", help="Run the retrieval-backed graph for one example."
+    )
     run_parser.add_argument("--example-id", required=True)
-    run_parser.add_argument("--verbose", action="store_true", help="Append query, evidence, and chunk details after the main answer view.")
+    run_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Append query, evidence, and chunk details after the main answer view.",
+    )
     run_parser.set_defaults(func=_run_example)
 
-    eval_parser = subparsers.add_parser("eval", help="Run the Phase 4 evaluation harness.")
-    eval_parser.add_argument("--split", default="validation", choices=["train", "validation", "test"])
+    eval_parser = subparsers.add_parser(
+        "eval", help="Run the Phase 4 evaluation harness."
+    )
+    eval_parser.add_argument(
+        "--split", default="validation", choices=["train", "validation", "test"]
+    )
     eval_parser.add_argument("--domain", default=None)
     eval_parser.add_argument(
         "--subset",
@@ -623,17 +747,28 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["smoke", "frozen_ablation", "full_validation"],
         help="Eval subset. Defaults to the developer-friendly smoke subset.",
     )
-    eval_parser.add_argument("--limit", type=int, default=None, help="Optional cap on evaluated examples.")
-    eval_parser.add_argument("--notes", default=None, help="Optional run note stored in the manifest.")
+    eval_parser.add_argument(
+        "--limit", type=int, default=None, help="Optional cap on evaluated examples."
+    )
+    eval_parser.add_argument(
+        "--notes", default=None, help="Optional run note stored in the manifest."
+    )
     eval_parser.set_defaults(func=_eval_split)
 
     ablation_parser = subparsers.add_parser(
         "ablate-smoke10",
         help="Run the DMV Smoke-10 ablation variants and write a comparison note.",
     )
-    ablation_parser.add_argument("--split", default="validation", choices=["train", "validation", "test"])
+    ablation_parser.add_argument(
+        "--split", default="validation", choices=["train", "validation", "test"]
+    )
     ablation_parser.add_argument("--domain", default=None)
-    ablation_parser.add_argument("--limit", type=int, default=10, help="Number of leading smoke examples to compare. Default 10.")
+    ablation_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Number of leading smoke examples to compare. Default 10.",
+    )
     ablation_parser.set_defaults(func=_ablate_smoke10)
 
     return parser

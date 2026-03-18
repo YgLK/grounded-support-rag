@@ -80,8 +80,12 @@ def build_turn_examples(dialogues: list[dict]) -> list[dict]:
                     "dial_id": dial_id,
                     "target_turn_id": target_turn.get("turn_id"),
                     "turns_before_target": turns_before_target,
-                    "latest_user_turn_id": None if latest_user_turn is None else latest_user_turn.get("turn_id"),
-                    "latest_user_utterance": None if latest_user_turn is None else latest_user_turn.get("utterance", ""),
+                    "latest_user_turn_id": None
+                    if latest_user_turn is None
+                    else latest_user_turn.get("turn_id"),
+                    "latest_user_utterance": None
+                    if latest_user_turn is None
+                    else latest_user_turn.get("utterance", ""),
                     "target_turn": target_turn,
                     "target_mode": _target_mode(target_turn),
                     "gold_doc_ids": gold_doc_ids,

@@ -20,12 +20,12 @@ def build_subset(
     salt: str | None = None,
 ) -> list[dict]:
     filtered = [
-        example
-        for example in examples
-        if example.get("target_mode") == target_mode
+        example for example in examples if example.get("target_mode") == target_mode
     ]
     effective_salt = salt or f"support-graph:{target_mode}:{size}"
-    selected = sorted(filtered, key=lambda example: _subset_sort_key(example, effective_salt))[:size]
+    selected = sorted(
+        filtered, key=lambda example: _subset_sort_key(example, effective_salt)
+    )[:size]
     return sorted(selected, key=lambda example: example.get("example_id", ""))
 
 
