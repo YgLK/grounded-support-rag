@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "support-graph"
+version = "0.1.0"
+description = "CLI-first SupportGraph MVP over MultiDoc2Dial"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain-core>=1.2.19",
+    "langchain-ollama>=1.0.1",
+    "langchain-postgres>=0.0.17",
+    "langgraph>=1.1.2",
+    "psycopg[binary]>=3.3.3",
+]
+
+[project.scripts]
+support-graph = "support_graph.cli:main"
+
+[tool.setuptools]
+packages = ["support_graph"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
