@@ -56,12 +56,18 @@ def summarize_trace_events(
     total_latency_ms = 0.0
     retrieval_ranked_count = 0
     retrieved_count = 0
+    fallback_events: list[dict] = []
 
     for event in ordered_events:
         node = str(event.get("node") or "").strip()
         latency_ms = event.get("latency_ms")
         if node and latency_ms is not None:
             node_latency_ms.setdefault(node, []).append(float(latency_ms))
+        raw_fallback = event.get("fallback")
+        if isinstance(raw_fallback, dict):
+            fallback = dict(raw_fallback)
+            fallback.setdefault("node", node)
+            fallback_events.append(fallback)
 
         if node == "prepare_query" and event.get("query"):
             final_query = str(event.get("query"))
@@ -93,6 +99,13 @@ def summarize_trace_events(
         "node_latency_ms": node_latency_ms,
         "retrieval_ranked_count": retrieval_ranked_count,
         "retrieved_count": retrieved_count,
+        "fallback_count": len(fallback_events),
+        "fallback_nodes": [
+            str(event.get("node"))
+            for event in fallback_events
+            if event.get("node") is not None
+        ],
+        "fallbacks": fallback_events,
     }
     if trace_path is not None:
         summary["trace_path"] = str(trace_path)

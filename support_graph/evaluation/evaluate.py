@@ -5,20 +5,29 @@ from __future__ import annotations
 import csv
 import json
 import re
-import subprocess
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
-from types import SimpleNamespace
 from typing import Any
 
+from support_graph.config.runtime import (
+    RuntimeConfig,
+    RuntimeSettingsLike,
+    build_runtime_config,
+    with_runtime_config_overrides,
+)
 from support_graph.data.dataset import load_dialogues
 from support_graph.data.eval_subsets import load_subset_jsonl
 from support_graph.data.examples import (
     build_turn_examples,
     load_examples_jsonl,
     write_examples_jsonl,
+)
+from support_graph.runtime.prompts import (
+    ANSWER_PROMPT_VERSION,
+    EVIDENCE_PROMPT_VERSION,
+    QUERY_PROMPT_VERSION,
 )
 from support_graph.runtime.graph import run_graph
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
@@ -209,36 +218,12 @@ def load_eval_examples(
     return examples, "full_validation"
 
 
-def build_eval_config(settings: Any, domain: str) -> SimpleNamespace:
-    if hasattr(settings, "chunk_artifact_path"):
-        chunk_artifact_path = settings.chunk_artifact_path(domain)
-    else:
-        chunk_artifact_path = (
-            settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
-        )
-    return SimpleNamespace(
-        postgres_dsn=getattr(settings, "postgres_dsn", None),
-        provider_type=getattr(settings, "provider_type", "ollama"),
-        ollama_base_url=getattr(settings, "ollama_base_url", None),
-        embedding_model=getattr(settings, "embedding_model", None),
-        chat_model=getattr(settings, "chat_model", None),
-        domain=domain,
-        collection_name=settings.collection_name(domain),
-        retrieval_top_k=getattr(settings, "retrieval_top_k", 5),
-        retrieval_candidate_k=getattr(settings, "retrieval_candidate_k", 12),
-        retrieval_rerank=True,
-        content_only_reasoning=True,
-        neighbor_expansion=True,
-        max_retrieval_attempts=getattr(settings, "max_retrieval_attempts", 2),
-        trace_dir=settings.trace_dir,
-        chunk_artifact_path=chunk_artifact_path,
-    )
+def build_eval_config(settings: RuntimeSettingsLike, domain: str) -> RuntimeConfig:
+    return build_runtime_config(settings, domain)
 
 
-def with_config_overrides(config: Any, **overrides: Any) -> SimpleNamespace:
-    payload = dict(vars(config))
-    payload.update(overrides)
-    return SimpleNamespace(**payload)
+def with_config_overrides(config: RuntimeConfig, **overrides: Any) -> RuntimeConfig:
+    return with_runtime_config_overrides(config, **overrides)
 
 
 def build_run_id(
@@ -253,32 +238,6 @@ def build_run_id(
     if slug:
         parts.append(slug)
     return "-".join(parts)
-
-
-def _git_metadata(project_root: Path) -> tuple[str, bool]:
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=project_root,
-            capture_output=True,
-            check=True,
-            text=True,
-        ).stdout.strip()
-    except Exception:
-        commit = "unknown"
-    try:
-        dirty = bool(
-            subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=project_root,
-                capture_output=True,
-                check=True,
-                text=True,
-            ).stdout.strip()
-        )
-    except Exception:
-        dirty = True
-    return commit, dirty
 
 
 def _prediction_metrics(example: dict, prediction: dict) -> dict:
@@ -555,6 +514,8 @@ def _trace_index_records(predictions: list[dict]) -> list[dict]:
                 "node_latency_ms": summarized.get("node_latency_ms", {}),
                 "retrieval_ranked_count": summarized.get("retrieval_ranked_count", 0),
                 "retrieved_count": summarized.get("retrieved_count", 0),
+                "fallback_count": summarized.get("fallback_count", 0),
+                "fallback_nodes": summarized.get("fallback_nodes", []),
             }
         )
     return records
@@ -637,7 +598,7 @@ def evaluate_examples(
     notes: str | None = None,
     run_graph_func: Any = run_graph,
     now: datetime | None = None,
-    config: Any | None = None,
+    config: RuntimeConfig | None = None,
     run_id_slug: str | None = None,
     subset_label: str | None = None,
     manifest_overrides: dict[str, Any] | None = None,
@@ -657,7 +618,7 @@ def evaluate_examples(
         prediction = run_graph_func(
             example=example,
             config=resolved_config,
-            max_attempts=getattr(settings, "max_retrieval_attempts", 2),
+            max_attempts=settings.max_retrieval_attempts,
             trace_dir=settings.trace_dir,
         )
         metrics = _prediction_metrics(example, prediction)
@@ -697,13 +658,9 @@ def evaluate_examples(
         )
     )
     resolved_subset_label = subset_label or f"{domain} {split} / {subset_name}"
-    commit, dirty = _git_metadata(settings.project_root)
-
     manifest = {
         "run_id": run_id,
         "created_at": (now or datetime.now().astimezone()).isoformat(),
-        "git_commit": commit,
-        "git_dirty": dirty,
         "dataset_root": str(settings.dataset_root),
         "domains": [domain],
         "split": split,
@@ -712,47 +669,31 @@ def evaluate_examples(
             {example.get("target_mode", "answer") for example in selected_examples}
         ),
         "provider": {
-            "type": getattr(settings, "provider_type", "ollama"),
-            "base_url": getattr(settings, "ollama_base_url", None),
-            "chat_model": getattr(settings, "chat_model", None),
-            "embedding_model": getattr(settings, "embedding_model", None),
+            "type": settings.provider_type,
+            "base_url": settings.ollama_base_url,
+            "chat_model": settings.chat_model,
+            "embedding_model": settings.embedding_model,
         },
         "chunking": {
             "strategy": "section_with_deterministic_subchunks",
             "max_tokens_per_chunk": 512,
         },
         "retrieval": {
-            "top_k": getattr(
-                resolved_config,
-                "retrieval_top_k",
-                getattr(settings, "retrieval_top_k", 5),
-            ),
-            "candidate_k": getattr(
-                resolved_config,
-                "retrieval_candidate_k",
-                getattr(settings, "retrieval_candidate_k", 12),
-            ),
-            "max_attempts": getattr(
-                resolved_config,
-                "max_retrieval_attempts",
-                getattr(settings, "max_retrieval_attempts", 2),
-            ),
+            "top_k": resolved_config.retrieval_top_k,
+            "candidate_k": resolved_config.retrieval_candidate_k,
+            "max_attempts": resolved_config.max_retrieval_attempts,
             "use_history": True,
-            "content_only_reasoning": bool(
-                getattr(resolved_config, "content_only_reasoning", True)
-            ),
-            "neighbor_expansion": bool(
-                getattr(resolved_config, "neighbor_expansion", True)
-            ),
+            "content_only_reasoning": bool(resolved_config.content_only_reasoning),
+            "neighbor_expansion": bool(resolved_config.neighbor_expansion),
         },
         "graph": {
             "enable_retry": True,
             "decision_policy_version": "v1",
         },
         "prompt": {
-            "answer_prompt_version": "v1",
-            "query_prompt_version": "v1",
-            "evidence_prompt_version": "v1",
+            "answer_prompt_version": ANSWER_PROMPT_VERSION,
+            "query_prompt_version": QUERY_PROMPT_VERSION,
+            "evidence_prompt_version": EVIDENCE_PROMPT_VERSION,
         },
         "notes": notes or "Phase 4 MVP eval harness run.",
     }

@@ -5,27 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-def _normalize_reference(reference: dict) -> dict:
-    return {
-        "label": reference.get("label", ""),
-        "id_sp": str(reference.get("id_sp", "")),
-        "doc_id": str(reference.get("doc_id", "")),
-    }
-
-
-def _normalize_turn(turn: dict) -> dict:
-    return {
-        "turn_id": turn.get("turn_id"),
-        "role": turn.get("role", ""),
-        "da": turn.get("da", ""),
-        "utterance": turn.get("utterance", ""),
-        "references": [
-            _normalize_reference(reference)
-            for reference in turn.get("references", [])
-            if reference is not None
-        ],
-    }
+from support_graph.data._utils import normalize_turn
 
 
 def _target_mode(turn: dict) -> str:
@@ -51,7 +31,7 @@ def build_turn_examples(dialogues: list[dict]) -> list[dict]:
     for dialogue in dialogues:
         domain = dialogue.get("domain", "")
         dial_id = dialogue.get("dial_id", "")
-        turns = [_normalize_turn(turn) for turn in dialogue.get("turns", []) or []]
+        turns = [normalize_turn(turn) for turn in dialogue.get("turns", []) or []]
 
         for index, target_turn in enumerate(turns):
             if target_turn.get("role") != "agent":

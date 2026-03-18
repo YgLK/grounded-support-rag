@@ -6,8 +6,12 @@ import argparse
 import json
 import math
 from pathlib import Path
-from types import SimpleNamespace
 
+from support_graph.config.runtime import (
+    RuntimeConfig,
+    build_runtime_config,
+    with_runtime_config_overrides,
+)
 from support_graph.config.settings import Settings
 from support_graph.data.chunks import build_chunks, write_chunks_jsonl
 from support_graph.data.dataset import load_dialogues, load_documents
@@ -27,8 +31,12 @@ from support_graph.retrieval.index import (
     index_documents,
     load_chunk_records,
 )
+from support_graph.logging_utils import configure_logging, get_logger
 from support_graph.runtime.graph import run_graph
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
+
+
+logger = get_logger(__name__)
 
 
 def _print_lines(lines: list[str]) -> None:
@@ -47,30 +55,8 @@ def _format_duration(seconds: float) -> str:
     return f"{remaining_seconds}s"
 
 
-def _run_config(settings: Settings, domain: str) -> SimpleNamespace:
-    if hasattr(settings, "chunk_artifact_path"):
-        chunk_artifact_path = settings.chunk_artifact_path(domain)
-    else:
-        chunk_artifact_path = (
-            settings.project_root / "data/derived/chunks" / f"{domain}.jsonl"
-        )
-    return SimpleNamespace(
-        postgres_dsn=getattr(settings, "postgres_dsn", None),
-        provider_type=getattr(settings, "provider_type", "ollama"),
-        ollama_base_url=getattr(settings, "ollama_base_url", None),
-        embedding_model=getattr(settings, "embedding_model", None),
-        chat_model=getattr(settings, "chat_model", None),
-        domain=domain,
-        collection_name=settings.collection_name(domain),
-        retrieval_top_k=getattr(settings, "retrieval_top_k", 5),
-        retrieval_candidate_k=getattr(settings, "retrieval_candidate_k", 12),
-        retrieval_rerank=True,
-        content_only_reasoning=True,
-        neighbor_expansion=True,
-        max_retrieval_attempts=getattr(settings, "max_retrieval_attempts", 2),
-        trace_dir=settings.trace_dir,
-        chunk_artifact_path=chunk_artifact_path,
-    )
+def _run_config(settings: Settings, domain: str) -> RuntimeConfig:
+    return build_runtime_config(settings, domain)
 
 
 def _relative_path(path: Path, project_root: Path) -> str:
@@ -170,6 +156,7 @@ def _format_run_output(result: dict, verbose: bool = False) -> list[str]:
             "Trace",
             f"Attempts: {trace_summary.get('retrieval_attempts', 0)}",
             f"Path: {' -> '.join(trace_summary.get('graph_path', []))}",
+            f"Fallbacks: {trace_summary.get('fallback_count', 0)}",
         ]
     )
     if verbose:
@@ -338,6 +325,7 @@ def _format_trace_show_output(
     settings: Settings,
 ) -> list[str]:
     node_latency_ms = trace_summary.get("node_latency_ms", {})
+    fallbacks = trace_summary.get("fallbacks", [])
     lines = [
         "SupportGraph Trace Show",
         f"Run: {run_id}",
@@ -354,6 +342,19 @@ def _format_trace_show_output(
         for node, latencies in node_latency_ms.items():
             formatted = ", ".join(f"{float(value):.2f} ms" for value in latencies)
             lines.append(f"{node}: {formatted}")
+    else:
+        lines.append("none")
+
+    lines.extend(["", "Fallbacks"])
+    if fallbacks:
+        for fallback in fallbacks:
+            lines.append(
+                "{node}: {exception_type} :: {error}".format(
+                    node=fallback.get("node", "unknown"),
+                    exception_type=fallback.get("exception_type", "unknown"),
+                    error=fallback.get("error", "unknown"),
+                )
+            )
     else:
         lines.append("none")
 
@@ -401,6 +402,36 @@ def _print_pending_surface(name: str, settings: Settings, phase_label: str) -> i
         )
     _print_lines(lines)
     return 1
+
+
+def _checked_collection_row_count(
+    postgres_dsn: str,
+    collection_name: str,
+) -> tuple[int | None, str | None]:
+    try:
+        return collection_row_count(postgres_dsn, collection_name), None
+    except Exception as exc:
+        logger.warning(
+            "Failed to inspect pgvector row count for %s: %s",
+            collection_name,
+            exc,
+            exc_info=exc,
+        )
+        return None, str(exc)
+
+
+def _index_unavailable_lines(
+    *, title: str, collection_name: str, error: str
+) -> list[str]:
+    return [
+        title,
+        "State: index-unavailable",
+        "Index unavailable",
+        f"Could not inspect collection {collection_name}.",
+        error,
+        "Next",
+        "Verify Postgres is reachable and the DSN is correct, then retry.",
+    ]
 
 
 def _build_chunks(args: argparse.Namespace) -> int:
@@ -523,15 +554,9 @@ def _index_docs(args: argparse.Namespace) -> int:
         write_chunks_jsonl(chunks, chunk_artifact_path)
 
     chunk_records = load_chunk_records(chunk_artifact_path)
-    config = SimpleNamespace(
-        postgres_dsn=settings.postgres_dsn,
-        provider_type=settings.provider_type,
-        ollama_base_url=settings.ollama_base_url,
-        embedding_model=settings.embedding_model,
-        chat_model=settings.chat_model,
-        domain=domain,
-        collection_name=settings.collection_name(domain),
-        chunk_artifact_path=chunk_artifact_path,
+    config = build_runtime_config(settings, domain)
+    config = with_runtime_config_overrides(
+        config, chunk_artifact_path=chunk_artifact_path
     )
     index_documents(
         config,
@@ -582,14 +607,7 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
         write_chunks_jsonl(chunks, chunk_artifact_path)
 
     chunk_records = load_benchmark_chunk_records(str(chunk_artifact_path))
-    config = SimpleNamespace(
-        postgres_dsn=settings.postgres_dsn,
-        provider_type=settings.provider_type,
-        ollama_base_url=settings.ollama_base_url,
-        embedding_model=settings.embedding_model,
-        chat_model=settings.chat_model,
-        domain=domain,
-    )
+    config = build_runtime_config(settings, domain)
     result = benchmark_embeddings(
         config,
         chunk_records=chunk_records,
@@ -637,11 +655,19 @@ def _run_example(args: argparse.Namespace) -> int:
     example = load_example_record(args.example_id, settings)
     domain = example.get("domain") or settings.selected_domain()
     run_config = _run_config(settings, domain)
-    row_count = None
-    if getattr(run_config, "postgres_dsn", None):
-        row_count = collection_row_count(
-            run_config.postgres_dsn, run_config.collection_name
+    row_count, row_count_error = _checked_collection_row_count(
+        run_config.postgres_dsn,
+        run_config.collection_name,
+    )
+    if row_count is None:
+        _print_lines(
+            _index_unavailable_lines(
+                title="SupportGraph Run",
+                collection_name=run_config.collection_name,
+                error=row_count_error or "Unknown pgvector inspection error.",
+            )
         )
+        return 1
     if row_count == 0:
         _print_lines(
             [
@@ -658,7 +684,7 @@ def _run_example(args: argparse.Namespace) -> int:
     result = run_graph(
         example=example,
         config=run_config,
-        max_attempts=getattr(settings, "max_retrieval_attempts", 2),
+        max_attempts=settings.max_retrieval_attempts,
         trace_dir=settings.trace_dir,
     )
     _print_lines(_format_run_output(result, verbose=args.verbose))
@@ -682,9 +708,18 @@ def _eval_split(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count = collection_row_count(
+    row_count, row_count_error = _checked_collection_row_count(
         settings.postgres_dsn, settings.collection_name(domain)
     )
+    if row_count is None:
+        _print_lines(
+            _index_unavailable_lines(
+                title="SupportGraph Eval",
+                collection_name=settings.collection_name(domain),
+                error=row_count_error or "Unknown pgvector inspection error.",
+            )
+        )
+        return 1
     if row_count == 0:
         _print_lines(
             [
@@ -727,9 +762,18 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count = collection_row_count(
+    row_count, row_count_error = _checked_collection_row_count(
         settings.postgres_dsn, settings.collection_name(domain)
     )
+    if row_count is None:
+        _print_lines(
+            _index_unavailable_lines(
+                title="SupportGraph Ablation",
+                collection_name=settings.collection_name(domain),
+                error=row_count_error or "Unknown pgvector inspection error.",
+            )
+        )
+        return 1
     if row_count == 0:
         _print_lines(
             [
@@ -1069,6 +1113,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

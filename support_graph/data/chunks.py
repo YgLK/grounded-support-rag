@@ -7,19 +7,16 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable
 
-
-def _normalize_domains(domains: Iterable[str] | str | None) -> set[str] | None:
-    if domains is None:
-        return None
-    if isinstance(domains, str):
-        values = [part.strip() for part in domains.split(",")]
-    else:
-        values = [str(domain).strip() for domain in domains]
-    normalized = {value for value in values if value}
-    return normalized or None
+from support_graph.data._utils import normalize_domains
 
 
-def _token_count(text: str) -> int:
+def _approximate_token_count(text: str) -> int:
+    """Approximate model tokens with a whitespace word count.
+
+    The chunker uses this only as a deterministic size heuristic. It is not a
+    tokenizer-aware model context measurement.
+    """
+
     return len(text.split())
 
 
@@ -110,14 +107,14 @@ def _emit_section_chunks(
                 "subchunk_index": 0,
                 "text": text.strip(),
                 "span_ids": [],
-                "token_count": _token_count(text),
+                "token_count": _approximate_token_count(text),
                 "start_sec": section.get("start_sec"),
                 "end_sec": section.get("end_sec"),
             }
         ]
 
     section_text = section.get("text", "")
-    section_token_count = _token_count(section_text)
+    section_token_count = _approximate_token_count(section_text)
     if section_token_count <= max_tokens_per_chunk:
         return [
             {
@@ -163,7 +160,7 @@ def _emit_section_chunks(
                 "span_ids": [
                     span.get("id_sp", "") for span in current_spans if span.get("id_sp")
                 ],
-                "token_count": _token_count(text),
+                "token_count": _approximate_token_count(text),
                 "start_sec": section.get("start_sec"),
                 "end_sec": section.get("end_sec"),
             }
@@ -173,7 +170,7 @@ def _emit_section_chunks(
         current_token_count = 0
 
     for span in spans:
-        span_tokens = _token_count(span.get("text_sp", ""))
+        span_tokens = _approximate_token_count(span.get("text_sp", ""))
         if current_spans and current_token_count + span_tokens > max_tokens_per_chunk:
             flush()
         current_spans.append(span)
@@ -188,9 +185,13 @@ def build_chunks(
     max_tokens_per_chunk: int = 512,
     domains: Iterable[str] | str | None = None,
 ) -> list[dict]:
-    """Build deterministic section-aware chunks from document records."""
+    """Build deterministic section-aware chunks from document records.
 
-    domain_filter = _normalize_domains(domains)
+    `max_tokens_per_chunk` is enforced with the local approximation in
+    `_approximate_token_count`, not a model tokenizer.
+    """
+
+    domain_filter = normalize_domains(domains)
     chunks: list[dict] = []
 
     for document in documents:

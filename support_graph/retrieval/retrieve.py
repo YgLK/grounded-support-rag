@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_postgres import PGVector
 
+from support_graph.config.runtime import RuntimeConfigLike
 from support_graph.retrieval.index import (
     build_collection_name,
     build_embeddings,
@@ -370,7 +371,7 @@ def rerank_retrieval_hits(
 
 
 def get_vectorstore(
-    config: Any,
+    config: RuntimeConfigLike,
     *,
     vectorstore_cls: type[PGVector] = PGVector,
     embeddings: Any = None,
@@ -380,12 +381,10 @@ def get_vectorstore(
     embedding_client = (
         embeddings if embeddings is not None else build_embeddings(config)
     )
-    collection_name = getattr(config, "collection_name", None) or build_collection_name(
-        getattr(config, "domain", "dmv")
-    )
+    collection_name = config.collection_name or build_collection_name(config.domain)
     return vectorstore_cls(
         embeddings=embedding_client,
-        connection=normalize_postgres_connection(getattr(config, "postgres_dsn")),
+        connection=normalize_postgres_connection(config.postgres_dsn),
         collection_name=collection_name,
         use_jsonb=True,
         create_extension=create_extension,
@@ -396,7 +395,7 @@ def retrieve_chunks(
     *,
     example: dict,
     vectorstore: Any = None,
-    config: Any = None,
+    config: RuntimeConfigLike | None = None,
     top_k: int = 5,
     candidate_k: int | None = None,
     query: str | None = None,
@@ -427,7 +426,9 @@ def retrieve_chunks(
         int(
             candidate_k
             if candidate_k is not None
-            else getattr(config, "retrieval_candidate_k", resolved_top_k)
+            else (
+                config.retrieval_candidate_k if config is not None else resolved_top_k
+            )
         ),
     )
     hits = resolved_vectorstore.similarity_search_with_score(

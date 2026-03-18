@@ -11,6 +11,8 @@ from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
 
+from support_graph.config.runtime import IndexConfigLike
+
 
 def build_collection_name(domain: str) -> str:
     return f"support_graph_{domain}"
@@ -46,14 +48,14 @@ def load_chunk_records(path: str | Path) -> list[dict]:
     return records
 
 
-def validate_index_config(config: Any) -> None:
+def validate_index_config(config: IndexConfigLike) -> None:
     missing: list[str] = []
-    if not getattr(config, "postgres_dsn", None):
+    if not config.postgres_dsn:
         missing.append("postgres_dsn")
-    if not getattr(config, "embedding_model", None):
+    if not config.embedding_model:
         missing.append("embedding_model")
 
-    provider_type = getattr(config, "provider_type", "ollama")
+    provider_type = config.provider_type or "ollama"
     if provider_type != "ollama":
         raise ValueError(f"Unsupported provider_type for Phase 2: {provider_type}")
 
@@ -63,25 +65,22 @@ def validate_index_config(config: Any) -> None:
 
 
 def build_embeddings(
-    config: Any, embeddings_cls: type[OllamaEmbeddings] = OllamaEmbeddings
+    config: IndexConfigLike, embeddings_cls: type[OllamaEmbeddings] = OllamaEmbeddings
 ) -> Any:
     validate_index_config(config)
 
-    if (
-        hasattr(config, "embedding_client")
-        and getattr(config, "embedding_client") is not None
-    ):
-        return getattr(config, "embedding_client")
+    if config.embedding_client is not None:
+        return config.embedding_client
 
-    provider_type = getattr(config, "provider_type", None)
-    base_url = getattr(config, "ollama_base_url", None)
+    provider_type = config.provider_type
+    base_url = config.ollama_base_url
 
     # Tests can inject a plain value without full provider metadata.
     if provider_type is None and base_url is None:
-        return getattr(config, "embedding_model")
+        return config.embedding_model
 
     return embeddings_cls(
-        model=getattr(config, "embedding_model"),
+        model=config.embedding_model,
         base_url=base_url,
     )
 
@@ -150,7 +149,7 @@ def collection_row_count(connection: str, collection_name: str) -> int:
 
 
 def index_documents(
-    config: Any,
+    config: IndexConfigLike,
     *,
     chunk_records: list[dict] | None = None,
     vectorstore_cls: type[PGVector] | None = None,
@@ -164,7 +163,7 @@ def index_documents(
 
     resolved_chunk_records = chunk_records
     if resolved_chunk_records is None:
-        chunk_artifact_path = getattr(config, "chunk_artifact_path", None)
+        chunk_artifact_path = config.chunk_artifact_path
         if not chunk_artifact_path:
             raise ValueError("Missing chunk_artifact_path for indexing.")
         resolved_chunk_records = load_chunk_records(chunk_artifact_path)
@@ -175,14 +174,12 @@ def index_documents(
     embedding_client = (
         embeddings if embeddings is not None else build_embeddings(config)
     )
-    collection_name = getattr(config, "collection_name", None) or build_collection_name(
-        getattr(config, "domain", "dmv")
-    )
+    collection_name = config.collection_name or build_collection_name(config.domain)
     vector_ids = [build_vector_id(collection_name, chunk_id) for chunk_id in ids]
     resolved_vectorstore_cls = vectorstore_cls or PGVector
 
     kwargs = {
-        "connection": normalize_postgres_connection(getattr(config, "postgres_dsn")),
+        "connection": normalize_postgres_connection(config.postgres_dsn),
         "collection_name": collection_name,
         "use_jsonb": True,
         "pre_delete_collection": pre_delete_collection,

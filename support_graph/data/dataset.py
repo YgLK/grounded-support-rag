@@ -10,20 +10,11 @@ import json
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from support_graph.data._utils import normalize_domains, normalize_turn
+
 DOC_FILENAME = "multidoc2dial_doc.json"
 DIAL_FILENAME_TEMPLATE = "multidoc2dial_dial_{split}.json"
 SUPPORTED_SPLITS = {"train", "validation", "test"}
-
-
-def _normalize_domains(domains: Iterable[str] | str | None) -> set[str] | None:
-    if domains is None:
-        return None
-    if isinstance(domains, str):
-        values = [part.strip() for part in domains.split(",")]
-    else:
-        values = [str(domain).strip() for domain in domains]
-    normalized = {value for value in values if value}
-    return normalized or None
 
 
 def _sorted_items(mapping: dict) -> Iterator[tuple[str, object]]:
@@ -36,28 +27,6 @@ def _load_json(path: Path) -> dict:
         raise FileNotFoundError(f"Dataset file not found: {path}")
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def _normalize_reference(reference: dict) -> dict:
-    return {
-        "label": reference.get("label", ""),
-        "id_sp": str(reference.get("id_sp", "")),
-        "doc_id": str(reference.get("doc_id", "")),
-    }
-
-
-def _normalize_turn(turn: dict) -> dict:
-    return {
-        "turn_id": turn.get("turn_id"),
-        "role": turn.get("role", ""),
-        "da": turn.get("da", ""),
-        "utterance": turn.get("utterance", ""),
-        "references": [
-            _normalize_reference(reference)
-            for reference in turn.get("references", [])
-            if reference is not None
-        ],
-    }
 
 
 def _normalize_span(span: dict) -> dict:
@@ -91,7 +60,7 @@ def load_documents(
     """
 
     dataset_root = Path(dataset_root)
-    domain_filter = _normalize_domains(domains)
+    domain_filter = normalize_domains(domains)
     payload = _load_json(dataset_root / DOC_FILENAME)
     documents: list[dict] = []
 
@@ -136,7 +105,7 @@ def load_dialogues(
     """Load raw MultiDoc2Dial dialogue records for a split."""
 
     dataset_root = Path(dataset_root)
-    domain_filter = _normalize_domains(domains)
+    domain_filter = normalize_domains(domains)
     if split not in SUPPORTED_SPLITS:
         supported = ", ".join(sorted(SUPPORTED_SPLITS))
         raise ValueError(f"Unsupported split '{split}'. Expected one of: {supported}")
@@ -158,7 +127,7 @@ def load_dialogues(
                 {
                     "domain": domain,
                     "dial_id": str(dial.get("dial_id", "")),
-                    "turns": [_normalize_turn(turn) for turn in turns],
+                    "turns": [normalize_turn(turn) for turn in turns],
                 }
             )
 

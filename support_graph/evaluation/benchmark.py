@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any
 
+from support_graph.config.runtime import EmbeddingBenchmarkConfigLike
 from support_graph.retrieval.index import build_embeddings, load_chunk_records
 
 
@@ -38,7 +38,7 @@ def chunk_records_to_texts(chunk_records: list[dict]) -> list[str]:
 
 
 def benchmark_embeddings(
-    config: Any,
+    config: EmbeddingBenchmarkConfigLike,
     *,
     chunk_records: list[dict],
     sample_size: int = 100,
@@ -75,7 +75,7 @@ def benchmark_embeddings(
     )
 
     return {
-        "model": getattr(config, "embedding_model", None),
+        "model": config.embedding_model,
         "sample_size": measured_chunks,
         "total_chunks": total_chunks,
         "batch_size": batch_size,
