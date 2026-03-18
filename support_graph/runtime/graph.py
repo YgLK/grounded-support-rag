@@ -14,12 +14,12 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
-from support_graph.index import load_chunk_records
-from support_graph.retrieve import build_legacy_query
-from support_graph.retrieve import build_query as build_retrieval_query
-from support_graph.retrieve import build_query_context
-from support_graph.retrieve import get_vectorstore, retrieve_chunks
-from support_graph.traces import write_trace_event
+from support_graph.retrieval.index import load_chunk_records
+from support_graph.retrieval.retrieve import build_legacy_query
+from support_graph.retrieval.retrieve import build_query as build_retrieval_query
+from support_graph.retrieval.retrieve import build_query_context
+from support_graph.retrieval.retrieve import get_vectorstore, retrieve_chunks
+from support_graph.runtime.traces import write_trace_event
 
 
 Decision = Literal["answer", "clarify", "abstain"]

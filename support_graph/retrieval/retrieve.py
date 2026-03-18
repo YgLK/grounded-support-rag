@@ -7,7 +7,7 @@ from typing import Any
 
 from langchain_postgres import PGVector
 
-from support_graph.index import (
+from support_graph.retrieval.index import (
     build_collection_name,
     build_embeddings,
     normalize_postgres_connection,

@@ -6,7 +6,7 @@ import math
 import time
 from typing import Any
 
-from support_graph.index import build_embeddings, load_chunk_records
+from support_graph.retrieval.index import build_embeddings, load_chunk_records
 
 
 def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> list[dict]:

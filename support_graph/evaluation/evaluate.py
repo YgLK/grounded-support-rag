@@ -12,10 +12,10 @@ from statistics import mean
 from types import SimpleNamespace
 from typing import Any
 
-from support_graph.dataset import load_dialogues
-from support_graph.eval_subsets import load_subset_jsonl
-from support_graph.examples import build_turn_examples, load_examples_jsonl, write_examples_jsonl
-from support_graph.graph import run_graph
+from support_graph.data.dataset import load_dialogues
+from support_graph.data.eval_subsets import load_subset_jsonl
+from support_graph.data.examples import build_turn_examples, load_examples_jsonl, write_examples_jsonl
+from support_graph.runtime.graph import run_graph
 
 
 END_TO_END_TEXT_THRESHOLD = 0.35

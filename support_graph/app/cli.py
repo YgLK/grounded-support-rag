@@ -7,17 +7,17 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-from support_graph.benchmark import benchmark_embeddings, load_benchmark_chunk_records
-from support_graph.ablation import run_smoke10_ablation
-from support_graph.chunks import build_chunks, write_chunks_jsonl
-from support_graph.dataset import load_dialogues, load_documents
-from support_graph.evaluate import evaluate_split
-from support_graph.eval_subsets import build_subset, write_subset_jsonl
-from support_graph.examples import build_turn_examples, write_examples_jsonl
-from support_graph.examples import load_example_record as load_example_record_from_paths
-from support_graph.graph import run_graph
-from support_graph.index import collection_row_count, index_documents, load_chunk_records
-from support_graph.settings import Settings
+from support_graph.config.settings import Settings
+from support_graph.data.chunks import build_chunks, write_chunks_jsonl
+from support_graph.data.dataset import load_dialogues, load_documents
+from support_graph.data.eval_subsets import build_subset, write_subset_jsonl
+from support_graph.data.examples import build_turn_examples, write_examples_jsonl
+from support_graph.data.examples import load_example_record as load_example_record_from_paths
+from support_graph.evaluation.ablation import run_smoke10_ablation
+from support_graph.evaluation.benchmark import benchmark_embeddings, load_benchmark_chunk_records
+from support_graph.evaluation.evaluate import evaluate_split
+from support_graph.retrieval.index import collection_row_count, index_documents, load_chunk_records
+from support_graph.runtime.graph import run_graph
 
 
 def _print_lines(lines: list[str]) -> None:

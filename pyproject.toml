@@ -17,10 +17,10 @@ dependencies = [
 ]
 
 [project.scripts]
-support-graph = "support_graph.cli:main"
+support-graph = "support_graph.app.cli:main"
 
-[tool.setuptools]
-packages = ["support_graph"]
+[tool.setuptools.packages.find]
+include = ["support_graph*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
