@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ from support_graph.retrieval.index import (
     load_chunk_records,
 )
 from support_graph.runtime.graph import run_graph
+from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 
 
 def _print_lines(lines: list[str]) -> None:
@@ -76,6 +78,29 @@ def _relative_path(path: Path, project_root: Path) -> str:
         return str(path.relative_to(project_root))
     except ValueError:
         return str(path)
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_jsonl(path: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _run_output_dir(settings: Settings, run_id: str) -> Path:
+    return settings.eval_dir / run_id
+
+
+def _shorten(text: str, limit: int = 88) -> str:
+    cleaned = " ".join(str(text).split()).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[: max(0, limit - 3)].rstrip()}..."
 
 
 def load_example_record(
@@ -194,6 +219,11 @@ def _format_eval_output(result: dict, settings: Settings) -> list[str]:
             "Artifacts",
             _relative_path(output_dir / "summary.md", settings.project_root),
             _relative_path(output_dir / "failures.jsonl", settings.project_root),
+            _relative_path(output_dir / "manual_review.csv", settings.project_root),
+            _relative_path(
+                output_dir / "retrieval_examples.jsonl", settings.project_root
+            ),
+            _relative_path(output_dir / "trace_index.json", settings.project_root),
         ]
     )
     return lines
@@ -239,6 +269,111 @@ def _format_ablation_output(result: dict, settings: Settings) -> list[str]:
             "",
             "Artifacts",
             _relative_path(Path(result.get("summary_path")), settings.project_root),
+        ]
+    )
+    return lines
+
+
+def _format_review_failures_output(
+    *,
+    run_id: str,
+    output_dir: Path,
+    failures: list[dict],
+    filtered: list[dict],
+    limit: int,
+    settings: Settings,
+) -> list[str]:
+    failure_counts: dict[str, int] = {}
+    for record in failures:
+        label = str(record.get("failure_label") or "unknown")
+        failure_counts[label] = failure_counts.get(label, 0) + 1
+
+    lines = [
+        "SupportGraph Review Failures",
+        f"Run: {run_id}",
+        "",
+        "Failure Counts",
+    ]
+    if failure_counts:
+        for label, count in sorted(
+            failure_counts.items(), key=lambda item: (-item[1], item[0])
+        )[:5]:
+            lines.append(f"{label}: {count}")
+    else:
+        lines.append("none: 0")
+
+    lines.extend(["", "Examples"])
+    if filtered:
+        for record in filtered[:limit]:
+            lines.append(
+                "{example_id} | {label} | {decision} | {need}".format(
+                    example_id=record.get("example_id"),
+                    label=record.get("failure_label") or "unknown",
+                    decision=record.get("decision") or "unknown",
+                    need=_shorten(record.get("latest_user_utterance", "")),
+                )
+            )
+    else:
+        lines.append("No matching failures.")
+
+    lines.extend(
+        [
+            "",
+            "Artifacts",
+            _relative_path(output_dir / "failures.jsonl", settings.project_root),
+            _relative_path(output_dir / "manual_review.csv", settings.project_root),
+            _relative_path(
+                output_dir / "retrieval_examples.jsonl", settings.project_root
+            ),
+        ]
+    )
+    return lines
+
+
+def _format_trace_show_output(
+    *,
+    run_id: str,
+    example_id: str,
+    trace_summary: dict,
+    settings: Settings,
+) -> list[str]:
+    node_latency_ms = trace_summary.get("node_latency_ms", {})
+    lines = [
+        "SupportGraph Trace Show",
+        f"Run: {run_id}",
+        f"Example: {example_id}",
+        "",
+        "Trace",
+        f"Final Query: {trace_summary.get('final_query', '')}",
+        f"Attempts: {trace_summary.get('retrieval_attempts', 0)}",
+        f"Path: {' -> '.join(trace_summary.get('graph_path', []))}",
+        "",
+        "Node Latency",
+    ]
+    if node_latency_ms:
+        for node, latencies in node_latency_ms.items():
+            formatted = ", ".join(f"{float(value):.2f} ms" for value in latencies)
+            lines.append(f"{node}: {formatted}")
+    else:
+        lines.append("none")
+
+    lines.extend(
+        [
+            "",
+            "Evidence",
+            f"Grade: {trace_summary.get('evidence_grade', {})}",
+            "Counts: ranked {ranked} / expanded {expanded}".format(
+                ranked=trace_summary.get("retrieval_ranked_count", 0),
+                expanded=trace_summary.get("retrieved_count", 0),
+            ),
+            "",
+            "Decision",
+            str(trace_summary.get("decision", "")),
+            "",
+            "Artifact",
+            _relative_path(
+                Path(str(trace_summary.get("trace_path", ""))), settings.project_root
+            ),
         ]
     )
     return lines
@@ -618,6 +753,138 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
     return 0
 
 
+def _review_failures(args: argparse.Namespace) -> int:
+    settings = Settings.from_env(args.env_file)
+    output_dir = _run_output_dir(settings, args.run_id)
+    failures_path = output_dir / "failures.jsonl"
+    manual_review_path = output_dir / "manual_review.csv"
+    retrieval_examples_path = output_dir / "retrieval_examples.jsonl"
+    if not output_dir.exists():
+        _print_lines(
+            [
+                "SupportGraph Review Failures",
+                "State: run-missing",
+                "Run missing",
+                f"No eval run found at {_relative_path(output_dir, settings.project_root)}.",
+            ]
+        )
+        return 1
+    required_paths = [failures_path, manual_review_path, retrieval_examples_path]
+    if any(not path.exists() for path in required_paths):
+        _print_lines(
+            [
+                "SupportGraph Review Failures",
+                "State: artifacts-missing",
+                "Artifacts missing",
+                f"Run {args.run_id} predates the analysis-tooling artifacts or is incomplete.",
+                "Next",
+                "Run eval again to generate failures.jsonl, manual_review.csv, and retrieval_examples.jsonl.",
+            ]
+        )
+        return 1
+
+    failures = _load_jsonl(failures_path)
+    filtered = failures
+    if args.label is not None:
+        filtered = [
+            record for record in filtered if record.get("failure_label") == args.label
+        ]
+    if args.target_mode is not None:
+        filtered = [
+            record
+            for record in filtered
+            if record.get("target_mode") == args.target_mode
+        ]
+
+    _print_lines(
+        _format_review_failures_output(
+            run_id=args.run_id,
+            output_dir=output_dir,
+            failures=failures,
+            filtered=filtered,
+            limit=args.limit,
+            settings=settings,
+        )
+    )
+    return 0
+
+
+def _trace_show(args: argparse.Namespace) -> int:
+    settings = Settings.from_env(args.env_file)
+    output_dir = _run_output_dir(settings, args.run_id)
+    trace_index_path = output_dir / "trace_index.json"
+    if not output_dir.exists():
+        _print_lines(
+            [
+                "SupportGraph Trace Show",
+                "State: run-missing",
+                "Run missing",
+                f"No eval run found at {_relative_path(output_dir, settings.project_root)}.",
+            ]
+        )
+        return 1
+    if not trace_index_path.exists():
+        _print_lines(
+            [
+                "SupportGraph Trace Show",
+                "State: artifacts-missing",
+                "Artifacts missing",
+                f"Run {args.run_id} predates trace_index.json or is incomplete.",
+                "Next",
+                "Run eval again to generate trace_index.json.",
+            ]
+        )
+        return 1
+
+    trace_index = _load_json(trace_index_path)
+    entries = list(trace_index.get("entries", []))
+    entry = next(
+        (
+            candidate
+            for candidate in entries
+            if candidate.get("example_id") == args.example_id
+        ),
+        None,
+    )
+    if entry is None:
+        _print_lines(
+            [
+                "SupportGraph Trace Show",
+                "State: example-missing",
+                "Example missing",
+                f"No trace entry found for {args.example_id}.",
+            ]
+        )
+        return 1
+
+    raw_trace_path = str(entry.get("trace_path", "")).strip()
+    trace_path = Path(raw_trace_path) if raw_trace_path else Path()
+    if not raw_trace_path or not trace_path.exists() or not trace_path.is_file():
+        _print_lines(
+            [
+                "SupportGraph Trace Show",
+                "State: trace-missing",
+                "Trace missing",
+                f"Trace file not found: {_relative_path(trace_path, settings.project_root)}.",
+            ]
+        )
+        return 1
+
+    trace_summary = summarize_trace_events(
+        load_trace_events(trace_path),
+        trace_path=trace_path,
+    )
+    _print_lines(
+        _format_trace_show_output(
+            run_id=args.run_id,
+            example_id=args.example_id,
+            trace_summary=trace_summary,
+            settings=settings,
+        )
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="support-graph")
     parser.add_argument(
@@ -770,6 +1037,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of leading smoke examples to compare. Default 10.",
     )
     ablation_parser.set_defaults(func=_ablate_smoke10)
+
+    review_failures_parser = subparsers.add_parser(
+        "review-failures",
+        help="Inspect failure examples and review artifacts for one eval run.",
+    )
+    review_failures_parser.add_argument("--run-id", required=True)
+    review_failures_parser.add_argument("--label", default=None)
+    review_failures_parser.add_argument(
+        "--target-mode",
+        default=None,
+        choices=["answer", "follow_up"],
+    )
+    review_failures_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of filtered examples to print.",
+    )
+    review_failures_parser.set_defaults(func=_review_failures)
+
+    trace_show_parser = subparsers.add_parser(
+        "trace-show",
+        help="Inspect the raw trace for one evaluated example.",
+    )
+    trace_show_parser.add_argument("--run-id", required=True)
+    trace_show_parser.add_argument("--example-id", required=True)
+    trace_show_parser.set_defaults(func=_trace_show)
 
     return parser
 

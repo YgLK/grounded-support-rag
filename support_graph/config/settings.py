@@ -8,7 +8,21 @@ from pathlib import Path
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_path(
+    value: str | Path | None,
+    *,
+    project_root: Path,
+    default: Path,
+) -> Path:
+    if value is None or value == "":
+        return default
+    path = Path(value)
+    if not path.is_absolute():
+        path = project_root / path
+    return path
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -60,20 +74,28 @@ class Settings:
     @classmethod
     def from_env(cls, dotenv_path: str | Path | None = None) -> "Settings":
         project_root = _repo_root()
-        resolved_dotenv = (
-            Path(dotenv_path) if dotenv_path is not None else project_root / ".env"
+        resolved_dotenv = _resolve_path(
+            dotenv_path,
+            project_root=project_root,
+            default=project_root / ".env",
         )
         file_values = _read_dotenv(resolved_dotenv)
         env = {**file_values, **os.environ}
 
-        dataset_root = Path(
-            env.get("SUPPORT_GRAPH_DATASET_ROOT", project_root / "multidoc2dial")
+        dataset_root = _resolve_path(
+            env.get("SUPPORT_GRAPH_DATASET_ROOT"),
+            project_root=project_root,
+            default=project_root / "multidoc2dial",
         )
-        trace_dir = Path(
-            env.get("SUPPORT_GRAPH_TRACE_DIR", project_root / "outputs/traces")
+        trace_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_TRACE_DIR"),
+            project_root=project_root,
+            default=project_root / "outputs/traces",
         )
-        eval_dir = Path(
-            env.get("SUPPORT_GRAPH_EVAL_DIR", project_root / "outputs/evals")
+        eval_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_EVAL_DIR"),
+            project_root=project_root,
+            default=project_root / "outputs/evals",
         )
         derived_dir = project_root / "data/derived"
         chunks_dir = derived_dir / "chunks"

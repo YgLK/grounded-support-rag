@@ -19,6 +19,7 @@ from support_graph.retrieval.retrieve import build_legacy_query
 from support_graph.retrieval.retrieve import build_query as build_retrieval_query
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.retrieval.retrieve import get_vectorstore, retrieve_chunks
+from support_graph.runtime.traces import trace_file_path
 from support_graph.runtime.traces import write_trace_event
 
 
@@ -730,6 +731,7 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
 
 def _normalize_final_output(state: GraphState, payload: dict) -> dict:
     graph_path = state.get("graph_path", []) + ["finalize"]
+    trace_path = trace_file_path(state.get("trace_dir", ""), state.get("run_id", ""))
     return {
         "example_id": state.get("example_id"),
         "decision": payload.get("decision"),
@@ -747,6 +749,7 @@ def _normalize_final_output(state: GraphState, payload: dict) -> dict:
             or state.get("query"),
             "graph_path": graph_path,
             "latency_ms": state.get("total_latency_ms", 0.0),
+            "trace_path": str(trace_path),
         },
     }
 

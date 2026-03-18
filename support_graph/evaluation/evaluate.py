@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import subprocess
@@ -20,9 +21,32 @@ from support_graph.data.examples import (
     write_examples_jsonl,
 )
 from support_graph.runtime.graph import run_graph
+from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 
 
 END_TO_END_TEXT_THRESHOLD = 0.35
+MANUAL_REVIEW_COLUMNS = [
+    "run_id",
+    "example_id",
+    "target_mode",
+    "decision",
+    "failure_label",
+    "latest_user_utterance",
+    "response_text",
+    "gold_doc_ids",
+    "gold_span_ids",
+    "final_query",
+    "retrieval_attempts",
+    "retrieval_ranked_chunk_ids",
+    "retrieved_chunk_ids",
+    "citation_chunk_ids",
+    "decision_correct",
+    "evidence_relevant",
+    "no_unsupported_claims",
+    "clear",
+    "citations_useful",
+    "reviewer_notes",
+]
 
 
 def _normalize_text(text: str) -> list[str]:
@@ -411,6 +435,131 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
             handle.write("\n")
 
 
+def _write_csv(path: Path, fieldnames: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
+def _compact_join(values: list[str]) -> str:
+    return " | ".join(str(value) for value in values if str(value).strip())
+
+
+def _chunk_ids(chunks: list[dict]) -> list[str]:
+    return [
+        str(chunk.get("chunk_id"))
+        for chunk in chunks
+        if chunk.get("chunk_id") is not None and str(chunk.get("chunk_id")).strip()
+    ]
+
+
+def _citation_chunk_ids(citations: list[dict]) -> list[str]:
+    return [
+        str(citation.get("chunk_id"))
+        for citation in citations
+        if citation.get("chunk_id") is not None
+        and str(citation.get("chunk_id")).strip()
+    ]
+
+
+def _manual_review_rows(run_id: str, predictions: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for record in predictions:
+        is_follow_up = record.get("target_mode") == "follow_up"
+        is_answer_failure = record.get("target_mode") == "answer" and bool(
+            record.get("failure_label")
+        )
+        if not (is_follow_up or is_answer_failure):
+            continue
+        trace_summary = record.get("trace_summary", {})
+        rows.append(
+            {
+                "run_id": run_id,
+                "example_id": record.get("example_id", ""),
+                "target_mode": record.get("target_mode", ""),
+                "decision": record.get("decision", ""),
+                "failure_label": record.get("failure_label", "") or "",
+                "latest_user_utterance": record.get("latest_user_utterance", ""),
+                "response_text": record.get("response_text", ""),
+                "gold_doc_ids": _compact_join(record.get("gold_doc_ids", [])),
+                "gold_span_ids": _compact_join(record.get("gold_span_ids", [])),
+                "final_query": trace_summary.get("final_query", ""),
+                "retrieval_attempts": trace_summary.get("retrieval_attempts", 0),
+                "retrieval_ranked_chunk_ids": _compact_join(
+                    _chunk_ids(record.get("retrieval_ranked_chunks", []))
+                ),
+                "retrieved_chunk_ids": _compact_join(
+                    _chunk_ids(record.get("retrieved_chunks", []))
+                ),
+                "citation_chunk_ids": _compact_join(
+                    _citation_chunk_ids(record.get("citations", []))
+                ),
+                "decision_correct": "",
+                "evidence_relevant": "",
+                "no_unsupported_claims": "",
+                "clear": "",
+                "citations_useful": "",
+                "reviewer_notes": "",
+            }
+        )
+    return rows
+
+
+def _retrieval_example_records(predictions: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for record in predictions:
+        trace_summary = record.get("trace_summary", {})
+        metrics = record.get("metrics", {})
+        records.append(
+            {
+                "example_id": record.get("example_id"),
+                "target_mode": record.get("target_mode"),
+                "latest_user_utterance": record.get("latest_user_utterance"),
+                "target_text": record.get("target_text"),
+                "gold_doc_ids": record.get("gold_doc_ids", []),
+                "gold_span_ids": record.get("gold_span_ids", []),
+                "final_query": trace_summary.get("final_query"),
+                "retrieval_attempts": trace_summary.get("retrieval_attempts"),
+                "retrieval_ranked_chunks": record.get("retrieval_ranked_chunks", []),
+                "retrieved_chunks": record.get("retrieved_chunks", []),
+                "doc_recall_at_3": metrics.get("doc_recall_at_3"),
+                "span_recall_at_5": metrics.get("span_recall_at_5"),
+                "mrr_at_5": metrics.get("mrr_at_5"),
+                "failure_label": record.get("failure_label"),
+                "decision": record.get("decision"),
+            }
+        )
+    return records
+
+
+def _trace_index_records(predictions: list[dict]) -> list[dict]:
+    records: list[dict] = []
+    for record in predictions:
+        trace_summary = record.get("trace_summary", {})
+        trace_path = trace_summary.get("trace_path")
+        events = load_trace_events(trace_path) if trace_path else []
+        summarized = summarize_trace_events(events, trace_path=trace_path or "")
+        records.append(
+            {
+                "example_id": record.get("example_id"),
+                "trace_path": summarized.get("trace_path", trace_path or ""),
+                "graph_path": summarized.get("graph_path", []),
+                "retrieval_attempts": summarized.get("retrieval_attempts", 0),
+                "final_query": summarized.get("final_query", ""),
+                "decision": record.get("decision") or summarized.get("decision", ""),
+                "failure_label": record.get("failure_label"),
+                "total_latency_ms": summarized.get("total_latency_ms", 0.0),
+                "node_latency_ms": summarized.get("node_latency_ms", {}),
+                "retrieval_ranked_count": summarized.get("retrieval_ranked_count", 0),
+                "retrieved_count": summarized.get("retrieved_count", 0),
+            }
+        )
+    return records
+
+
 def _summary_lines(
     run_id: str,
     subset_label: str,
@@ -469,6 +618,9 @@ def _summary_lines(
             f"- {output_dir / 'metrics.json'}",
             f"- {output_dir / 'predictions.jsonl'}",
             f"- {output_dir / 'failures.jsonl'}",
+            f"- {output_dir / 'manual_review.csv'}",
+            f"- {output_dir / 'retrieval_examples.jsonl'}",
+            f"- {output_dir / 'trace_index.json'}",
         ]
     )
     return lines
@@ -513,6 +665,8 @@ def evaluate_examples(
             "example_id": example.get("example_id"),
             "target_mode": example.get("target_mode"),
             "target_turn_id": example.get("target_turn_id"),
+            "latest_user_utterance": prediction.get("latest_user_utterance")
+            or example.get("latest_user_utterance"),
             "gold_doc_ids": example.get("gold_doc_ids", []),
             "gold_span_ids": example.get("gold_span_ids", []),
             "target_text": example.get("target_turn", {}).get("utterance", ""),
@@ -611,6 +765,16 @@ def evaluate_examples(
     )
     _write_jsonl(output_dir / "predictions.jsonl", predictions)
     _write_jsonl(output_dir / "failures.jsonl", failures)
+    manual_review_path = output_dir / "manual_review.csv"
+    retrieval_examples_path = output_dir / "retrieval_examples.jsonl"
+    trace_index_path = output_dir / "trace_index.json"
+    _write_csv(
+        manual_review_path,
+        MANUAL_REVIEW_COLUMNS,
+        _manual_review_rows(run_id, predictions),
+    )
+    _write_jsonl(retrieval_examples_path, _retrieval_example_records(predictions))
+    _write_json(trace_index_path, {"entries": _trace_index_records(predictions)})
     summary_path = output_dir / "summary.md"
     summary_path.write_text(
         "\n".join(
@@ -636,6 +800,9 @@ def evaluate_examples(
             "metrics": output_dir / "metrics.json",
             "predictions": output_dir / "predictions.jsonl",
             "failures": output_dir / "failures.jsonl",
+            "manual_review": manual_review_path,
+            "retrieval_examples": retrieval_examples_path,
+            "trace_index": trace_index_path,
             "summary": summary_path,
         },
         "metrics": metrics,
