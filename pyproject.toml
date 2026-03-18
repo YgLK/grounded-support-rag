@@ -13,6 +13,7 @@ dependencies = [
     "langchain-ollama>=1.0.1",
     "langchain-postgres>=0.0.17",
     "langgraph>=1.1.2",
+    "pydantic>=2.0.0",
     "psycopg[binary]>=3.3.3",
 ]
 
