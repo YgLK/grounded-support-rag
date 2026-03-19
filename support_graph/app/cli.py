@@ -39,6 +39,7 @@ from support_graph.runtime.traces import load_trace_events, summarize_trace_even
 
 
 logger = get_logger(__name__)
+RunDecision = {"answer", "clarify", "abstain"}
 
 
 def _print_lines(lines: list[str]) -> None:
@@ -97,6 +98,81 @@ def _run_async_boundary(value: object) -> object:
     return value
 
 
+def _missing_config_lines(
+    *,
+    title: str,
+    settings: Settings,
+    missing: list[str],
+) -> list[str]:
+    return [
+        title,
+        "State: missing-config",
+        "Missing config",
+        ", ".join(missing),
+        "Next",
+        f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
+    ]
+
+
+def _index_missing_lines(
+    *,
+    title: str,
+    collection_name: str,
+    domain: str,
+) -> list[str]:
+    return [
+        title,
+        "State: index-missing",
+        "Index missing",
+        f"No indexed rows found for collection {collection_name}.",
+        "Next",
+        f"Run: uv run support-graph index-docs --domain {domain}",
+    ]
+
+
+def _metric_text(
+    value: float | None,
+    *,
+    retrieval_top_k: int | None = None,
+    metric_k: int | None = None,
+) -> str:
+    if value is not None:
+        return f"{value:.3f}"
+    if (
+        metric_k is not None
+        and retrieval_top_k is not None
+        and retrieval_top_k < metric_k
+    ):
+        return f"n/a (retrieval_top_k={retrieval_top_k})"
+    return "n/a"
+
+
+def _index_preflight_error_lines(
+    *,
+    title: str,
+    postgres_dsn: str,
+    collection_name: str,
+    domain: str,
+) -> list[str] | None:
+    row_count, row_count_error = _checked_collection_row_count(
+        postgres_dsn,
+        collection_name,
+    )
+    if row_count is None:
+        return _index_unavailable_lines(
+            title=title,
+            collection_name=collection_name,
+            error=row_count_error or "Unknown pgvector inspection error.",
+        )
+    if row_count == 0:
+        return _index_missing_lines(
+            title=title,
+            collection_name=collection_name,
+            domain=domain,
+        )
+    return None
+
+
 def load_example_record(
     example_id: str, settings: Settings, domain: str | None = None
 ) -> dict:
@@ -119,6 +195,7 @@ def load_example_record(
 
 def _run_next_lines(result: dict) -> list[str]:
     decision = result.get("decision")
+    assert decision in RunDecision, f"Unknown decision: {decision}"
     if decision == "answer":
         return ["Grounded answer produced from retrieved DMV documentation."]
     if decision == "clarify":
@@ -189,34 +266,23 @@ def _format_eval_output(result: dict, settings: Settings) -> list[str]:
     output_dir = Path(result.get("output_dir"))
     retrieval_top_k = result.get("retrieval_top_k", settings.retrieval_top_k)
 
-    def format_metric(value: float | None, *, metric_k: int | None = None) -> str:
-        if value is not None:
-            return f"{value:.3f}"
-        if (
-            metric_k is not None
-            and retrieval_top_k is not None
-            and retrieval_top_k < metric_k
-        ):
-            return f"n/a (retrieval_top_k={retrieval_top_k})"
-        return "n/a"
-
     lines = [
         "SupportGraph Eval",
         f"Run: {result.get('run_id')}",
         f"Subset: {result.get('subset_label')}",
         "",
         "Headline Metrics",
-        f"Doc Recall@3: {format_metric(retrieval.get('doc_recall_at_3'), metric_k=3)}",
-        f"Span Recall@5: {format_metric(retrieval.get('span_recall_at_5'), metric_k=5)}",
-        f"ROUGE-L: {format_metric(generation.get('rouge_l'))}",
-        f"F1: {format_metric(generation.get('token_f1'))}",
+        f"Doc Recall@3: {_metric_text(retrieval.get('doc_recall_at_3'), retrieval_top_k=retrieval_top_k, metric_k=3)}",
+        f"Span Recall@5: {_metric_text(retrieval.get('span_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
+        f"ROUGE-L: {_metric_text(generation.get('rouge_l'))}",
+        f"F1: {_metric_text(generation.get('token_f1'))}",
         "",
         "Paper Reference",
-        f"Recall@1: {format_metric(retrieval.get('doc_recall_at_1'), metric_k=1)}",
-        f"Recall@5: {format_metric(retrieval.get('doc_recall_at_5'), metric_k=5)}",
-        f"Recall@10: {format_metric(retrieval.get('doc_recall_at_10'), metric_k=10)}",
-        f"Exact Match: {format_metric(generation.get('exact_match'))}",
-        f"SacreBLEU: {format_metric(generation.get('sacrebleu'))}",
+        f"Recall@1: {_metric_text(retrieval.get('doc_recall_at_1'), retrieval_top_k=retrieval_top_k, metric_k=1)}",
+        f"Recall@5: {_metric_text(retrieval.get('doc_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
+        f"Recall@10: {_metric_text(retrieval.get('doc_recall_at_10'), retrieval_top_k=retrieval_top_k, metric_k=10)}",
+        f"Exact Match: {_metric_text(generation.get('exact_match'))}",
+        f"SacreBLEU: {_metric_text(generation.get('sacrebleu'))}",
         "",
         "Failure Snapshot",
     ]
@@ -577,14 +643,11 @@ def _index_docs(args: argparse.Namespace) -> int:
     missing = settings.index_missing_fields()
     if missing:
         _print_lines(
-            [
-                "SupportGraph Index Docs",
-                "State: missing-config",
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
+            _missing_config_lines(
+                title="SupportGraph Index Docs",
+                settings=settings,
+                missing=missing,
+            )
         )
         return 1
 
@@ -630,14 +693,11 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
     missing = settings.index_missing_fields()
     if missing:
         _print_lines(
-            [
-                "SupportGraph Benchmark Embeddings",
-                "State: missing-config",
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
+            _missing_config_lines(
+                title="SupportGraph Benchmark Embeddings",
+                settings=settings,
+                missing=missing,
+            )
         )
         return 1
 
@@ -688,44 +748,26 @@ def _run_example(args: argparse.Namespace) -> int:
     missing = settings.runtime_missing_fields()
     if missing:
         _print_lines(
-            [
-                "SupportGraph Run",
-                "State: missing-config",
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
+            _missing_config_lines(
+                title="SupportGraph Run",
+                settings=settings,
+                missing=missing,
+            )
         )
         return 1
 
     example = load_example_record(args.example_id, settings)
     domain = example.get("domain") or settings.selected_domain()
     run_config = _run_config(settings, domain)
-    row_count, row_count_error = _checked_collection_row_count(
-        run_config.postgres_dsn,
-        run_config.collection_name,
+    assert run_config.postgres_dsn is not None
+    error_lines = _index_preflight_error_lines(
+        title="SupportGraph Run",
+        postgres_dsn=run_config.postgres_dsn,
+        collection_name=run_config.collection_name,
+        domain=domain,
     )
-    if row_count is None:
-        _print_lines(
-            _index_unavailable_lines(
-                title="SupportGraph Run",
-                collection_name=run_config.collection_name,
-                error=row_count_error or "Unknown pgvector inspection error.",
-            )
-        )
-        return 1
-    if row_count == 0:
-        _print_lines(
-            [
-                "SupportGraph Run",
-                "State: index-missing",
-                "Index missing",
-                f"No indexed rows found for collection {run_config.collection_name}.",
-                "Next",
-                f"Run: uv run support-graph index-docs --domain {domain}",
-            ]
-        )
+    if error_lines is not None:
+        _print_lines(error_lines)
         return 1
 
     result = _run_async_boundary(
@@ -745,41 +787,24 @@ def _eval_split(args: argparse.Namespace) -> int:
     missing = settings.runtime_missing_fields()
     if missing:
         _print_lines(
-            [
-                "SupportGraph Eval",
-                "State: missing-config",
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
+            _missing_config_lines(
+                title="SupportGraph Eval",
+                settings=settings,
+                missing=missing,
+            )
         )
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count, row_count_error = _checked_collection_row_count(
-        settings.postgres_dsn, settings.collection_name(domain)
+    assert settings.postgres_dsn is not None
+    error_lines = _index_preflight_error_lines(
+        title="SupportGraph Eval",
+        postgres_dsn=settings.postgres_dsn,
+        collection_name=settings.collection_name(domain),
+        domain=domain,
     )
-    if row_count is None:
-        _print_lines(
-            _index_unavailable_lines(
-                title="SupportGraph Eval",
-                collection_name=settings.collection_name(domain),
-                error=row_count_error or "Unknown pgvector inspection error.",
-            )
-        )
-        return 1
-    if row_count == 0:
-        _print_lines(
-            [
-                "SupportGraph Eval",
-                "State: index-missing",
-                "Index missing",
-                f"No indexed rows found for collection {settings.collection_name(domain)}.",
-                "Next",
-                f"Run: uv run support-graph index-docs --domain {domain}",
-            ]
-        )
+    if error_lines is not None:
+        _print_lines(error_lines)
         return 1
 
     result = _run_async_boundary(
@@ -802,41 +827,24 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
     missing = settings.runtime_missing_fields()
     if missing:
         _print_lines(
-            [
-                "SupportGraph Ablation",
-                "State: missing-config",
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
+            _missing_config_lines(
+                title="SupportGraph Ablation",
+                settings=settings,
+                missing=missing,
+            )
         )
         return 1
 
     domain = settings.selected_domain(args.domain)
-    row_count, row_count_error = _checked_collection_row_count(
-        settings.postgres_dsn, settings.collection_name(domain)
+    assert settings.postgres_dsn is not None
+    error_lines = _index_preflight_error_lines(
+        title="SupportGraph Ablation",
+        postgres_dsn=settings.postgres_dsn,
+        collection_name=settings.collection_name(domain),
+        domain=domain,
     )
-    if row_count is None:
-        _print_lines(
-            _index_unavailable_lines(
-                title="SupportGraph Ablation",
-                collection_name=settings.collection_name(domain),
-                error=row_count_error or "Unknown pgvector inspection error.",
-            )
-        )
-        return 1
-    if row_count == 0:
-        _print_lines(
-            [
-                "SupportGraph Ablation",
-                "State: index-missing",
-                "Index missing",
-                f"No indexed rows found for collection {settings.collection_name(domain)}.",
-                "Next",
-                f"Run: uv run support-graph index-docs --domain {domain}",
-            ]
-        )
+    if error_lines is not None:
+        _print_lines(error_lines)
         return 1
 
     result = _run_async_boundary(

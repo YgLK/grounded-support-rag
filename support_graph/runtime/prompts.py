@@ -26,14 +26,13 @@ class PromptRegistry:
     default_version: str = DEFAULT_PROMPT_VERSION
 
     def resolve(self, version: str | None = None) -> PromptSet:
-        resolved_version = version or self.default_version
-        prompt_set = self.prompt_sets.get(resolved_version)
-        if prompt_set is None:
+        resolved_version = self.default_version if version is None else version
+        if resolved_version not in self.prompt_sets:
             available = ", ".join(sorted(self.prompt_sets))
             raise ValueError(
                 f"Unsupported prompt version {resolved_version!r}. Available: {available}."
             )
-        return prompt_set
+        return self.prompt_sets[resolved_version]
 
 
 def _v1_prompt_set() -> PromptSet:

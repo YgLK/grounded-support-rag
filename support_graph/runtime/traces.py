@@ -37,7 +37,7 @@ def load_trace_events(path: str | Path) -> list[dict]:
 
 
 def summarize_graph_path(events: Iterable[dict]) -> str:
-    nodes = [event.get("node") for event in events if event.get("node")]
+    nodes = [str(event["node"]) for event in events if event.get("node")]
     return " -> ".join(nodes)
 
 
@@ -47,7 +47,7 @@ def summarize_trace_events(
     trace_path: str | Path | None = None,
 ) -> dict:
     ordered_events = list(events)
-    graph_path = [event.get("node") for event in ordered_events if event.get("node")]
+    graph_path = [str(event["node"]) for event in ordered_events if event.get("node")]
     node_latency_ms: dict[str, list[float]] = {}
     retrieval_attempts = 0
     final_query = ""
@@ -60,23 +60,32 @@ def summarize_trace_events(
     observability: dict = {}
 
     for event in ordered_events:
-        node = str(event.get("node") or "").strip()
+        node = ""
+        if event.get("node") is not None:
+            node = str(event["node"]).strip()
         latency_ms = event.get("latency_ms")
         if node and latency_ms is not None:
             node_latency_ms.setdefault(node, []).append(float(latency_ms))
+
         raw_observability = event.get("observability")
         if isinstance(raw_observability, dict):
             observability = dict(raw_observability)
+
         raw_fallback = event.get("fallback")
         if isinstance(raw_fallback, dict):
             fallback = dict(raw_fallback)
-            fallback.setdefault("node", node)
+            if "node" not in fallback and node:
+                fallback["node"] = node
             fallback_events.append(fallback)
 
-        if node == "prepare_query" and event.get("query"):
-            final_query = str(event.get("query"))
-        elif node == "refine_query" and event.get("refined_query"):
-            final_query = str(event.get("refined_query"))
+        if node == "prepare_query":
+            query = event.get("query")
+            if query is not None:
+                final_query = str(query)
+        elif node == "refine_query":
+            refined_query = event.get("refined_query")
+            if refined_query is not None:
+                final_query = str(refined_query)
         elif node == "retrieve_docs":
             retrieval_attempts = max(
                 retrieval_attempts, int(event.get("retrieval_attempts") or 0)
@@ -85,13 +94,18 @@ def summarize_trace_events(
                 event.get("retrieval_ranked_count") or retrieval_ranked_count
             )
             retrieved_count = int(event.get("retrieved_count") or retrieved_count)
-        elif node == "grade_evidence" and event.get("evidence_grade"):
-            evidence_grade = dict(event.get("evidence_grade") or {})
+        elif node == "grade_evidence":
+            raw_evidence_grade = event.get("evidence_grade")
+            if raw_evidence_grade is not None:
+                evidence_grade = dict(raw_evidence_grade)
         elif node in {"generate_response", "resolve_without_answer", "finalize"}:
-            if event.get("decision"):
-                decision = str(event.get("decision"))
-        if event.get("total_latency_ms") is not None:
-            total_latency_ms = float(event.get("total_latency_ms") or 0.0)
+            raw_decision = event.get("decision")
+            if raw_decision is not None:
+                decision = str(raw_decision)
+
+        total_latency = event.get("total_latency_ms")
+        if total_latency is not None:
+            total_latency_ms = float(total_latency)
 
     summary = {
         "graph_path": graph_path,
@@ -105,7 +119,7 @@ def summarize_trace_events(
         "retrieved_count": retrieved_count,
         "fallback_count": len(fallback_events),
         "fallback_nodes": [
-            str(event.get("node"))
+            str(event["node"])
             for event in fallback_events
             if event.get("node") is not None
         ],

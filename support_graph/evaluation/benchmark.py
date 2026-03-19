@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import math
 import time
+from typing import Protocol
 
 from support_graph.config.runtime import EmbeddingBenchmarkConfigLike
 from support_graph.retrieval.index import build_embeddings, load_chunk_records
 
 
+class EmbeddingsClient(Protocol):
+    def embed_documents(self, texts: list[str]) -> object: ...
+
+
 def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> list[dict]:
-    if sample_size <= 0:
-        raise ValueError("sample_size must be positive.")
+    assert sample_size > 0
     if sample_size >= len(chunk_records):
         return list(chunk_records)
 
     step = len(chunk_records) / sample_size
-    indices = []
-    seen = set()
+    indices: list[int] = []
+    seen: set[int] = set()
     for index in range(sample_size):
         candidate = min(len(chunk_records) - 1, math.floor(index * step))
         if candidate not in seen:
@@ -34,7 +38,7 @@ def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> lis
 
 
 def chunk_records_to_texts(chunk_records: list[dict]) -> list[str]:
-    return [str(chunk_record.get("text", "")) for chunk_record in chunk_records]
+    return [str(chunk_record["text"]) for chunk_record in chunk_records]
 
 
 def benchmark_embeddings(
@@ -44,16 +48,13 @@ def benchmark_embeddings(
     sample_size: int = 100,
     batch_size: int = 1,
     warmup: bool = True,
-    embeddings: Any = None,
+    embeddings: EmbeddingsClient | None = None,
 ) -> dict:
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive.")
+    assert batch_size > 0
 
     sample_records = select_benchmark_records(chunk_records, sample_size)
     sample_texts = chunk_records_to_texts(sample_records)
-    embedding_client = (
-        embeddings if embeddings is not None else build_embeddings(config)
-    )
+    embedding_client = build_embeddings(config) if embeddings is None else embeddings
 
     warmup_seconds = 0.0
     if warmup and sample_texts:

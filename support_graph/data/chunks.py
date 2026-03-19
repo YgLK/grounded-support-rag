@@ -10,6 +10,9 @@ from typing import Iterable
 from support_graph.data._utils import normalize_domains
 
 
+_MISSING_POSITION = 10**18
+
+
 def _approximate_token_count(text: str) -> int:
     """Approximate model tokens with a whitespace word count.
 
@@ -30,23 +33,53 @@ def _join_span_text(spans: list[dict]) -> str:
 
 def _section_sort_key(section: dict) -> tuple:
     return (
-        section.get("start_sec") if section.get("start_sec") is not None else 10**18,
-        section.get("start_sp") if section.get("start_sp") is not None else 10**18,
+        section.get("start_sec")
+        if section.get("start_sec") is not None
+        else _MISSING_POSITION,
+        section.get("start_sp")
+        if section.get("start_sp") is not None
+        else _MISSING_POSITION,
         section.get("section_id", ""),
     )
+
+
+def _chunk_record(
+    document: dict,
+    section: dict,
+    *,
+    subchunk_index: int,
+    text: str,
+    spans: list[dict],
+) -> dict:
+    text = text.strip()
+    return {
+        "chunk_id": f"{document['domain']}::{document['doc_id']}::sec::{section['section_id']}::sub::{subchunk_index}",
+        "domain": document["domain"],
+        "doc_id": document["doc_id"],
+        "doc_title": document["title"],
+        "section_id": section["section_id"],
+        "section_title": section["section_title"],
+        "parent_titles": section["parent_titles"],
+        "subchunk_index": subchunk_index,
+        "text": text,
+        "span_ids": [span["id_sp"] for span in spans if span["id_sp"]],
+        "token_count": _approximate_token_count(text),
+        "start_sec": section["start_sec"],
+        "end_sec": section["end_sec"],
+    }
 
 
 def _group_sections(document: dict) -> list[dict]:
     section_map: dict[str, list[dict]] = defaultdict(list)
     heading_context_by_title: dict[str, list[str]] = {}
-    for span in document.get("spans", []) or []:
-        section_id = str(span.get("id_sec") or "doc")
+    for span in document["spans"]:
+        section_id = str(span["id_sec"] or "doc")
         section_map[section_id].append(span)
-        tag = str(span.get("tag", ""))
-        title = str(span.get("title", "")).strip()
+        tag = str(span["tag"])
+        title = str(span["title"]).strip()
         if tag.startswith("h") and title:
             heading_context_by_title[title] = _normalize_parent_titles(
-                span.get("parent_titles", [])
+                span["parent_titles"]
             )
 
     sections: list[dict] = []
@@ -54,21 +87,17 @@ def _group_sections(document: dict) -> list[dict]:
         ordered_spans = sorted(
             spans,
             key=lambda span: (
-                span.get("start_sp") if span.get("start_sp") is not None else 10**18,
-                span.get("end_sp") if span.get("end_sp") is not None else 10**18,
-                span.get("id_sp", ""),
+                span["start_sp"] if span["start_sp"] is not None else _MISSING_POSITION,
+                span["end_sp"] if span["end_sp"] is not None else _MISSING_POSITION,
+                span["id_sp"],
             ),
         )
-        first_span = ordered_spans[0] if ordered_spans else {}
-        section_text = (
-            _join_span_text(ordered_spans)
-            if ordered_spans
-            else document.get("doc_text", "")
-        )
-        section_title = first_span.get("title", "") or document.get("title", "")
+        first_span = ordered_spans[0]
+        section_text = _join_span_text(ordered_spans)
+        section_title = first_span["title"] or document["title"]
         parent_titles = []
         for span in ordered_spans:
-            candidate = _normalize_parent_titles(span.get("parent_titles", []))
+            candidate = _normalize_parent_titles(span["parent_titles"])
             if candidate:
                 parent_titles = candidate
                 break
@@ -81,8 +110,9 @@ def _group_sections(document: dict) -> list[dict]:
                 "parent_titles": parent_titles,
                 "spans": ordered_spans,
                 "text": section_text,
-                "start_sec": first_span.get("start_sec"),
-                "end_sec": ordered_spans[-1].get("end_sec") if ordered_spans else None,
+                "start_sec": first_span["start_sec"],
+                "start_sp": first_span["start_sp"],
+                "end_sec": ordered_spans[-1]["end_sec"],
             }
         )
 
@@ -94,46 +124,16 @@ def _emit_section_chunks(
 ) -> list[dict]:
     spans = section["spans"]
     if not spans:
-        text = section.get("text") or document.get("doc_text", "")
-        return [
-            {
-                "chunk_id": f"{document['domain']}::{document['doc_id']}::sec::{section['section_id']}::sub::0",
-                "domain": document["domain"],
-                "doc_id": document["doc_id"],
-                "doc_title": document.get("title", ""),
-                "section_id": section["section_id"],
-                "section_title": section.get("section_title", ""),
-                "parent_titles": section.get("parent_titles", []),
-                "subchunk_index": 0,
-                "text": text.strip(),
-                "span_ids": [],
-                "token_count": _approximate_token_count(text),
-                "start_sec": section.get("start_sec"),
-                "end_sec": section.get("end_sec"),
-            }
-        ]
+        text = section["text"] or document["doc_text"]
+        return [_chunk_record(document, section, subchunk_index=0, text=text, spans=[])]
 
-    section_text = section.get("text", "")
+    section_text = section["text"]
     section_token_count = _approximate_token_count(section_text)
     if section_token_count <= max_tokens_per_chunk:
         return [
-            {
-                "chunk_id": f"{document['domain']}::{document['doc_id']}::sec::{section['section_id']}::sub::0",
-                "domain": document["domain"],
-                "doc_id": document["doc_id"],
-                "doc_title": document.get("title", ""),
-                "section_id": section["section_id"],
-                "section_title": section.get("section_title", ""),
-                "parent_titles": section.get("parent_titles", []),
-                "subchunk_index": 0,
-                "text": section_text.strip(),
-                "span_ids": [
-                    span.get("id_sp", "") for span in spans if span.get("id_sp")
-                ],
-                "token_count": section_token_count,
-                "start_sec": section.get("start_sec"),
-                "end_sec": section.get("end_sec"),
-            }
+            _chunk_record(
+                document, section, subchunk_index=0, text=section_text, spans=spans
+            )
         ]
 
     chunks: list[dict] = []
@@ -147,30 +147,20 @@ def _emit_section_chunks(
             return
         text = _join_span_text(current_spans)
         chunks.append(
-            {
-                "chunk_id": f"{document['domain']}::{document['doc_id']}::sec::{section['section_id']}::sub::{subchunk_index}",
-                "domain": document["domain"],
-                "doc_id": document["doc_id"],
-                "doc_title": document.get("title", ""),
-                "section_id": section["section_id"],
-                "section_title": section.get("section_title", ""),
-                "parent_titles": section.get("parent_titles", []),
-                "subchunk_index": subchunk_index,
-                "text": text.strip(),
-                "span_ids": [
-                    span.get("id_sp", "") for span in current_spans if span.get("id_sp")
-                ],
-                "token_count": _approximate_token_count(text),
-                "start_sec": section.get("start_sec"),
-                "end_sec": section.get("end_sec"),
-            }
+            _chunk_record(
+                document,
+                section,
+                subchunk_index=subchunk_index,
+                text=text,
+                spans=current_spans,
+            )
         )
         subchunk_index += 1
         current_spans = []
         current_token_count = 0
 
     for span in spans:
-        span_tokens = _approximate_token_count(span.get("text_sp", ""))
+        span_tokens = _approximate_token_count(span["text_sp"])
         if current_spans and current_token_count + span_tokens > max_tokens_per_chunk:
             flush()
         current_spans.append(span)
@@ -191,11 +181,12 @@ def build_chunks(
     `_approximate_token_count`, not a model tokenizer.
     """
 
+    assert max_tokens_per_chunk > 0
     domain_filter = normalize_domains(domains)
     chunks: list[dict] = []
 
     for document in documents:
-        if domain_filter is not None and document.get("domain") not in domain_filter:
+        if domain_filter is not None and document["domain"] not in domain_filter:
             continue
         sections = _group_sections(document)
         for section in sections:

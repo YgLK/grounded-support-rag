@@ -7,13 +7,23 @@ import os
 
 
 DEFAULT_LOG_LEVEL = "INFO"
+LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
 
 
 def _resolved_level(level: str | int | None) -> int:
     if isinstance(level, int):
         return level
-    raw = str(level or os.environ.get("SUPPORT_GRAPH_LOG_LEVEL", DEFAULT_LOG_LEVEL))
-    return getattr(logging, raw.upper(), logging.INFO)
+    raw_level = os.environ.get("SUPPORT_GRAPH_LOG_LEVEL", DEFAULT_LOG_LEVEL)
+    if level is not None:
+        raw_level = level
+    return LOG_LEVELS.get(str(raw_level).upper(), logging.INFO)
 
 
 def configure_logging(level: str | int | None = None) -> None:

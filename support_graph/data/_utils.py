@@ -17,22 +17,36 @@ def normalize_domains(domains: Iterable[str] | str | None) -> set[str] | None:
 
 
 def normalize_reference(reference: dict) -> dict:
+    label = reference.get("label")
+    id_sp = reference.get("id_sp")
+    doc_id = reference.get("doc_id")
+    assert label is not None
+    assert id_sp is not None
+    assert doc_id is not None
     return {
-        "label": reference.get("label", ""),
-        "id_sp": str(reference.get("id_sp", "")),
-        "doc_id": str(reference.get("doc_id", "")),
+        "label": str(label),
+        "id_sp": str(id_sp),
+        "doc_id": str(doc_id),
     }
 
 
 def normalize_turn(turn: dict) -> dict:
+    references = turn.get("references")
+    assert isinstance(references, list)
+    role = turn.get("role")
+    da = turn.get("da")
+    utterance = turn.get("utterance")
+    assert role is not None
+    assert da is not None
+    assert utterance is not None
     return {
         "turn_id": turn.get("turn_id"),
-        "role": turn.get("role", ""),
-        "da": turn.get("da", ""),
-        "utterance": turn.get("utterance", ""),
+        "role": str(role),
+        "da": str(da),
+        "utterance": str(utterance),
         "references": [
             normalize_reference(reference)
-            for reference in turn.get("references", [])
+            for reference in references
             if reference is not None
         ],
     }

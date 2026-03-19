@@ -17,6 +17,8 @@ from support_graph.runtime.prompts import PromptSet
 
 Decision = Literal["answer", "clarify", "abstain"]
 EvidenceVerdict = Literal["sufficient", "partial", "insufficient"]
+ResponseConfidence = Literal["high", "medium", "low"]
+FallbackConfidence = Literal["medium", "low"]
 GraphStreamEventKind = Literal[
     "query_ready",
     "retrieval_complete",
@@ -28,7 +30,7 @@ GraphStreamEventKind = Literal[
     "error",
 ]
 
-_FALLBACK_KEY = "_fallback"
+_FALLBACK_KEY: Literal["_fallback"] = "_fallback"
 
 
 class EvidenceGradeModel(BaseModel):
@@ -41,14 +43,14 @@ class ResponseModel(BaseModel):
     decision: Decision
     response_text: str
     citation_chunk_ids: list[str] = Field(default_factory=list)
-    confidence_label: Literal["high", "medium", "low"]
+    confidence_label: ResponseConfidence
 
 
 class FallbackResponseModel(BaseModel):
     decision: Literal["clarify", "abstain"]
     response_text: str
     citation_chunk_ids: list[str] = Field(default_factory=list)
-    confidence_label: Literal["medium", "low"]
+    confidence_label: FallbackConfidence
 
 
 class FallbackTrace(TypedDict, total=False):
@@ -158,8 +160,9 @@ def attach_fallback_metadata(
 
 def fallback_metadata(payload: dict[str, Any]) -> FallbackTrace | None:
     raw = payload.get(_FALLBACK_KEY)
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
+    assert isinstance(raw, dict)
     return cast(FallbackTrace, dict(raw))
 
 
@@ -177,6 +180,8 @@ __all__ = [
     "GraphStreamEvent",
     "GraphStreamEventKind",
     "GraphState",
+    "FallbackConfidence",
+    "ResponseConfidence",
     "ResponseModel",
     "Runtime",
     "RuntimeResources",

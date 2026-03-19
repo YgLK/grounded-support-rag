@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from support_graph.data._utils import normalize_turn
 
 
-def _target_mode(turn: dict) -> str:
-    if str(turn.get("da", "")).startswith("respond_"):
+TargetMode = Literal["answer", "follow_up"]
+
+
+def _target_mode(turn: dict) -> TargetMode:
+    if str(turn["da"]).startswith("respond_"):
         return "answer"
     return "follow_up"
 
@@ -29,43 +33,41 @@ def build_turn_examples(dialogues: list[dict]) -> list[dict]:
 
     examples: list[dict] = []
     for dialogue in dialogues:
-        domain = dialogue.get("domain", "")
-        dial_id = dialogue.get("dial_id", "")
-        turns = [normalize_turn(turn) for turn in dialogue.get("turns", []) or []]
+        domain = str(dialogue["domain"])
+        dial_id = str(dialogue["dial_id"])
+        turns = [normalize_turn(turn) for turn in dialogue["turns"]]
 
         for index, target_turn in enumerate(turns):
-            if target_turn.get("role") != "agent":
+            if target_turn["role"] != "agent":
                 continue
 
             turns_before_target = turns[:index]
-            latest_user_turn = next(
-                (
-                    turn
-                    for turn in reversed(turns_before_target)
-                    if turn.get("role") == "user"
-                ),
-                None,
-            )
-            references = target_turn.get("references", [])
+            latest_user_turn = None
+            for turn in reversed(turns_before_target):
+                if turn["role"] == "user":
+                    latest_user_turn = turn
+                    break
+            references = target_turn["references"]
             gold_doc_ids = _dedupe_preserve_order(
-                [reference.get("doc_id", "") for reference in references]
+                [reference["doc_id"] for reference in references]
             )
             gold_span_ids = _dedupe_preserve_order(
-                [reference.get("id_sp", "") for reference in references]
+                [reference["id_sp"] for reference in references]
             )
+            latest_user_turn_id = None
+            latest_user_utterance = None
+            if latest_user_turn is not None:
+                latest_user_turn_id = latest_user_turn["turn_id"]
+                latest_user_utterance = latest_user_turn["utterance"]
             examples.append(
                 {
-                    "example_id": f"{domain}::{dial_id}::turn_{target_turn.get('turn_id')}",
+                    "example_id": f"{domain}::{dial_id}::turn_{target_turn['turn_id']}",
                     "domain": domain,
                     "dial_id": dial_id,
-                    "target_turn_id": target_turn.get("turn_id"),
+                    "target_turn_id": target_turn["turn_id"],
                     "turns_before_target": turns_before_target,
-                    "latest_user_turn_id": None
-                    if latest_user_turn is None
-                    else latest_user_turn.get("turn_id"),
-                    "latest_user_utterance": None
-                    if latest_user_turn is None
-                    else latest_user_turn.get("utterance", ""),
+                    "latest_user_turn_id": latest_user_turn_id,
+                    "latest_user_utterance": latest_user_utterance,
                     "target_turn": target_turn,
                     "target_mode": _target_mode(target_turn),
                     "gold_doc_ids": gold_doc_ids,
@@ -100,6 +102,6 @@ def load_examples_jsonl(path: str | Path) -> list[dict]:
 def load_example_record(example_id: str, paths: list[str | Path]) -> dict:
     for path in paths:
         for record in load_examples_jsonl(path):
-            if record.get("example_id") == example_id:
+            if record["example_id"] == example_id:
                 return record
     raise FileNotFoundError(f"Example not found: {example_id}")

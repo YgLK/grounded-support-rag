@@ -15,6 +15,7 @@ from support_graph.data._utils import normalize_domains, normalize_turn
 DOC_FILENAME = "multidoc2dial_doc.json"
 DIAL_FILENAME_TEMPLATE = "multidoc2dial_dial_{split}.json"
 SUPPORTED_SPLITS = {"train", "validation", "test"}
+_MISSING_POSITION = 10**18
 
 
 def _sorted_items(mapping: dict) -> Iterator[tuple[str, object]]:
@@ -30,14 +31,23 @@ def _load_json(path: Path) -> dict:
 
 
 def _normalize_span(span: dict) -> dict:
-    parent_titles = span.get("parent_titles", []) or []
+    parent_titles = span.get("parent_titles")
+    assert isinstance(parent_titles, list)
+    tag = span.get("tag")
+    text_sp = span.get("text_sp")
+    title = span.get("title")
+    text_sec = span.get("text_sec")
+    assert tag is not None
+    assert text_sp is not None
+    assert title is not None
+    assert text_sec is not None
     return {
         "id_sp": str(span.get("id_sp", "")),
-        "tag": span.get("tag", ""),
+        "tag": str(tag),
         "start_sp": span.get("start_sp"),
         "end_sp": span.get("end_sp"),
-        "text_sp": span.get("text_sp", ""),
-        "title": span.get("title", ""),
+        "text_sp": str(text_sp),
+        "title": str(title),
         "parent_titles": [
             item.get("text", "")
             for item in parent_titles
@@ -46,7 +56,7 @@ def _normalize_span(span: dict) -> dict:
         "id_sec": str(span.get("id_sec", "")),
         "start_sec": span.get("start_sec"),
         "end_sec": span.get("end_sec"),
-        "text_sec": span.get("text_sec", ""),
+        "text_sec": str(text_sec),
     }
 
 
@@ -62,22 +72,27 @@ def load_documents(
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
     payload = _load_json(dataset_root / DOC_FILENAME)
+    doc_data = payload.get("doc_data")
+    assert isinstance(doc_data, dict)
     documents: list[dict] = []
 
-    for domain, docs in _sorted_items(payload.get("doc_data", {})):
+    for domain, docs in _sorted_items(doc_data):
         if domain_filter is not None and domain not in domain_filter:
             continue
+        assert isinstance(docs, dict)
         for doc_id, doc in _sorted_items(docs):
-            spans = doc.get("spans", {}) or {}
+            assert isinstance(doc, dict)
+            spans = doc.get("spans")
+            assert isinstance(spans, dict)
             normalized_spans = sorted(
                 (_normalize_span(span) for span in spans.values()),
                 key=lambda span: (
-                    span.get("start_sec")
-                    if span.get("start_sec") is not None
-                    else 10**18,
-                    span.get("start_sp")
-                    if span.get("start_sp") is not None
-                    else 10**18,
+                    span["start_sec"]
+                    if span["start_sec"] is not None
+                    else _MISSING_POSITION,
+                    span["start_sp"]
+                    if span["start_sp"] is not None
+                    else _MISSING_POSITION,
                     span.get("id_sp", ""),
                 ),
             )
@@ -85,10 +100,10 @@ def load_documents(
                 {
                     "domain": domain,
                     "doc_id": str(doc_id),
-                    "title": doc.get("title", ""),
-                    "doc_text": doc.get("doc_text", ""),
-                    "doc_html_ts": doc.get("doc_html_ts", ""),
-                    "doc_html_raw": doc.get("doc_html_raw", ""),
+                    "title": str(doc["title"]),
+                    "doc_text": str(doc["doc_text"]),
+                    "doc_html_ts": str(doc["doc_html_ts"]),
+                    "doc_html_raw": str(doc["doc_html_raw"]),
                     "spans": normalized_spans,
                     "raw_spans": spans,
                 }
@@ -110,14 +125,20 @@ def load_dialogues(
         supported = ", ".join(sorted(SUPPORTED_SPLITS))
         raise ValueError(f"Unsupported split '{split}'. Expected one of: {supported}")
     payload = _load_json(dataset_root / DIAL_FILENAME_TEMPLATE.format(split=split))
+    dial_data = payload.get("dial_data")
+    assert isinstance(dial_data, dict)
     dialogues: list[dict] = []
 
-    for domain, dials in _sorted_items(payload.get("dial_data", {})):
+    for domain, dials in _sorted_items(dial_data):
         if domain_filter is not None and domain not in domain_filter:
             continue
+        assert isinstance(dials, list)
         for dial in dials:
+            assert isinstance(dial, dict)
+            turns = dial.get("turns")
+            assert isinstance(turns, list)
             turns = sorted(
-                dial.get("turns", []) or [],
+                turns,
                 key=lambda turn: (
                     turn.get("turn_id") if turn.get("turn_id") is not None else 10**18,
                     turn.get("role", ""),
@@ -126,7 +147,7 @@ def load_dialogues(
             dialogues.append(
                 {
                     "domain": domain,
-                    "dial_id": str(dial.get("dial_id", "")),
+                    "dial_id": str(dial["dial_id"]),
                     "turns": [normalize_turn(turn) for turn in turns],
                 }
             )
