@@ -15,26 +15,34 @@ from support_graph.providers import chat_provider_base_url
 
 
 _T = TypeVar("_T")
+SemaphoreKey = tuple[int, str, str, str, int]
 _RETRYABLE_MESSAGE_PATTERN = re.compile(
     r"(429|rate limit|timeout|temporar|try again|connection|unavailable|bad gateway|service unavailable|internal server error)",
     re.IGNORECASE,
 )
-_SHARED_SEMAPHORES: dict[tuple[int, str, str, str, int], asyncio.Semaphore] = {}
+_SHARED_SEMAPHORES: dict[SemaphoreKey, asyncio.Semaphore] = {}
+
+
+def _max_concurrency(config: RuntimeConfigLike) -> int:
+    assert config.llm_max_concurrency > 0
+    return config.llm_max_concurrency
+
+
+def _semaphore_key(config: RuntimeConfigLike) -> SemaphoreKey:
+    return (
+        id(asyncio.get_running_loop()),
+        config.provider_type,
+        chat_provider_base_url(config) or "",
+        config.chat_model or "",
+        _max_concurrency(config),
+    )
 
 
 def shared_llm_semaphore(config: RuntimeConfigLike) -> asyncio.Semaphore:
-    loop = asyncio.get_running_loop()
-    max_concurrency = max(1, int(config.llm_max_concurrency))
-    key = (
-        id(loop),
-        str(config.provider_type),
-        str(chat_provider_base_url(config) or ""),
-        str(config.chat_model or ""),
-        max_concurrency,
-    )
+    key = _semaphore_key(config)
     semaphore = _SHARED_SEMAPHORES.get(key)
     if semaphore is None:
-        semaphore = asyncio.Semaphore(max_concurrency)
+        semaphore = asyncio.Semaphore(key[-1])
         _SHARED_SEMAPHORES[key] = semaphore
     return semaphore
 
@@ -70,8 +78,9 @@ def is_retryable_exception(exc: BaseException) -> bool:
         return True
     if status_code is not None and 500 <= status_code < 600:
         return True
-
-    return bool(_RETRYABLE_MESSAGE_PATTERN.search(str(exc)))
+    if _RETRYABLE_MESSAGE_PATTERN.search(str(exc)):
+        return True
+    return False
 
 
 async def ainvoke_with_retry(
@@ -82,11 +91,14 @@ async def ainvoke_with_retry(
     base_delay_seconds: float,
     max_delay_seconds: float,
 ) -> _T:
+    assert max_attempts > 0
+    assert base_delay_seconds >= 0.0
+    assert max_delay_seconds >= base_delay_seconds
     async for attempt in AsyncRetrying(
-        stop=stop_after_attempt(max(1, int(max_attempts))),
+        stop=stop_after_attempt(max_attempts),
         wait=wait_exponential_jitter(
-            initial=max(0.0, float(base_delay_seconds)),
-            max=max(float(base_delay_seconds), float(max_delay_seconds)),
+            initial=base_delay_seconds,
+            max=max_delay_seconds,
         ),
         retry=retry_if_exception(is_retryable_exception),
         reraise=True,

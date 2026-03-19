@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import psycopg
 from langchain_core.documents import Document
@@ -12,6 +12,10 @@ from langchain_postgres import PGVector
 
 from support_graph.config.runtime import IndexConfigLike
 from support_graph.providers import build_embeddings as build_provider_embeddings
+
+
+class VectorStoreWithAddDocuments(Protocol):
+    def add_documents(self, documents: list[Document], *, ids: list[str]) -> Any: ...
 
 
 def build_collection_name(domain: str) -> str:
@@ -40,12 +44,11 @@ def load_chunk_records(path: str | Path) -> list[dict]:
     chunk_path = Path(path)
     if not chunk_path.exists():
         raise FileNotFoundError(f"Chunk artifact not found: {chunk_path}")
-
-    records: list[dict] = []
-    for line in chunk_path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            records.append(json.loads(line))
-    return records
+    return [
+        json.loads(line)
+        for line in chunk_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def validate_index_config(config: IndexConfigLike) -> None:
@@ -75,6 +78,7 @@ def chunk_record_to_document(
     chunk_record: dict, document_cls: type[Document] | None = None
 ) -> Document:
     resolved_document_cls = document_cls or Document
+    text = str(chunk_record.get("text", ""))
     metadata = {
         "chunk_id": chunk_record.get("chunk_id"),
         "domain": chunk_record.get("domain"),
@@ -87,9 +91,7 @@ def chunk_record_to_document(
         "subchunk_index": chunk_record.get("subchunk_index"),
         "token_count": chunk_record.get("token_count"),
     }
-    return resolved_document_cls(
-        page_content=chunk_record.get("text", ""), metadata=metadata
-    )
+    return resolved_document_cls(page_content=text, metadata=metadata)
 
 
 def chunk_records_to_documents(
@@ -102,6 +104,18 @@ def chunk_records_to_documents(
     ]
     ids = [str(chunk_record.get("chunk_id", "")) for chunk_record in chunk_records]
     return documents, ids
+
+
+def _add_document_batches(
+    store: VectorStoreWithAddDocuments,
+    documents: list[Document],
+    vector_ids: list[str],
+    *,
+    batch_size: int,
+) -> None:
+    for start in range(0, len(documents), batch_size):
+        end = start + batch_size
+        store.add_documents(documents[start:end], ids=vector_ids[start:end])
 
 
 def load_indexed_chunk_ids(connection: str, collection_name: str) -> set[str]:
@@ -146,16 +160,16 @@ def index_documents(
     batch_size: int = 1,
 ) -> Any:
     validate_index_config(config)
+    assert config.postgres_dsn is not None
 
-    resolved_chunk_records = chunk_records
-    if resolved_chunk_records is None:
+    if chunk_records is None:
         chunk_artifact_path = config.chunk_artifact_path
         if not chunk_artifact_path:
             raise ValueError("Missing chunk_artifact_path for indexing.")
-        resolved_chunk_records = load_chunk_records(chunk_artifact_path)
+        chunk_records = load_chunk_records(chunk_artifact_path)
 
     documents, ids = chunk_records_to_documents(
-        resolved_chunk_records, document_cls=document_cls
+        chunk_records, document_cls=document_cls
     )
     embedding_client = (
         embeddings if embeddings is not None else build_embeddings(config)
@@ -163,9 +177,9 @@ def index_documents(
     collection_name = config.collection_name or build_collection_name(config.domain)
     vector_ids = [build_vector_id(collection_name, chunk_id) for chunk_id in ids]
     resolved_vectorstore_cls = vectorstore_cls or PGVector
-
-    kwargs = {
-        "connection": normalize_postgres_connection(config.postgres_dsn),
+    connection = normalize_postgres_connection(config.postgres_dsn)
+    vectorstore_kwargs = {
+        "connection": connection,
         "collection_name": collection_name,
         "use_jsonb": True,
         "pre_delete_collection": pre_delete_collection,
@@ -175,38 +189,44 @@ def index_documents(
     if hasattr(resolved_vectorstore_cls, "add_documents"):
         store = resolved_vectorstore_cls(
             embeddings=embedding_client,
-            **kwargs,
+            **vectorstore_kwargs,
         )
-        for start in range(0, len(documents), batch_size):
-            end = start + batch_size
-            store.add_documents(documents[start:end], ids=vector_ids[start:end])
-        stored_ids = load_indexed_chunk_ids(kwargs["connection"], collection_name)
+        _add_document_batches(
+            store,
+            documents,
+            vector_ids,
+            batch_size=batch_size,
+        )
+        stored_ids = load_indexed_chunk_ids(connection, collection_name)
         missing_ids = [chunk_id for chunk_id in ids if chunk_id not in stored_ids]
-        if missing_ids:
-            by_chunk_id = {
-                chunk_record["chunk_id"]: chunk_record
-                for chunk_record in resolved_chunk_records
-            }
-            missing_records = [by_chunk_id[chunk_id] for chunk_id in missing_ids]
-            missing_documents, missing_document_ids = chunk_records_to_documents(
-                missing_records,
-                document_cls=document_cls,
-            )
-            missing_vector_ids = [
-                build_vector_id(collection_name, chunk_id)
-                for chunk_id in missing_document_ids
-            ]
-            for start in range(0, len(missing_documents), batch_size):
-                end = start + batch_size
-                store.add_documents(
-                    missing_documents[start:end],
-                    ids=missing_vector_ids[start:end],
-                )
+        if not missing_ids:
+            return store
+
+        missing_id_set = set(missing_ids)
+        missing_records = [
+            chunk_record
+            for chunk_record in chunk_records
+            if chunk_record["chunk_id"] in missing_id_set
+        ]
+        missing_documents, missing_document_ids = chunk_records_to_documents(
+            missing_records,
+            document_cls=document_cls,
+        )
+        missing_vector_ids = [
+            build_vector_id(collection_name, chunk_id)
+            for chunk_id in missing_document_ids
+        ]
+        _add_document_batches(
+            store,
+            missing_documents,
+            missing_vector_ids,
+            batch_size=batch_size,
+        )
         return store
 
-    kwargs["ids"] = vector_ids
     return resolved_vectorstore_cls.from_documents(
         documents,
         embedding_client,
-        **kwargs,
+        ids=vector_ids,
+        **vectorstore_kwargs,
     )
