@@ -3,23 +3,46 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Iterable, Literal, TypeAlias
+from typing import Iterable, Literal, Self, TypeAlias
 
 
-class Domain(StrEnum):
+class ChoiceStrEnum(StrEnum):
+    @classmethod
+    def values(cls) -> tuple[str, ...]:
+        return tuple(item.value for item in cls)
+
+    @classmethod
+    def value_set(cls) -> frozenset[str]:
+        return frozenset(cls.values())
+
+    @classmethod
+    def parse(cls, value: str | Self) -> Self:
+        if isinstance(value, cls):
+            return value
+        normalized = str(value).strip().lower()
+        try:
+            return cls(normalized)
+        except ValueError as exc:
+            supported = ", ".join(sorted(cls.value_set()))
+            raise ValueError(
+                f"Unsupported {cls.__name__.lower()} '{value}'. Expected one of: {supported}"
+            ) from exc
+
+
+class Domain(ChoiceStrEnum):
     DMV = "dmv"
     SSA = "ssa"
     STUDENTAID = "studentaid"
     VA = "va"
 
 
-class DatasetSplit(StrEnum):
+class DatasetSplit(ChoiceStrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     TEST = "test"
 
 
-class EvalSubset(StrEnum):
+class EvalSubset(ChoiceStrEnum):
     SMOKE = "smoke"
     FROZEN_ABLATION = "frozen_ablation"
     FULL_VALIDATION = "full_validation"
@@ -32,23 +55,9 @@ TargetMode = Literal["answer", "follow_up"]
 TurnRole = Literal["agent", "user"]
 QueryContextRole = Literal["agent", "user", "unknown"]
 
-SUPPORTED_DOMAINS = frozenset(domain.value for domain in Domain)
-SUPPORTED_SPLITS = frozenset(split.value for split in DatasetSplit)
-SUPPORTED_EVAL_SUBSETS = frozenset(subset.value for subset in EvalSubset)
-
-
-def _normalize_choice(value: str) -> str:
-    return value.strip().lower()
-
 
 def parse_domain(value: DomainLike) -> Domain:
-    if isinstance(value, Domain):
-        return value
-    normalized = _normalize_choice(str(value))
-    if normalized not in SUPPORTED_DOMAINS:
-        supported = ", ".join(sorted(SUPPORTED_DOMAINS))
-        raise ValueError(f"Unsupported domain '{value}'. Expected one of: {supported}")
-    return Domain(normalized)
+    return Domain.parse(value)
 
 
 def parse_domains(values: Iterable[DomainLike]) -> tuple[Domain, ...]:
@@ -64,25 +73,11 @@ def parse_domains(values: Iterable[DomainLike]) -> tuple[Domain, ...]:
 
 
 def parse_dataset_split(value: DatasetSplitLike) -> DatasetSplit:
-    if isinstance(value, DatasetSplit):
-        return value
-    normalized = _normalize_choice(str(value))
-    if normalized not in SUPPORTED_SPLITS:
-        supported = ", ".join(sorted(SUPPORTED_SPLITS))
-        raise ValueError(f"Unsupported split '{value}'. Expected one of: {supported}")
-    return DatasetSplit(normalized)
+    return DatasetSplit.parse(value)
 
 
 def parse_eval_subset(value: EvalSubsetLike) -> EvalSubset:
-    if isinstance(value, EvalSubset):
-        return value
-    normalized = _normalize_choice(str(value))
-    if normalized not in SUPPORTED_EVAL_SUBSETS:
-        supported = ", ".join(sorted(SUPPORTED_EVAL_SUBSETS))
-        raise ValueError(
-            f"Unsupported eval subset '{value}'. Expected one of: {supported}"
-        )
-    return EvalSubset(normalized)
+    return EvalSubset.parse(value)
 
 
 __all__ = [
@@ -93,9 +88,7 @@ __all__ = [
     "EvalSubset",
     "EvalSubsetLike",
     "QueryContextRole",
-    "SUPPORTED_DOMAINS",
-    "SUPPORTED_EVAL_SUBSETS",
-    "SUPPORTED_SPLITS",
+    "ChoiceStrEnum",
     "TargetMode",
     "TurnRole",
     "parse_dataset_split",

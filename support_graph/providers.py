@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Protocol
 
 from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 
+from support_graph.types import ChoiceStrEnum
 
-ChatProviderType = Literal["anthropic", "ollama", "openai"]
-EmbeddingProviderType = Literal["ollama", "openai"]
 
-DEFAULT_PROVIDER_TYPE: ChatProviderType = "ollama"
-SUPPORTED_CHAT_PROVIDERS = frozenset({"anthropic", "ollama", "openai"})
-SUPPORTED_EMBEDDING_PROVIDERS = frozenset({"ollama", "openai"})
+class Provider(ChoiceStrEnum):
+    ANTHROPIC = "anthropic"
+    OLLAMA = "ollama"
+    OPENAI = "openai"
+
+    def supports_embeddings(self) -> bool:
+        return self in {Provider.OLLAMA, Provider.OPENAI}
+
+
+DEFAULT_PROVIDER_TYPE = Provider.OLLAMA
 
 
 class ProviderConfigLike(Protocol):
-    provider_type: ChatProviderType | None
-    embedding_provider_type: EmbeddingProviderType | None
+    provider_type: Provider | None
+    embedding_provider_type: Provider | None
     ollama_base_url: str | None
     openai_base_url: str | None
     openai_api_key: str | None
@@ -29,66 +35,74 @@ class ProviderConfigLike(Protocol):
     embedding_client: Any | None
 
 
-def normalize_provider_type(value: str | None) -> str:
+def normalize_provider_type(value: str | Provider | None) -> Provider:
     if value is None:
         return DEFAULT_PROVIDER_TYPE
-    resolved = value.strip().lower()
-    return resolved or DEFAULT_PROVIDER_TYPE
+    if isinstance(value, Provider):
+        return value
+    normalized = str(value).strip()
+    if not normalized:
+        return DEFAULT_PROVIDER_TYPE
+    return Provider.parse(normalized)
 
 
-def validate_chat_provider_type(value: str | None) -> ChatProviderType:
-    provider = normalize_provider_type(value)
-    if provider not in SUPPORTED_CHAT_PROVIDERS:
-        supported = ", ".join(sorted(SUPPORTED_CHAT_PROVIDERS))
+def validate_chat_provider_type(value: str | Provider | None) -> Provider:
+    try:
+        return normalize_provider_type(value)
+    except ValueError as exc:
+        supported = ", ".join(sorted(Provider.value_set()))
         raise ValueError(
-            f"Unsupported provider_type '{provider}'. Supported providers: {supported}."
+            f"Unsupported provider_type '{value}'. Supported providers: {supported}."
+        ) from exc
+
+
+def validate_embedding_provider_type(value: str | Provider | None) -> Provider:
+    provider = validate_chat_provider_type(value)
+    if provider.supports_embeddings():
+        return provider
+    supported = ", ".join(
+        sorted(
+            candidate.value for candidate in Provider if candidate.supports_embeddings()
         )
-    return cast(ChatProviderType, provider)
+    )
+    raise ValueError(
+        "Unsupported embedding provider_type "
+        f"'{provider}'. Supported providers: {supported}."
+    )
 
 
-def validate_embedding_provider_type(value: str | None) -> EmbeddingProviderType:
-    provider = normalize_provider_type(value)
-    if provider not in SUPPORTED_EMBEDDING_PROVIDERS:
-        supported = ", ".join(sorted(SUPPORTED_EMBEDDING_PROVIDERS))
-        raise ValueError(
-            "Unsupported embedding provider_type "
-            f"'{provider}'. Supported providers: {supported}."
-        )
-    return cast(EmbeddingProviderType, provider)
-
-
-def resolve_embedding_provider_type(
-    config: ProviderConfigLike,
-) -> EmbeddingProviderType:
+def resolve_embedding_provider_type(config: ProviderConfigLike) -> Provider:
     provider = normalize_provider_type(
         config.embedding_provider_type or config.provider_type
     )
-    if provider == "anthropic":
+    if not provider.supports_embeddings():
         raise ValueError(
             "Anthropic chat models do not provide embeddings through LangChain. "
             "Set SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE to 'openai' or 'ollama'."
         )
-    return validate_embedding_provider_type(provider)
+    return provider
 
 
 def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
     provider = validate_chat_provider_type(config.provider_type)
     match provider:
-        case "ollama":
+        case Provider.OLLAMA:
             return config.ollama_base_url
-        case "openai":
+        case Provider.OPENAI:
             return config.openai_base_url
-        case "anthropic":
+        case Provider.ANTHROPIC:
             return config.anthropic_base_url
 
 
 def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
     provider = resolve_embedding_provider_type(config)
     match provider:
-        case "ollama":
+        case Provider.OLLAMA:
             return config.ollama_base_url
-        case "openai":
+        case Provider.OPENAI:
             return config.openai_base_url
+        case Provider.ANTHROPIC:
+            raise AssertionError(provider)
 
 
 def _without_none(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -97,17 +111,17 @@ def _without_none(kwargs: dict[str, Any]) -> dict[str, Any]:
 
 def _chat_provider_kwargs(
     config: ProviderConfigLike,
-    provider: ChatProviderType,
+    provider: Provider,
 ) -> dict[str, Any]:
     match provider:
-        case "ollama":
+        case Provider.OLLAMA:
             return _without_none(
                 {
                     "temperature": 0,
                     "base_url": config.ollama_base_url,
                 }
             )
-        case "openai":
+        case Provider.OPENAI:
             return _without_none(
                 {
                     "temperature": 0,
@@ -115,7 +129,7 @@ def _chat_provider_kwargs(
                     "base_url": config.openai_base_url,
                 }
             )
-        case "anthropic":
+        case Provider.ANTHROPIC:
             return _without_none(
                 {
                     "temperature": 0,
@@ -127,18 +141,20 @@ def _chat_provider_kwargs(
 
 def _embedding_provider_kwargs(
     config: ProviderConfigLike,
-    provider: EmbeddingProviderType,
+    provider: Provider,
 ) -> dict[str, Any]:
     match provider:
-        case "ollama":
+        case Provider.OLLAMA:
             return _without_none({"base_url": config.ollama_base_url})
-        case "openai":
+        case Provider.OPENAI:
             return _without_none(
                 {
                     "api_key": config.openai_api_key,
                     "base_url": config.openai_base_url,
                 }
             )
+        case Provider.ANTHROPIC:
+            raise AssertionError(provider)
 
 
 def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:
@@ -163,7 +179,7 @@ def build_chat_model(
 
     provider = validate_chat_provider_type(config.provider_type)
     if chat_model_cls is not None:
-        if provider != "ollama":
+        if provider is not Provider.OLLAMA:
             raise ValueError(
                 "Legacy chat_model_cls injection is only supported for provider_type='ollama'."
             )
@@ -198,7 +214,7 @@ def build_embeddings(
 
     provider = resolve_embedding_provider_type(config)
     if embeddings_cls is not None:
-        if provider != "ollama":
+        if provider is not Provider.OLLAMA:
             raise ValueError(
                 "Legacy embeddings_cls injection is only supported for provider_type='ollama'."
             )
@@ -215,12 +231,9 @@ def build_embeddings(
 
 
 __all__ = [
-    "ChatProviderType",
     "DEFAULT_PROVIDER_TYPE",
-    "EmbeddingProviderType",
+    "Provider",
     "ProviderConfigLike",
-    "SUPPORTED_CHAT_PROVIDERS",
-    "SUPPORTED_EMBEDDING_PROVIDERS",
     "build_chat_model",
     "build_embeddings",
     "chat_provider_base_url",
