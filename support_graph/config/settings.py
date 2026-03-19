@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from support_graph.providers import (
+    ChatProviderType,
+    EmbeddingProviderType,
+    validate_chat_provider_type,
+    validate_embedding_provider_type,
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
@@ -23,6 +30,14 @@ def _resolve_path(
     if not path.is_absolute():
         path = project_root / path
     return path
+
+
+def _env_value(env: dict[str, str], *keys: str) -> str | None:
+    for key in keys:
+        value = env.get(key)
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _find_closing_quote(value: str, quote: str) -> int | None:
@@ -120,8 +135,8 @@ class Settings:
     dataset_root: Path
     enabled_domains: tuple[str, ...]
     postgres_dsn: str | None
-    provider_type: str
-    embedding_provider_type: str | None
+    provider_type: ChatProviderType
+    embedding_provider_type: EmbeddingProviderType | None
     ollama_base_url: str
     openai_base_url: str | None
     openai_api_key: str | None
@@ -163,6 +178,17 @@ class Settings:
         )
         file_values = _read_dotenv(resolved_dotenv)
         env = {**file_values, **os.environ}
+        provider_type = validate_chat_provider_type(
+            _env_value(env, "SUPPORT_GRAPH_PROVIDER_TYPE")
+        )
+        embedding_provider_raw = _env_value(
+            env, "SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE"
+        )
+        embedding_provider_type = (
+            validate_embedding_provider_type(embedding_provider_raw)
+            if embedding_provider_raw is not None
+            else None
+        )
 
         dataset_root = _resolve_path(
             env.get("SUPPORT_GRAPH_DATASET_ROOT"),
@@ -190,24 +216,23 @@ class Settings:
                 env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), ("dmv",)
             ),
             postgres_dsn=env.get("SUPPORT_GRAPH_POSTGRES_DSN") or None,
-            provider_type=env.get("SUPPORT_GRAPH_PROVIDER_TYPE", "ollama"),
-            embedding_provider_type=env.get("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
-            or None,
+            provider_type=provider_type,
+            embedding_provider_type=embedding_provider_type,
             ollama_base_url=env.get(
                 "SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"
             ),
-            openai_base_url=env.get("SUPPORT_GRAPH_OPENAI_BASE_URL")
-            or env.get("OPENAI_BASE_URL")
-            or None,
-            openai_api_key=env.get("SUPPORT_GRAPH_OPENAI_API_KEY")
-            or env.get("OPENAI_API_KEY")
-            or None,
-            anthropic_base_url=env.get("SUPPORT_GRAPH_ANTHROPIC_BASE_URL")
-            or env.get("ANTHROPIC_BASE_URL")
-            or None,
-            anthropic_api_key=env.get("SUPPORT_GRAPH_ANTHROPIC_API_KEY")
-            or env.get("ANTHROPIC_API_KEY")
-            or None,
+            openai_base_url=_env_value(
+                env, "SUPPORT_GRAPH_OPENAI_BASE_URL", "OPENAI_BASE_URL"
+            ),
+            openai_api_key=_env_value(
+                env, "SUPPORT_GRAPH_OPENAI_API_KEY", "OPENAI_API_KEY"
+            ),
+            anthropic_base_url=_env_value(
+                env, "SUPPORT_GRAPH_ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"
+            ),
+            anthropic_api_key=_env_value(
+                env, "SUPPORT_GRAPH_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"
+            ),
             chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
             embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
             prompt_version=env.get("SUPPORT_GRAPH_PROMPT_VERSION", "v1"),
@@ -229,31 +254,34 @@ class Settings:
                 env.get("SUPPORT_GRAPH_LLM_RETRY_MAX_DELAY_SECONDS"), 4.0
             ),
             langsmith_tracing_enabled=_bool_value(
-                env.get("SUPPORT_GRAPH_LANGSMITH_TRACING_ENABLED")
-                or env.get("LANGSMITH_TRACING")
-                or env.get("LANGCHAIN_TRACING_V2"),
+                _env_value(
+                    env,
+                    "SUPPORT_GRAPH_LANGSMITH_TRACING_ENABLED",
+                    "LANGSMITH_TRACING",
+                    "LANGCHAIN_TRACING_V2",
+                ),
                 False,
             ),
-            langsmith_project=env.get("SUPPORT_GRAPH_LANGSMITH_PROJECT")
-            or env.get("LANGSMITH_PROJECT")
-            or None,
-            langsmith_api_key=env.get("SUPPORT_GRAPH_LANGSMITH_API_KEY")
-            or env.get("LANGSMITH_API_KEY")
-            or None,
-            langsmith_endpoint=env.get("SUPPORT_GRAPH_LANGSMITH_ENDPOINT")
-            or env.get("LANGSMITH_ENDPOINT")
-            or None,
+            langsmith_project=_env_value(
+                env, "SUPPORT_GRAPH_LANGSMITH_PROJECT", "LANGSMITH_PROJECT"
+            ),
+            langsmith_api_key=_env_value(
+                env, "SUPPORT_GRAPH_LANGSMITH_API_KEY", "LANGSMITH_API_KEY"
+            ),
+            langsmith_endpoint=_env_value(
+                env, "SUPPORT_GRAPH_LANGSMITH_ENDPOINT", "LANGSMITH_ENDPOINT"
+            ),
             otel_enabled=_bool_value(env.get("SUPPORT_GRAPH_OTEL_ENABLED"), False),
             otel_service_name=env.get(
                 "SUPPORT_GRAPH_OTEL_SERVICE_NAME", "support-graph"
             ),
             otel_exporter=env.get("SUPPORT_GRAPH_OTEL_EXPORTER") or None,
-            otel_endpoint=env.get("SUPPORT_GRAPH_OTEL_ENDPOINT")
-            or env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-            or None,
-            otel_headers=env.get("SUPPORT_GRAPH_OTEL_HEADERS")
-            or env.get("OTEL_EXPORTER_OTLP_HEADERS")
-            or None,
+            otel_endpoint=_env_value(
+                env, "SUPPORT_GRAPH_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"
+            ),
+            otel_headers=_env_value(
+                env, "SUPPORT_GRAPH_OTEL_HEADERS", "OTEL_EXPORTER_OTLP_HEADERS"
+            ),
             trace_dir=trace_dir,
             eval_dir=eval_dir,
             derived_dir=derived_dir,
@@ -265,7 +293,8 @@ class Settings:
     def selected_domain(self, explicit_domain: str | None = None) -> str:
         if explicit_domain:
             return explicit_domain
-        return self.enabled_domains[0] if self.enabled_domains else "dmv"
+        assert self.enabled_domains
+        return self.enabled_domains[0]
 
     def chunk_artifact_path(self, explicit_domain: str | None = None) -> Path:
         return self.chunks_dir / f"{self.selected_domain(explicit_domain)}.jsonl"
@@ -279,15 +308,7 @@ class Settings:
             missing.append("SUPPORT_GRAPH_POSTGRES_DSN")
         if not self.embedding_model:
             missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        embedding_provider = (
-            (self.embedding_provider_type or self.provider_type or "ollama")
-            .strip()
-            .lower()
-        )
-        if embedding_provider == "anthropic":
-            missing.append("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
-        elif embedding_provider == "openai" and not self.openai_api_key:
-            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
+        missing.extend(self._embedding_provider_missing_fields())
         return list(dict.fromkeys(missing))
 
     def runtime_missing_fields(self) -> list[str]:
@@ -298,19 +319,27 @@ class Settings:
             missing.append("SUPPORT_GRAPH_CHAT_MODEL")
         if not self.embedding_model:
             missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        provider = (self.provider_type or "ollama").strip().lower()
-        if provider == "openai" and not self.openai_api_key:
-            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
-        elif provider == "anthropic" and not self.anthropic_api_key:
-            missing.append("SUPPORT_GRAPH_ANTHROPIC_API_KEY")
-
-        embedding_provider = (
-            (self.embedding_provider_type or self.provider_type or "ollama")
-            .strip()
-            .lower()
-        )
-        if embedding_provider == "anthropic":
-            missing.append("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
-        elif embedding_provider == "openai" and not self.openai_api_key:
-            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
+        missing.extend(self._chat_provider_missing_fields())
+        missing.extend(self._embedding_provider_missing_fields())
         return list(dict.fromkeys(missing))
+
+    def _chat_provider_missing_fields(self) -> list[str]:
+        if self.provider_type == "ollama":
+            return []
+        if self.provider_type == "openai":
+            return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
+        if self.provider_type == "anthropic":
+            return [] if self.anthropic_api_key else ["SUPPORT_GRAPH_ANTHROPIC_API_KEY"]
+        raise AssertionError(self.provider_type)
+
+    def _embedding_provider_missing_fields(self) -> list[str]:
+        if not self.embedding_model:
+            return []
+        if self.embedding_provider_type is None and self.provider_type == "anthropic":
+            return ["SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE"]
+        provider = self.embedding_provider_type or self.provider_type
+        if provider == "ollama":
+            return []
+        if provider == "openai":
+            return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
+        raise AssertionError(provider)

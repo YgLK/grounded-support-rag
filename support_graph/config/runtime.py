@@ -6,11 +6,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from support_graph.providers import ChatProviderType, EmbeddingProviderType
+
 
 class RuntimeSettingsLike(Protocol):
     postgres_dsn: str | None
-    provider_type: str
-    embedding_provider_type: str | None
+    provider_type: ChatProviderType
+    embedding_provider_type: EmbeddingProviderType | None
     ollama_base_url: str
     openai_base_url: str | None
     openai_api_key: str | None
@@ -48,8 +50,8 @@ class EmbeddingBenchmarkConfigLike(Protocol):
 
 class IndexConfigLike(Protocol):
     postgres_dsn: str | None
-    provider_type: str
-    embedding_provider_type: str | None
+    provider_type: ChatProviderType | None
+    embedding_provider_type: EmbeddingProviderType | None
     ollama_base_url: str | None
     openai_base_url: str | None
     openai_api_key: str | None
@@ -93,8 +95,8 @@ class RuntimeConfigLike(IndexConfigLike, Protocol):
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     postgres_dsn: str | None = None
-    provider_type: str = "ollama"
-    embedding_provider_type: str | None = None
+    provider_type: ChatProviderType = "ollama"
+    embedding_provider_type: EmbeddingProviderType | None = None
     ollama_base_url: str | None = None
     openai_base_url: str | None = None
     openai_api_key: str | None = None
