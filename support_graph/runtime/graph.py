@@ -12,6 +12,7 @@ from typing import Any, Literal, cast
 from langgraph.graph import END, START, StateGraph
 
 from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.logging_utils import get_logger
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.runtime.nodes import (
     _build_evidence_chunks,
@@ -43,6 +44,7 @@ from support_graph.runtime.traces import trace_file_path
 
 
 GraphRoute = Literal["generate_response", "refine_query", "resolve_without_answer"]
+logger = get_logger(__name__)
 
 
 def _retrieval_trace_chunks(chunks: list[dict], limit: int = 5) -> list[dict]:
@@ -389,6 +391,16 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                     "latency_ms": _latency_ms(started),
                 },
             )
+            await _emit_graph_event(
+                runtime,
+                {
+                    "kind": "query_refined",
+                    "node": "refine_query",
+                    "run_id": runtime.run_id,
+                    "example_id": state.get("example_id"),
+                    "refined_query": query,
+                },
+            )
             return {"refined_query": query, "final_query": query, "graph_path": path}
 
     async def generate_response_node(state: GraphState) -> GraphState:
@@ -493,21 +505,20 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                     "latency_ms": _latency_ms(started),
                 },
             )
-            if runtime.stream_responses:
-                await _emit_graph_event(
-                    runtime,
-                    {
-                        "kind": "response_completed",
-                        "node": "finalize",
-                        "run_id": runtime.run_id,
-                        "example_id": state.get("example_id"),
-                        "decision": finalized.get("decision"),
-                        "response_text": finalized.get("response_text"),
-                        "citations": finalized.get("citations", []),
-                        "confidence_label": finalized.get("confidence_label"),
-                        "trace_summary": finalized.get("trace_summary", {}),
-                    },
-                )
+            await _emit_graph_event(
+                runtime,
+                {
+                    "kind": "response_completed",
+                    "node": "finalize",
+                    "run_id": runtime.run_id,
+                    "example_id": state.get("example_id"),
+                    "decision": finalized.get("decision"),
+                    "response_text": finalized.get("response_text"),
+                    "citations": finalized.get("citations", []),
+                    "confidence_label": finalized.get("confidence_label"),
+                    "trace_summary": finalized.get("trace_summary", {}),
+                },
+            )
             return {"final_output": finalized}
 
     graph_builder.add_node("prepare_query", prepare_query_node)
@@ -550,6 +561,11 @@ async def run_graph_async(
     _runtime_resources: RuntimeResources | None = None,
 ) -> dict:
     run_started = time.perf_counter()
+    logger.info(
+        "Starting graph run for example=%s domain=%s",
+        example.get("example_id"),
+        example.get("domain") or config.domain,
+    )
     runtime = await build_runtime_async(
         config,
         trace_dir=trace_dir,
@@ -593,7 +609,15 @@ async def run_graph_async(
             },
         ):
             result = await app.ainvoke(initial_state)
-    return cast(dict, result["final_output"])
+    final_output = cast(dict, result["final_output"])
+    logger.info(
+        "Completed graph run %s example=%s decision=%s latency_ms=%.2f",
+        runtime.run_id,
+        initial_state.get("example_id"),
+        final_output.get("decision"),
+        float(final_output.get("trace_summary", {}).get("latency_ms", 0.0)),
+    )
+    return final_output
 
 
 async def astream_graph_events(

@@ -15,6 +15,7 @@ from typing import Any
 
 from sacrebleu.metrics import BLEU
 
+from support_graph.logging_utils import get_logger
 from support_graph.config.runtime import (
     RuntimeConfig,
     RuntimeSettingsLike,
@@ -45,6 +46,7 @@ from support_graph.types import (
 
 END_TO_END_TEXT_THRESHOLD = 0.35
 _SACREBLEU = BLEU(effective_order=True)
+logger = get_logger(__name__)
 MANUAL_REVIEW_COLUMNS = [
     "run_id",
     "example_id",
@@ -796,14 +798,42 @@ async def evaluate_examples_async(
     run_id = build_run_id(resolved_domain, subset_name, now=now, slug=run_id_slug)
     output_dir = settings.eval_dir / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Starting eval run %s domain=%s split=%s subset=%s examples=%s max_concurrency=%s",
+        run_id,
+        resolved_domain,
+        resolved_split,
+        subset_name,
+        len(selected_examples),
+        max_concurrency,
+    )
     resolved_config = (
         config if config is not None else build_eval_config(settings, resolved_domain)
     )
-    shared_runtime_resources = (
-        await resolve_runtime_resources_async(resolved_config)
-        if run_graph_func is run_graph_async
-        else None
-    )
+    shared_runtime_resources = None
+    if run_graph_func is run_graph_async:
+        logger.info("Resolving shared runtime resources for eval run %s", run_id)
+        shared_runtime_resources = await resolve_runtime_resources_async(
+            resolved_config
+        )
+    if shared_runtime_resources is not None:
+        logger.info("Shared runtime resources ready for eval run %s", run_id)
+    progress_lock = asyncio.Lock()
+    completed_count = 0
+
+    async def _log_prediction_progress(example: dict, record: dict) -> None:
+        nonlocal completed_count
+        async with progress_lock:
+            completed_count += 1
+            logger.info(
+                "Eval progress %s/%s example=%s target=%s decision=%s failure=%s",
+                completed_count,
+                len(selected_examples),
+                example.get("example_id"),
+                example.get("target_mode"),
+                record.get("decision"),
+                record.get("failure_label") or "none",
+            )
 
     semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -823,27 +853,31 @@ async def evaluate_examples_async(
         try:
             prediction = await run_prediction(example)
         except Exception as exc:
+            record = _runtime_error_record(
+                example,
+                exc,
+                retrieval_top_k=resolved_config.retrieval_top_k,
+            )
+            await _log_prediction_progress(example, record)
             return (
                 index,
-                _runtime_error_record(
-                    example,
-                    exc,
-                    retrieval_top_k=resolved_config.retrieval_top_k,
-                ),
+                record,
             )
         metrics = _prediction_metrics(
             example,
             prediction,
             retrieval_top_k=resolved_config.retrieval_top_k,
         )
+        record = _prediction_record(
+            example,
+            prediction,
+            metrics,
+            failure_label=_failure_label(example, prediction, metrics),
+        )
+        await _log_prediction_progress(example, record)
         return (
             index,
-            _prediction_record(
-                example,
-                prediction,
-                metrics,
-                failure_label=_failure_label(example, prediction, metrics),
-            ),
+            record,
         )
 
     completed = await asyncio.gather(
@@ -869,6 +903,11 @@ async def evaluate_examples_async(
                 if record.get("failure_label")
             ).items()
         )
+    )
+    logger.info(
+        "Finished model execution for eval run %s failures=%s",
+        run_id,
+        len(failures),
     )
     resolved_subset_label = (
         subset_label or f"{resolved_domain} {resolved_split} / {subset_name}"
@@ -916,6 +955,7 @@ async def evaluate_examples_async(
     if manifest_overrides:
         manifest.update(manifest_overrides)
 
+    logger.info("Writing eval artifacts for run %s to %s", run_id, output_dir)
     await asyncio.to_thread(_write_json, output_dir / "manifest.json", manifest)
     await asyncio.to_thread(
         _write_json,
@@ -961,6 +1001,7 @@ async def evaluate_examples_async(
         + "\n",
         encoding="utf-8",
     )
+    logger.info("Eval run %s complete. Summary written to %s", run_id, summary_path)
 
     return {
         "run_id": run_id,

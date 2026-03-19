@@ -21,6 +21,7 @@ ResponseConfidence = Literal["high", "medium", "low"]
 FallbackConfidence = Literal["medium", "low"]
 GraphStreamEventKind = Literal[
     "query_ready",
+    "query_refined",
     "retrieval_complete",
     "evidence_graded",
     "response_started",
@@ -67,6 +68,7 @@ class GraphStreamEvent(TypedDict, total=False):
     run_id: str
     example_id: str
     query: str
+    refined_query: str
     query_context: dict
     retrieval_attempts: int
     retrieval_ranked_chunks: list[dict]

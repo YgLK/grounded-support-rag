@@ -972,6 +972,13 @@ async def build_runtime_async(
 ) -> Runtime:
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     resolved_trace_dir = Path(trace_dir or config.trace_dir)
+    logger.info(
+        "Preparing runtime %s for domain=%s provider=%s trace_dir=%s",
+        run_id,
+        config.domain,
+        config.provider_type,
+        resolved_trace_dir,
+    )
     resolved_resources = resources
     if resolved_resources is None:
         resolved_resources = await resolve_runtime_resources_async(
@@ -979,6 +986,13 @@ async def build_runtime_async(
             vectorstore=vectorstore,
             chat_model=chat_model,
         )
+    logger.info(
+        "Runtime %s ready with chunk_docs=%s chat_model=%s vectorstore=%s",
+        run_id,
+        len(resolved_resources.chunk_records_by_doc),
+        "enabled" if resolved_resources.chat_model is not None else "disabled",
+        "enabled" if resolved_resources.vectorstore is not None else "disabled",
+    )
     return Runtime(
         config=config,
         vectorstore=resolved_resources.vectorstore,
@@ -1002,13 +1016,28 @@ async def resolve_runtime_resources_async(
 ) -> RuntimeResources:
     resolved_vectorstore = vectorstore
     if resolved_vectorstore is None and config.postgres_dsn and config.embedding_model:
+        logger.info(
+            "Connecting vectorstore for collection=%s embedding_model=%s",
+            config.collection_name,
+            config.embedding_model,
+        )
         resolved_vectorstore = await asyncio.to_thread(get_vectorstore, config)
 
     resolved_chat_model = chat_model
     if resolved_chat_model is None and config.chat_model:
+        logger.info(
+            "Initializing chat model %s via %s",
+            config.chat_model,
+            config.provider_type,
+        )
         resolved_chat_model = build_chat_model(config)
 
     chunk_records_by_doc = await asyncio.to_thread(_load_chunk_records_by_doc, config)
+    logger.info(
+        "Loaded chunk metadata for %s documents using prompt_version=%s",
+        len(chunk_records_by_doc),
+        config.prompt_version,
+    )
     return RuntimeResources(
         vectorstore=resolved_vectorstore,
         chat_model=resolved_chat_model,

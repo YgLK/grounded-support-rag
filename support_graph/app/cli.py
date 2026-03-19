@@ -557,16 +557,83 @@ def _index_unavailable_lines(
     ]
 
 
+def _log_graph_event(event: dict) -> None:
+    kind = str(event.get("kind") or "")
+    run_id = str(event.get("run_id") or "unknown-run")
+    example_id = str(event.get("example_id") or "unknown-example")
+    match kind:
+        case "query_ready":
+            logger.info(
+                "Run %s prepared query for %s: %s",
+                run_id,
+                example_id,
+                _shorten(str(event.get("query") or ""), limit=96),
+            )
+        case "query_refined":
+            logger.info(
+                "Run %s refined query for %s: %s",
+                run_id,
+                example_id,
+                _shorten(str(event.get("refined_query") or ""), limit=96),
+            )
+        case "retrieval_complete":
+            logger.info(
+                "Run %s retrieval attempt %s for %s returned %s ranked / %s expanded chunks",
+                run_id,
+                int(event.get("retrieval_attempts") or 0),
+                example_id,
+                len(event.get("retrieval_ranked_chunks") or []),
+                len(event.get("retrieved_chunks") or []),
+            )
+        case "evidence_graded":
+            grade = event.get("evidence_grade") or {}
+            logger.info(
+                "Run %s evidence verdict for %s: %s",
+                run_id,
+                example_id,
+                grade.get("verdict", "unknown"),
+            )
+        case "fallback":
+            fallback = event.get("fallback") or {}
+            logger.warning(
+                "Run %s fallback in %s for %s: %s: %s",
+                run_id,
+                fallback.get("node") or event.get("node") or "unknown-node",
+                example_id,
+                fallback.get("exception_type", "UnknownError"),
+                fallback.get("error", "unknown fallback"),
+            )
+        case "response_completed":
+            logger.info(
+                "Run %s completed for %s with decision=%s citations=%s",
+                run_id,
+                example_id,
+                event.get("decision"),
+                len(event.get("citations") or []),
+            )
+        case "error":
+            logger.error(
+                "Run %s failed for %s: %s: %s",
+                run_id,
+                example_id,
+                event.get("exception_type", "UnknownError"),
+                event.get("error", "unknown error"),
+            )
+
+
 def _build_chunks(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
+    logger.info("Building chunks for domain=%s", domain)
     documents = load_documents(settings.dataset_root, domains=[domain])
+    logger.info("Loaded %s documents for domain=%s", len(documents), domain)
     chunks = build_chunks(
         documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
     )
     output_path = (
         Path(args.output) if args.output else settings.chunks_dir / f"{domain}.jsonl"
     )
+    logger.info("Writing %s chunks to %s", len(chunks), output_path)
     write_chunks_jsonl(chunks, output_path)
     _print_lines(
         [
@@ -583,8 +650,12 @@ def _build_chunks(args: argparse.Namespace) -> int:
 def _build_examples(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
+    logger.info("Building examples for domain=%s split=%s", domain, args.split)
     dialogues = load_dialogues(
         settings.dataset_root, split=args.split, domains=[domain]
+    )
+    logger.info(
+        "Loaded %s dialogues for domain=%s split=%s", len(dialogues), domain, args.split
     )
     examples = build_turn_examples(dialogues)
     output_path = (
@@ -593,6 +664,7 @@ def _build_examples(args: argparse.Namespace) -> int:
         else settings.examples_dir / f"{domain}_{args.split}.jsonl"
     )
     write_examples_jsonl(examples, output_path)
+    logger.info("Wrote %s examples to %s", len(examples), output_path)
     _print_lines(
         [
             "SupportGraph Build Examples",
@@ -609,6 +681,7 @@ def _build_examples(args: argparse.Namespace) -> int:
 def _build_subsets(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     domain = settings.selected_domain(args.domain)
+    logger.info("Building eval subsets for domain=%s split=%s", domain, args.split)
     dialogues = load_dialogues(
         settings.dataset_root, split=args.split, domains=[domain]
     )
@@ -632,6 +705,12 @@ def _build_subsets(args: argparse.Namespace) -> int:
     )
     smoke_path = output_dir / "smoke.jsonl"
     frozen_path = output_dir / "frozen_ablation.jsonl"
+    logger.info(
+        "Writing subset artifacts to %s (smoke=%s, frozen_ablation=%s)",
+        output_dir,
+        len(smoke_examples),
+        len(frozen_examples),
+    )
     write_subset_jsonl(smoke_examples, smoke_path)
     write_subset_jsonl(frozen_examples, frozen_path)
     _print_lines(
@@ -667,16 +746,29 @@ def _index_docs(args: argparse.Namespace) -> int:
         else settings.chunk_artifact_path(domain)
     )
     if not chunk_artifact_path.exists():
+        logger.info(
+            "Chunk artifact missing for domain=%s, building fresh chunks at %s",
+            domain,
+            chunk_artifact_path,
+        )
         documents = load_documents(settings.dataset_root, domains=[domain])
         chunks = build_chunks(
             documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
         )
         write_chunks_jsonl(chunks, chunk_artifact_path)
 
+    logger.info("Loading chunk records from %s", chunk_artifact_path)
     chunk_records = load_chunk_records(chunk_artifact_path)
     config = build_runtime_config(settings, domain)
     config = with_runtime_config_overrides(
         config, chunk_artifact_path=chunk_artifact_path
+    )
+    logger.info(
+        "Indexing %s chunks into collection=%s batch_size=%s recreate=%s",
+        len(chunk_records),
+        config.collection_name,
+        args.batch_size,
+        bool(args.recreate),
     )
     index_documents(
         config,
@@ -717,6 +809,10 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
         else settings.chunk_artifact_path(domain)
     )
     if not chunk_artifact_path.exists():
+        logger.info(
+            "Chunk artifact missing for benchmark, building fresh chunks at %s",
+            chunk_artifact_path,
+        )
         documents = load_documents(settings.dataset_root, domains=[domain])
         chunks = build_chunks(
             documents, max_tokens_per_chunk=args.max_tokens_per_chunk, domains=[domain]
@@ -725,6 +821,12 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
 
     chunk_records = load_benchmark_chunk_records(str(chunk_artifact_path))
     config = build_runtime_config(settings, domain)
+    logger.info(
+        "Benchmarking embeddings for domain=%s sample_size=%s batch_size=%s",
+        domain,
+        args.sample_size,
+        args.batch_size,
+    )
     result = benchmark_embeddings(
         config,
         chunk_records=chunk_records,
@@ -766,6 +868,7 @@ def _run_example(args: argparse.Namespace) -> int:
         )
         return 1
 
+    logger.info("Loading example %s", args.example_id)
     example = load_example_record(args.example_id, settings)
     domain = example.get("domain") or settings.selected_domain()
     run_config = _run_config(settings, domain)
@@ -782,12 +885,19 @@ def _run_example(args: argparse.Namespace) -> int:
         _print_lines(error_lines)
         return 1
 
+    logger.info(
+        "Running graph for example=%s domain=%s collection=%s",
+        example.get("example_id"),
+        domain,
+        run_config.collection_name,
+    )
     result = _run_async_boundary(
         run_graph_async(
             example=example,
             config=run_config,
             max_attempts=settings.max_retrieval_attempts,
             trace_dir=settings.trace_dir,
+            _event_sink=_log_graph_event,
         )
     )
     _print_lines(_format_run_output(result, verbose=args.verbose))
@@ -821,6 +931,14 @@ def _eval_split(args: argparse.Namespace) -> int:
         _print_lines(error_lines)
         return 1
 
+    logger.info(
+        "Running eval for domain=%s split=%s subset=%s limit=%s max_concurrency=%s",
+        domain,
+        args.split,
+        args.subset,
+        args.limit if args.limit is not None else "all",
+        args.max_concurrency,
+    )
     result = _run_async_boundary(
         evaluate_split_async(
             settings=settings,
@@ -1202,7 +1320,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
+    settings = Settings.from_env(args.env_file)
+    log_path = configure_logging(log_dir=settings.log_dir, command_name=args.command)
+    if log_path is not None:
+        logger.info("Writing command logs to %s", log_path)
     return args.func(args)

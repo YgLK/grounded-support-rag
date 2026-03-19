@@ -166,6 +166,7 @@ class Settings:
     otel_headers: str | None
     trace_dir: Path
     eval_dir: Path
+    log_dir: Path
     derived_dir: Path
     chunks_dir: Path
     examples_dir: Path
@@ -207,6 +208,11 @@ class Settings:
             env.get("SUPPORT_GRAPH_EVAL_DIR"),
             project_root=project_root,
             default=project_root / "outputs/evals",
+        )
+        log_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_LOG_DIR"),
+            project_root=project_root,
+            default=project_root / "logs",
         )
         derived_dir = project_root / "data/derived"
         chunks_dir = derived_dir / "chunks"
@@ -287,6 +293,7 @@ class Settings:
             ),
             trace_dir=trace_dir,
             eval_dir=eval_dir,
+            log_dir=log_dir,
             derived_dir=derived_dir,
             chunks_dir=chunks_dir,
             examples_dir=examples_dir,
