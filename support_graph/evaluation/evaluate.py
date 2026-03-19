@@ -213,6 +213,7 @@ def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None
         if (metrics.get("end_to_end_success") or 0.0) == 0.0:
             return "unsupported_answer"
         return None
+    assert target_mode == "follow_up", f"Unknown target_mode: {target_mode}"
     if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
         return "wrong_doc"
     return None
@@ -260,6 +261,47 @@ def build_run_id(
     return "-".join(parts)
 
 
+def _prediction_retrieval_ranked_chunks(prediction: dict) -> list[dict]:
+    if "retrieval_ranked_chunks" in prediction:
+        return prediction["retrieval_ranked_chunks"]
+    return prediction.get("retrieved_chunks", [])
+
+
+def _prediction_retrieved_chunks(prediction: dict) -> list[dict]:
+    return prediction.get(
+        "retrieved_chunks", _prediction_retrieval_ranked_chunks(prediction)
+    )
+
+
+def _prediction_record(
+    example: dict,
+    prediction: dict,
+    metrics: dict,
+    *,
+    failure_label: str | None = None,
+    runtime_error: dict | None = None,
+) -> dict:
+    return {
+        "example_id": example.get("example_id"),
+        "target_mode": example.get("target_mode"),
+        "target_turn_id": example.get("target_turn_id"),
+        "latest_user_utterance": prediction.get("latest_user_utterance")
+        or example.get("latest_user_utterance"),
+        "gold_doc_ids": example.get("gold_doc_ids", []),
+        "gold_span_ids": example.get("gold_span_ids", []),
+        "target_text": example.get("target_turn", {}).get("utterance", ""),
+        "decision": prediction.get("decision"),
+        "response_text": prediction.get("response_text"),
+        "citations": prediction.get("citations", []),
+        "retrieval_ranked_chunks": _prediction_retrieval_ranked_chunks(prediction),
+        "retrieved_chunks": _prediction_retrieved_chunks(prediction),
+        "trace_summary": prediction.get("trace_summary", {}),
+        "metrics": metrics,
+        "failure_label": failure_label,
+        **({"runtime_error": runtime_error} if runtime_error is not None else {}),
+    }
+
+
 def _prediction_metrics(
     example: dict,
     prediction: dict,
@@ -267,31 +309,21 @@ def _prediction_metrics(
     retrieval_top_k: int | None = None,
 ) -> dict:
     target_text = str(example.get("target_turn", {}).get("utterance", ""))
-    retrieval_ranked_chunks = prediction.get(
-        "retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])
-    )
-    retrieved_chunks = prediction.get("retrieved_chunks", retrieval_ranked_chunks)
+    retrieval_ranked_chunks = _prediction_retrieval_ranked_chunks(prediction)
+    retrieved_chunks = _prediction_retrieved_chunks(prediction)
     citations = prediction.get("citations", [])
-    doc_recall_at_1 = (
-        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=1)
-        if _retrieval_metric_available(retrieval_top_k, k=1)
-        else None
-    )
-    doc_recall = (
-        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=3)
-        if _retrieval_metric_available(retrieval_top_k, k=3)
-        else None
-    )
-    doc_recall_at_5 = (
-        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=5)
-        if _retrieval_metric_available(retrieval_top_k, k=5)
-        else None
-    )
-    doc_recall_at_10 = (
-        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=10)
-        if _retrieval_metric_available(retrieval_top_k, k=10)
-        else None
-    )
+    doc_recalls = {
+        k: (
+            doc_recall_at_k(
+                example.get("gold_doc_ids", []),
+                retrieval_ranked_chunks,
+                k=k,
+            )
+            if _retrieval_metric_available(retrieval_top_k, k=k)
+            else None
+        )
+        for k in (1, 3, 5, 10)
+    }
     span_recall = (
         span_recall_at_k(example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5)
         if _retrieval_metric_available(retrieval_top_k, k=5)
@@ -310,7 +342,7 @@ def _prediction_metrics(
     citations_valid = (
         1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
     )
-    retrieved_doc_success = (doc_recall or 0.0) > 0.0 or (span_recall or 0.0) > 0.0
+    retrieved_doc_success = (doc_recalls[3] or 0.0) > 0.0 or (span_recall or 0.0) > 0.0
     text_success = max(rouge, f1) >= END_TO_END_TEXT_THRESHOLD
     end_to_end_success = (
         example.get("target_mode") == "answer"
@@ -320,10 +352,10 @@ def _prediction_metrics(
         and text_success
     )
     return {
-        "doc_recall_at_1": doc_recall_at_1,
-        "doc_recall_at_3": doc_recall,
-        "doc_recall_at_5": doc_recall_at_5,
-        "doc_recall_at_10": doc_recall_at_10,
+        "doc_recall_at_1": doc_recalls[1],
+        "doc_recall_at_3": doc_recalls[3],
+        "doc_recall_at_5": doc_recalls[5],
+        "doc_recall_at_10": doc_recalls[10],
         "span_recall_at_5": span_recall,
         "mrr_at_5": mrr,
         "rouge_l": rouge,
@@ -368,6 +400,10 @@ def _rate_map(records: list[dict], key: str) -> dict[str, float]:
     return {name: count / total for name, count in sorted(counts.items())}
 
 
+def _metric_mean(records: list[dict], metric: str) -> float | None:
+    return _safe_mean([record["metrics"].get(metric) for record in records])
+
+
 def _aggregate_metrics(predictions: list[dict]) -> dict:
     answer_predictions = [
         record for record in predictions if record.get("target_mode") == "answer"
@@ -378,24 +414,12 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
 
     def retrieval_metrics(records: list[dict]) -> dict:
         return {
-            "doc_recall_at_1": _safe_mean(
-                [record["metrics"].get("doc_recall_at_1") for record in records]
-            ),
-            "doc_recall_at_3": _safe_mean(
-                [record["metrics"].get("doc_recall_at_3") for record in records]
-            ),
-            "doc_recall_at_5": _safe_mean(
-                [record["metrics"].get("doc_recall_at_5") for record in records]
-            ),
-            "doc_recall_at_10": _safe_mean(
-                [record["metrics"].get("doc_recall_at_10") for record in records]
-            ),
-            "span_recall_at_5": _safe_mean(
-                [record["metrics"].get("span_recall_at_5") for record in records]
-            ),
-            "mrr_at_5": _safe_mean(
-                [record["metrics"].get("mrr_at_5") for record in records]
-            ),
+            "doc_recall_at_1": _metric_mean(records, "doc_recall_at_1"),
+            "doc_recall_at_3": _metric_mean(records, "doc_recall_at_3"),
+            "doc_recall_at_5": _metric_mean(records, "doc_recall_at_5"),
+            "doc_recall_at_10": _metric_mean(records, "doc_recall_at_10"),
+            "span_recall_at_5": _metric_mean(records, "span_recall_at_5"),
+            "mrr_at_5": _metric_mean(records, "mrr_at_5"),
         }
 
     answer_latencies = [
@@ -428,35 +452,17 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
         },
         "generation": {
             "answer": {
-                "rouge_l": _safe_mean(
-                    [record["metrics"].get("rouge_l") for record in answer_predictions]
+                "rouge_l": _metric_mean(answer_predictions, "rouge_l"),
+                "token_f1": _metric_mean(answer_predictions, "token_f1"),
+                "exact_match": _metric_mean(answer_predictions, "exact_match"),
+                "sacrebleu": _metric_mean(answer_predictions, "sacrebleu"),
+                "citation_coverage": _metric_mean(
+                    answer_predictions,
+                    "citation_coverage",
                 ),
-                "token_f1": _safe_mean(
-                    [record["metrics"].get("token_f1") for record in answer_predictions]
-                ),
-                "exact_match": _safe_mean(
-                    [
-                        record["metrics"].get("exact_match")
-                        for record in answer_predictions
-                    ]
-                ),
-                "sacrebleu": _safe_mean(
-                    [
-                        record["metrics"].get("sacrebleu")
-                        for record in answer_predictions
-                    ]
-                ),
-                "citation_coverage": _safe_mean(
-                    [
-                        record["metrics"].get("citation_coverage")
-                        for record in answer_predictions
-                    ]
-                ),
-                "end_to_end_success_rate": _safe_mean(
-                    [
-                        record["metrics"].get("end_to_end_success")
-                        for record in answer_predictions
-                    ]
+                "end_to_end_success_rate": _metric_mean(
+                    answer_predictions,
+                    "end_to_end_success",
                 ),
             }
         },
@@ -717,31 +723,21 @@ def _runtime_error_record(
         },
         "latest_user_utterance": example.get("latest_user_utterance"),
     }
-    return {
-        "example_id": example.get("example_id"),
-        "target_mode": example.get("target_mode"),
-        "target_turn_id": example.get("target_turn_id"),
-        "latest_user_utterance": example.get("latest_user_utterance"),
-        "gold_doc_ids": example.get("gold_doc_ids", []),
-        "gold_span_ids": example.get("gold_span_ids", []),
-        "target_text": example.get("target_turn", {}).get("utterance", ""),
-        "decision": prediction.get("decision"),
-        "response_text": prediction.get("response_text"),
-        "citations": prediction.get("citations", []),
-        "retrieval_ranked_chunks": prediction.get("retrieval_ranked_chunks", []),
-        "retrieved_chunks": prediction.get("retrieved_chunks", []),
-        "trace_summary": prediction.get("trace_summary", {}),
-        "metrics": _prediction_metrics(
+    runtime_error = {
+        "exception_type": type(exc).__name__,
+        "error": str(exc),
+    }
+    return _prediction_record(
+        example,
+        prediction,
+        _prediction_metrics(
             example,
             prediction,
             retrieval_top_k=retrieval_top_k,
         ),
-        "failure_label": "runtime_error",
-        "runtime_error": {
-            "exception_type": type(exc).__name__,
-            "error": str(exc),
-        },
-    }
+        failure_label="runtime_error",
+        runtime_error=runtime_error,
+    )
 
 
 async def evaluate_examples_async(
@@ -764,64 +760,60 @@ async def evaluate_examples_async(
     selected_examples = examples[:limit] if limit is not None else examples
     if not selected_examples:
         raise ValueError("No examples available for evaluation.")
+    assert max_concurrency > 0
 
     run_id = build_run_id(domain, subset_name, now=now, slug=run_id_slug)
     output_dir = settings.eval_dir / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
-    resolved_config = config or build_eval_config(settings, domain)
-    shared_runtime_resources = None
-    if run_graph_func is run_graph_async:
-        shared_runtime_resources = await resolve_runtime_resources_async(
-            resolved_config
-        )
+    resolved_config = (
+        config if config is not None else build_eval_config(settings, domain)
+    )
+    shared_runtime_resources = (
+        await resolve_runtime_resources_async(resolved_config)
+        if run_graph_func is run_graph_async
+        else None
+    )
 
-    semaphore = asyncio.Semaphore(max(1, int(max_concurrency)))
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def run_prediction(example: dict) -> dict:
+        call_kwargs = {
+            "example": example,
+            "config": resolved_config,
+            "max_attempts": resolved_config.max_retrieval_attempts,
+            "trace_dir": settings.trace_dir,
+        }
+        if shared_runtime_resources is not None:
+            call_kwargs["_runtime_resources"] = shared_runtime_resources
+        async with semaphore:
+            return await _maybe_await_result(run_graph_func(**call_kwargs))
 
     async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
         try:
-            async with semaphore:
-                call_kwargs = {
-                    "example": example,
-                    "config": resolved_config,
-                    "max_attempts": resolved_config.max_retrieval_attempts,
-                    "trace_dir": settings.trace_dir,
-                }
-                if shared_runtime_resources is not None:
-                    call_kwargs["_runtime_resources"] = shared_runtime_resources
-                prediction = await _maybe_await_result(run_graph_func(**call_kwargs))
+            prediction = await run_prediction(example)
         except Exception as exc:
-            return index, _runtime_error_record(
-                example,
-                exc,
-                retrieval_top_k=resolved_config.retrieval_top_k,
+            return (
+                index,
+                _runtime_error_record(
+                    example,
+                    exc,
+                    retrieval_top_k=resolved_config.retrieval_top_k,
+                ),
             )
         metrics = _prediction_metrics(
             example,
             prediction,
             retrieval_top_k=resolved_config.retrieval_top_k,
         )
-        record = {
-            "example_id": example.get("example_id"),
-            "target_mode": example.get("target_mode"),
-            "target_turn_id": example.get("target_turn_id"),
-            "latest_user_utterance": prediction.get("latest_user_utterance")
-            or example.get("latest_user_utterance"),
-            "gold_doc_ids": example.get("gold_doc_ids", []),
-            "gold_span_ids": example.get("gold_span_ids", []),
-            "target_text": example.get("target_turn", {}).get("utterance", ""),
-            "decision": prediction.get("decision"),
-            "response_text": prediction.get("response_text"),
-            "citations": prediction.get("citations", []),
-            "retrieval_ranked_chunks": prediction.get(
-                "retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])
+        return (
+            index,
+            _prediction_record(
+                example,
+                prediction,
+                metrics,
+                failure_label=_failure_label(example, prediction, metrics),
             ),
-            "retrieved_chunks": prediction.get("retrieved_chunks", []),
-            "trace_summary": prediction.get("trace_summary", {}),
-            "metrics": metrics,
-        }
-        failure_label = _failure_label(example, prediction, metrics)
-        record["failure_label"] = failure_label
-        return index, record
+        )
 
     completed = await asyncio.gather(
         *[

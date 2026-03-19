@@ -1,9 +1,10 @@
 """Targeted ablation runner for DMV Smoke-10."""
 
 from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol, TypedDict, cast
 
 from support_graph.evaluation.evaluate import (
     build_eval_config,
@@ -12,6 +13,28 @@ from support_graph.evaluation.evaluate import (
     with_config_overrides,
 )
 from support_graph.runtime.graph import run_graph_async
+
+
+VariantId = Literal[
+    "control",
+    "structured-query",
+    "structured-query-rerank",
+    "structured-query-rerank-neighbors",
+]
+VariantStatus = Literal["control", "worked", "didn't work"]
+
+
+class AblationVariant(TypedDict):
+    id: VariantId
+    title: str
+    summary: str
+    notes: str
+    ablation_options: dict[str, Any]
+    config_overrides: dict[str, Any]
+
+
+class AblationSettingsLike(Protocol):
+    eval_dir: Path
 
 
 PRIMARY_METRICS = (
@@ -24,7 +47,7 @@ DOC_RECALL_FLOOR = 0.45
 LATENCY_LIMIT_MS = 39_400.0
 
 
-VARIANTS = (
+VARIANTS: tuple[AblationVariant, ...] = (
     {
         "id": "control",
         "title": "Control",
@@ -126,7 +149,7 @@ def _material_primary_gain(deltas: dict[str, float]) -> bool:
     return max(deltas.values(), default=0.0) >= 0.10
 
 
-def classify_variant(control: dict, candidate: dict) -> tuple[str, str]:
+def classify_variant(control: dict, candidate: dict) -> tuple[VariantStatus, str]:
     if candidate["variant"]["id"] == "control":
         return "control", "Baseline anchor for comparison."
 
@@ -162,6 +185,59 @@ def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
             return "Neighbor expansion added nearby evidence from the same document, which improved grounding after the direct retrieval step."
         return "Neighbor expansion increased evidence breadth, but it did not materially improve citations or end-to-end success on Smoke-10."
     return "Content-only reasoning remains the baseline anchor for comparison."
+
+
+def _variant_manifest(variant: AblationVariant, *, scope: str) -> dict:
+    return {
+        "ablation": {
+            "variant_id": variant["id"],
+            "variant_name": variant["title"],
+            "variant_summary": variant["summary"],
+            "scope": scope,
+        }
+    }
+
+
+async def _run_variant(
+    *,
+    settings: Any,
+    examples: list[dict],
+    domain: str,
+    split: str,
+    subset_name: str,
+    started_at: datetime,
+    base_config: Any,
+    variant: AblationVariant,
+    run_graph_func: Any,
+    ablation_variant: str,
+    notes: str,
+    run_id_slug: str,
+    subset_label: str,
+    manifest_scope: str,
+) -> dict:
+    config = with_config_overrides(
+        base_config,
+        ablation_variant=ablation_variant,
+        ablation_options=variant["ablation_options"],
+        **variant["config_overrides"],
+    )
+    result = await evaluate_examples_async(
+        examples,
+        settings=settings,
+        domain=domain,
+        split=split,
+        subset_name=subset_name,
+        limit=None,
+        notes=notes,
+        now=started_at,
+        config=config,
+        run_id_slug=run_id_slug,
+        subset_label=subset_label,
+        run_graph_func=run_graph_func,
+        manifest_overrides=_variant_manifest(variant, scope=manifest_scope),
+    )
+    result["variant"] = variant
+    return result
 
 
 def _variant_score(result: dict) -> tuple[float, float, float, float, float]:
@@ -238,7 +314,7 @@ def _summary_table_rows(results: list[dict]) -> list[str]:
 
 def write_ablation_summary(
     *,
-    settings: Any,
+    settings: AblationSettingsLike,
     domain: str,
     limit: int,
     results: list[dict],
@@ -333,40 +409,26 @@ async def run_smoke10_ablation_async(
     selected_examples = examples[:limit]
     started_at = now or datetime.now().astimezone()
     base_config = build_eval_config(settings, domain)
+    graph_runner = run_graph_func or run_graph_async
     results: list[dict] = []
 
     for variant in VARIANTS:
-        variant_config = with_config_overrides(
-            base_config,
-            ablation_variant=variant["id"],
-            ablation_options=variant["ablation_options"],
-            **variant["config_overrides"],
-        )
-        result = await evaluate_examples_async(
-            selected_examples,
+        result = await _run_variant(
             settings=settings,
+            examples=selected_examples,
             domain=domain,
             split=split,
             subset_name=f"smoke{limit}",
-            limit=None,
+            started_at=started_at,
+            base_config=base_config,
+            variant=variant,
+            run_graph_func=graph_runner,
+            ablation_variant=variant["id"],
             notes=variant["notes"],
-            now=started_at,
-            config=variant_config,
             run_id_slug=variant["id"],
             subset_label=f"{domain} {split} / smoke first {limit} / {variant['title']}",
-            run_graph_func=run_graph_func
-            if run_graph_func is not None
-            else run_graph_async,
-            manifest_overrides={
-                "ablation": {
-                    "variant_id": variant["id"],
-                    "variant_name": variant["title"],
-                    "variant_summary": variant["summary"],
-                    "scope": f"first {limit} examples from committed smoke subset",
-                }
-            },
+            manifest_scope=f"first {limit} examples from committed smoke subset",
         )
-        result["variant"] = variant
         results.append(result)
 
     control = results[0]
@@ -381,38 +443,23 @@ async def run_smoke10_ablation_async(
         frozen_examples, frozen_subset = load_eval_examples(
             settings, domain, split, "frozen_ablation"
         )
-        variant = best["variant"]
-        variant_config = with_config_overrides(
-            base_config,
-            ablation_variant=f"{variant['id']}-frozen",
-            ablation_options=variant["ablation_options"],
-            **variant["config_overrides"],
-        )
-        frozen_result = await evaluate_examples_async(
-            frozen_examples,
+        variant = cast(AblationVariant, best["variant"])
+        frozen_result = await _run_variant(
             settings=settings,
+            examples=frozen_examples,
             domain=domain,
             split=split,
             subset_name=frozen_subset,
-            limit=None,
+            started_at=started_at,
+            base_config=base_config,
+            variant=variant,
+            run_graph_func=graph_runner,
+            ablation_variant=f"{variant['id']}-frozen",
             notes=f"Frozen-200 follow-through for {variant['title']}.",
-            now=started_at,
-            config=variant_config,
             run_id_slug=f"{variant['id']}-frozen200",
             subset_label=f"{domain} {split} / frozen 200 / {variant['title']}",
-            run_graph_func=run_graph_func
-            if run_graph_func is not None
-            else run_graph_async,
-            manifest_overrides={
-                "ablation": {
-                    "variant_id": variant["id"],
-                    "variant_name": variant["title"],
-                    "variant_summary": variant["summary"],
-                    "scope": "Frozen-200 follow-through after Smoke-10 gate",
-                }
-            },
+            manifest_scope="Frozen-200 follow-through after Smoke-10 gate",
         )
-        frozen_result["variant"] = variant
 
     summary_path = write_ablation_summary(
         settings=settings,
