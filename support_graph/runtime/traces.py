@@ -36,11 +36,6 @@ def load_trace_events(path: str | Path) -> list[dict]:
     return events
 
 
-def summarize_graph_path(events: Iterable[dict]) -> str:
-    nodes = [str(event["node"]) for event in events if event.get("node")]
-    return " -> ".join(nodes)
-
-
 def summarize_trace_events(
     events: Iterable[dict],
     *,

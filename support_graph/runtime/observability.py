@@ -40,14 +40,6 @@ class Observability:
     langsmith_project: str | None = None
     langsmith_client: Client | None = None
 
-    @property
-    def otel_enabled(self) -> bool:
-        return self.tracer is not None
-
-    @property
-    def langsmith_enabled(self) -> bool:
-        return self.langsmith_client is not None
-
     def summary(self) -> dict[str, Any]:
         summary: dict[str, Any] = {}
         if self.tracer is not None:

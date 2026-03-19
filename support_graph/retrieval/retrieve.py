@@ -61,11 +61,6 @@ class NormalizedRetrievalHit(TypedDict):
     vector_distance: float | None
 
 
-class ScoredDocumentLike(Protocol):
-    page_content: str
-    metadata: dict[str, Any]
-
-
 class VectorStoreLike(Protocol):
     def similarity_search_with_score(
         self,

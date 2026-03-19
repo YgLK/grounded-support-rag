@@ -503,30 +503,6 @@ def _format_trace_show_output(
     return lines
 
 
-def _print_pending_surface(name: str, settings: Settings, phase_label: str) -> int:
-    missing = settings.runtime_missing_fields()
-    lines = [f"SupportGraph {name}", f"State: {phase_label}"]
-    if missing:
-        lines.extend(
-            [
-                "Missing config",
-                ", ".join(missing),
-                "Next",
-                f"Inspect {settings.dotenv_path} or copy .env.example to .env.",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "Next",
-                "Phase 1 data preparation is implemented.",
-                "Phase 2+ runtime surfaces are scaffolded but not wired yet.",
-            ]
-        )
-    _print_lines(lines)
-    return 1
-
-
 def _checked_collection_row_count(
     postgres_dsn: str,
     collection_name: str,
