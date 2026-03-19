@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Protocol, TypedDict
 
 from langchain_postgres import PGVector
 
@@ -32,6 +32,50 @@ QUERY_TOKEN_STOPWORDS = {
 }
 
 
+class QueryContextTurn(TypedDict):
+    role: str
+    utterance: str
+
+
+class QueryContext(TypedDict):
+    domain: str
+    latest_user_need: str
+    last_agent_question: str
+    carry_forward_context: list[QueryContextTurn]
+
+
+class NormalizedRetrievalHit(TypedDict):
+    rank: int
+    original_rank: int
+    chunk_id: str | None
+    domain: str | None
+    doc_id: str | None
+    doc_title: str | None
+    section_id: str | None
+    section_title: str | None
+    parent_titles: list[str]
+    span_ids: list[str]
+    token_count: int | None
+    text: str
+    score: float | None
+    vector_distance: float | None
+
+
+class ScoredDocumentLike(Protocol):
+    page_content: str
+    metadata: dict[str, Any]
+
+
+class VectorStoreLike(Protocol):
+    def similarity_search_with_score(
+        self,
+        query: str,
+        *,
+        k: int = 5,
+        filter: dict | None = None,
+    ) -> list[Any]: ...
+
+
 def _conversation_from_example(example: dict) -> list[dict]:
     if example.get("conversation"):
         return list(example.get("conversation", []))
@@ -48,6 +92,10 @@ def _latest_user_utterance(example: dict, conversation: list[dict]) -> str:
         if turn.get("role") == "user" and turn.get("utterance"):
             return str(turn.get("utterance"))
     return ""
+
+
+def _domain_from_example(example: dict) -> str:
+    return str(example.get("domain_hint") or example.get("domain") or "").strip()
 
 
 def _normalize_tokens(
@@ -109,11 +157,11 @@ def _is_duplicate_or_substring_variant(candidate: str, latest_user: str) -> bool
     )
 
 
-def build_query_context(example: dict) -> dict:
+def build_query_context(example: dict) -> QueryContext:
     conversation = _conversation_from_example(example)
     latest_user = _latest_user_utterance(example, conversation).strip()
     latest_user_index = _find_latest_user_index(example, conversation)
-    domain = str(example.get("domain_hint") or example.get("domain") or "").strip()
+    domain = _domain_from_example(example)
 
     last_agent_question = ""
     if latest_user_index is not None and latest_user_index > 0:
@@ -122,8 +170,8 @@ def build_query_context(example: dict) -> dict:
         if preceding_turn.get("role") == "agent" and preceding_text.endswith("?"):
             last_agent_question = preceding_text
 
-    user_context: list[dict] = []
-    agent_context: list[dict] = []
+    user_context: list[QueryContextTurn] = []
+    agent_context: list[QueryContextTurn] = []
     prior_turns = (
         conversation[:latest_user_index]
         if latest_user_index is not None
@@ -137,7 +185,7 @@ def build_query_context(example: dict) -> dict:
             continue
         if _is_duplicate_or_substring_variant(utterance, latest_user):
             continue
-        candidate = {
+        candidate: QueryContextTurn = {
             "role": str(turn.get("role", "")).strip() or "unknown",
             "utterance": utterance,
         }
@@ -155,7 +203,11 @@ def build_query_context(example: dict) -> dict:
     }
 
 
-def _render_query_context(context: dict, *, include_history: bool = True) -> str:
+def _render_query_context(
+    context: QueryContext,
+    *,
+    include_history: bool = True,
+) -> str:
     parts: list[str] = []
     if context.get("domain"):
         parts.append(f"Domain: {context['domain']}")
@@ -163,14 +215,12 @@ def _render_query_context(context: dict, *, include_history: bool = True) -> str
         parts.append(f"Latest user need: {context['latest_user_need']}")
     if include_history and context.get("last_agent_question"):
         parts.append(f"Last agent question: {context['last_agent_question']}")
-    carry_forward = (
-        list(context.get("carry_forward_context", [])) if include_history else []
-    )
+    carry_forward = list(context["carry_forward_context"]) if include_history else []
     if carry_forward:
         parts.append("Carry-forward context:")
         for turn in carry_forward:
-            role = str(turn.get("role", "")).strip().title() or "Unknown"
-            parts.append(f"- {role}: {str(turn.get('utterance', '')).strip()}")
+            role = turn["role"].strip().title() or "Unknown"
+            parts.append(f"- {role}: {turn['utterance'].strip()}")
     return "\n".join(parts).strip()
 
 
@@ -183,7 +233,11 @@ def build_query(
     del history_turn_limit
     context = build_query_context(example)
     if not include_history:
-        context = {**context, "last_agent_question": "", "carry_forward_context": []}
+        context = {
+            **context,
+            "last_agent_question": "",
+            "carry_forward_context": [],
+        }
     return _render_query_context(context, include_history=include_history)
 
 
@@ -195,7 +249,7 @@ def build_legacy_query(
 ) -> str:
     conversation = _conversation_from_example(example)
     latest_user = _latest_user_utterance(example, conversation)
-    domain = example.get("domain_hint") or example.get("domain") or ""
+    domain = _domain_from_example(example)
 
     history_lines = [
         f"{str(turn.get('role', '')).title()}: {turn.get('utterance', '')}"
@@ -215,16 +269,16 @@ def build_legacy_query(
     return "\n".join(parts).strip()
 
 
-def query_context_tokens(context: dict) -> set[str]:
+def query_context_tokens(context: QueryContext) -> set[str]:
     values: list[str] = []
-    if context.get("domain"):
-        values.append(str(context["domain"]))
-    if context.get("latest_user_need"):
-        values.append(str(context["latest_user_need"]))
-    if context.get("last_agent_question"):
-        values.append(str(context["last_agent_question"]))
-    for turn in context.get("carry_forward_context", []):
-        values.append(str(turn.get("utterance", "")))
+    if context["domain"]:
+        values.append(context["domain"])
+    if context["latest_user_need"]:
+        values.append(context["latest_user_need"])
+    if context["last_agent_question"]:
+        values.append(context["last_agent_question"])
+    for turn in context["carry_forward_context"]:
+        values.append(turn["utterance"])
     return set(
         _normalize_tokens(" ".join(values), minimum_length=3, drop_stopwords=True)
     )
@@ -253,24 +307,28 @@ def build_metadata_filter(
     return filters or None
 
 
-def normalize_retrieval_hits(hits: list[Any]) -> list[dict]:
-    normalized: list[dict] = []
-    for index, hit in enumerate(hits, start=1):
-        if isinstance(hit, tuple):
-            document, score = hit
-        elif isinstance(hit, dict):
-            document = hit
-            score = hit.get("score")
-        else:
-            document = hit
-            score = getattr(hit, "score", None)
+def _hit_document_and_score(hit: Any) -> tuple[Any, float | None]:
+    if isinstance(hit, tuple):
+        document, score = hit
+        return document, score
+    if isinstance(hit, dict):
+        return hit, hit.get("score")
+    return hit, getattr(hit, "score", None)
 
-        if isinstance(document, dict):
-            page_content = document.get("page_content", "")
-            metadata = document.get("metadata", {}) or {}
-        else:
-            page_content = getattr(document, "page_content", "")
-            metadata = getattr(document, "metadata", {}) or {}
+
+def _document_page_content_and_metadata(
+    document: Any,
+) -> tuple[str, dict[str, Any]]:
+    if isinstance(document, dict):
+        return str(document.get("page_content", "")), document.get("metadata", {}) or {}
+    return document.page_content, document.metadata or {}
+
+
+def normalize_retrieval_hits(hits: list[Any]) -> list[NormalizedRetrievalHit]:
+    normalized: list[NormalizedRetrievalHit] = []
+    for index, hit in enumerate(hits, start=1):
+        document, score = _hit_document_and_score(hit)
+        page_content, metadata = _document_page_content_and_metadata(document)
 
         normalized.append(
             {
@@ -293,30 +351,6 @@ def normalize_retrieval_hits(hits: list[Any]) -> list[dict]:
     return normalized
 
 
-def _is_heading_like(hit: dict) -> bool:
-    text = " ".join(str(hit.get("text", "")).split()).strip()
-    section_title = " ".join(str(hit.get("section_title", "")).split()).strip()
-    section_id = str(hit.get("section_id", "")).strip()
-    span_ids = hit.get("span_ids", [])
-    token_count = hit.get("token_count")
-
-    normalized_text = text.lower().rstrip(".")
-    normalized_title = section_title.lower().rstrip(".")
-    if section_id.startswith("t_"):
-        return True
-    if (
-        normalized_text
-        and normalized_text == normalized_title
-        and (token_count is None or token_count <= 16)
-    ):
-        return True
-    if len(span_ids) <= 1 and len(text.split()) <= 16 and text.endswith("?"):
-        return True
-    if len(span_ids) <= 1 and len(text.split()) <= 10:
-        return True
-    return False
-
-
 def _overlap_count(query_tokens: set[str], text: str) -> int:
     if not query_tokens or not text:
         return 0
@@ -327,7 +361,9 @@ def _overlap_count(query_tokens: set[str], text: str) -> int:
 
 
 def rerank_retrieval_hits(
-    hits: list[dict], *, query_context: dict | None = None
+    hits: list[dict],
+    *,
+    query_context: QueryContext | None = None,
 ) -> list[dict]:
     reranked = [dict(hit) for hit in hits]
     query_tokens = query_context_tokens(query_context or {})
@@ -394,12 +430,12 @@ def get_vectorstore(
 def retrieve_chunks(
     *,
     example: dict,
-    vectorstore: Any = None,
+    vectorstore: VectorStoreLike | None = None,
     config: RuntimeConfigLike | None = None,
     top_k: int = 5,
     candidate_k: int | None = None,
     query: str | None = None,
-    query_context: dict | None = None,
+    query_context: QueryContext | None = None,
     domain: str | None = None,
     doc_id: str | None = None,
     doc_ids: list[str] | None = None,
@@ -407,31 +443,26 @@ def retrieve_chunks(
 ) -> list[dict]:
     resolved_query_context = query_context or build_query_context(example)
     resolved_query = query or build_query(example)
-    resolved_domain = domain or example.get("domain_hint") or example.get("domain")
+    resolved_domain = domain or _domain_from_example(example)
     metadata_filter = build_metadata_filter(
         domain=resolved_domain,
         doc_id=doc_id,
         doc_ids=doc_ids,
     )
 
-    resolved_vectorstore = vectorstore
-    if resolved_vectorstore is None:
+    if vectorstore is None:
         if config is None:
             raise ValueError("retrieve_chunks requires either vectorstore or config.")
-        resolved_vectorstore = get_vectorstore(config)
+        vectorstore = get_vectorstore(config)
 
     resolved_top_k = max(1, int(top_k))
-    resolved_candidate_k = max(
-        resolved_top_k,
-        int(
-            candidate_k
-            if candidate_k is not None
-            else (
-                config.retrieval_candidate_k if config is not None else resolved_top_k
-            )
-        ),
-    )
-    hits = resolved_vectorstore.similarity_search_with_score(
+    resolved_candidate_k = candidate_k
+    if resolved_candidate_k is None:
+        resolved_candidate_k = (
+            config.retrieval_candidate_k if config is not None else resolved_top_k
+        )
+    resolved_candidate_k = max(resolved_top_k, int(resolved_candidate_k))
+    hits = vectorstore.similarity_search_with_score(
         resolved_query,
         k=resolved_candidate_k,
         filter=metadata_filter,
