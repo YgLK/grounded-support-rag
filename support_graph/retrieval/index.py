@@ -8,10 +8,10 @@ from typing import Any
 
 import psycopg
 from langchain_core.documents import Document
-from langchain_ollama import OllamaEmbeddings
 from langchain_postgres import PGVector
 
 from support_graph.config.runtime import IndexConfigLike
+from support_graph.providers import build_embeddings as build_provider_embeddings
 
 
 def build_collection_name(domain: str) -> str:
@@ -55,33 +55,19 @@ def validate_index_config(config: IndexConfigLike) -> None:
     if not config.embedding_model:
         missing.append("embedding_model")
 
-    provider_type = config.provider_type or "ollama"
-    if provider_type != "ollama":
-        raise ValueError(f"Unsupported provider_type for Phase 2: {provider_type}")
-
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"Missing required index config: {joined}")
 
 
 def build_embeddings(
-    config: IndexConfigLike, embeddings_cls: type[OllamaEmbeddings] = OllamaEmbeddings
+    config: IndexConfigLike,
+    embeddings_cls: type[Any] | None = None,
 ) -> Any:
     validate_index_config(config)
-
-    if config.embedding_client is not None:
-        return config.embedding_client
-
-    provider_type = config.provider_type
-    base_url = config.ollama_base_url
-
-    # Tests can inject a plain value without full provider metadata.
-    if provider_type is None and base_url is None:
-        return config.embedding_model
-
-    return embeddings_cls(
-        model=config.embedding_model,
-        base_url=base_url,
+    return build_provider_embeddings(
+        config,
+        embeddings_cls=embeddings_cls,
     )
 
 

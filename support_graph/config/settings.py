@@ -25,16 +25,67 @@ def _resolve_path(
     return path
 
 
+def _find_closing_quote(value: str, quote: str) -> int | None:
+    escaped = False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == quote:
+            return index
+    return None
+
+
+def _parse_dotenv_value(
+    lines: list[str],
+    *,
+    line_index: int,
+    raw_value: str,
+) -> tuple[str, int]:
+    value = raw_value.strip()
+    if not value or value[0] not in {'"', "'"}:
+        return value, line_index
+
+    quote = value[0]
+    parts = [value[1:]]
+    next_index = line_index
+    while True:
+        closing_index = _find_closing_quote(parts[-1], quote)
+        if closing_index is not None:
+            parts[-1] = parts[-1][:closing_index]
+            break
+        if next_index >= len(lines):
+            break
+        parts.append(lines[next_index])
+        next_index += 1
+    return "\n".join(parts), next_index
+
+
 def _read_dotenv(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    lines = path.read_text(encoding="utf-8").splitlines()
+    line_index = 0
+    while line_index < len(lines):
+        raw_line = lines[line_index]
+        line_index += 1
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
+        normalized_key = key.strip()
+        if not normalized_key:
+            continue
+        parsed_value, line_index = _parse_dotenv_value(
+            lines,
+            line_index=line_index,
+            raw_value=value,
+        )
+        values[normalized_key] = parsed_value
     return values
 
 
@@ -57,6 +108,12 @@ def _float_value(value: str | None, default: float) -> float:
     return float(value)
 
 
+def _bool_value(value: str | None, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
@@ -64,7 +121,12 @@ class Settings:
     enabled_domains: tuple[str, ...]
     postgres_dsn: str | None
     provider_type: str
+    embedding_provider_type: str | None
     ollama_base_url: str
+    openai_base_url: str | None
+    openai_api_key: str | None
+    anthropic_base_url: str | None
+    anthropic_api_key: str | None
     chat_model: str | None
     embedding_model: str | None
     prompt_version: str
@@ -75,6 +137,15 @@ class Settings:
     llm_max_retries: int
     llm_retry_base_delay_seconds: float
     llm_retry_max_delay_seconds: float
+    langsmith_tracing_enabled: bool
+    langsmith_project: str | None
+    langsmith_api_key: str | None
+    langsmith_endpoint: str | None
+    otel_enabled: bool
+    otel_service_name: str
+    otel_exporter: str | None
+    otel_endpoint: str | None
+    otel_headers: str | None
     trace_dir: Path
     eval_dir: Path
     derived_dir: Path
@@ -120,9 +191,23 @@ class Settings:
             ),
             postgres_dsn=env.get("SUPPORT_GRAPH_POSTGRES_DSN") or None,
             provider_type=env.get("SUPPORT_GRAPH_PROVIDER_TYPE", "ollama"),
+            embedding_provider_type=env.get("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
+            or None,
             ollama_base_url=env.get(
                 "SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"
             ),
+            openai_base_url=env.get("SUPPORT_GRAPH_OPENAI_BASE_URL")
+            or env.get("OPENAI_BASE_URL")
+            or None,
+            openai_api_key=env.get("SUPPORT_GRAPH_OPENAI_API_KEY")
+            or env.get("OPENAI_API_KEY")
+            or None,
+            anthropic_base_url=env.get("SUPPORT_GRAPH_ANTHROPIC_BASE_URL")
+            or env.get("ANTHROPIC_BASE_URL")
+            or None,
+            anthropic_api_key=env.get("SUPPORT_GRAPH_ANTHROPIC_API_KEY")
+            or env.get("ANTHROPIC_API_KEY")
+            or None,
             chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
             embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
             prompt_version=env.get("SUPPORT_GRAPH_PROMPT_VERSION", "v1"),
@@ -143,6 +228,32 @@ class Settings:
             llm_retry_max_delay_seconds=_float_value(
                 env.get("SUPPORT_GRAPH_LLM_RETRY_MAX_DELAY_SECONDS"), 4.0
             ),
+            langsmith_tracing_enabled=_bool_value(
+                env.get("SUPPORT_GRAPH_LANGSMITH_TRACING_ENABLED")
+                or env.get("LANGSMITH_TRACING")
+                or env.get("LANGCHAIN_TRACING_V2"),
+                False,
+            ),
+            langsmith_project=env.get("SUPPORT_GRAPH_LANGSMITH_PROJECT")
+            or env.get("LANGSMITH_PROJECT")
+            or None,
+            langsmith_api_key=env.get("SUPPORT_GRAPH_LANGSMITH_API_KEY")
+            or env.get("LANGSMITH_API_KEY")
+            or None,
+            langsmith_endpoint=env.get("SUPPORT_GRAPH_LANGSMITH_ENDPOINT")
+            or env.get("LANGSMITH_ENDPOINT")
+            or None,
+            otel_enabled=_bool_value(env.get("SUPPORT_GRAPH_OTEL_ENABLED"), False),
+            otel_service_name=env.get(
+                "SUPPORT_GRAPH_OTEL_SERVICE_NAME", "support-graph"
+            ),
+            otel_exporter=env.get("SUPPORT_GRAPH_OTEL_EXPORTER") or None,
+            otel_endpoint=env.get("SUPPORT_GRAPH_OTEL_ENDPOINT")
+            or env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+            or None,
+            otel_headers=env.get("SUPPORT_GRAPH_OTEL_HEADERS")
+            or env.get("OTEL_EXPORTER_OTLP_HEADERS")
+            or None,
             trace_dir=trace_dir,
             eval_dir=eval_dir,
             derived_dir=derived_dir,
@@ -168,7 +279,16 @@ class Settings:
             missing.append("SUPPORT_GRAPH_POSTGRES_DSN")
         if not self.embedding_model:
             missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        return missing
+        embedding_provider = (
+            (self.embedding_provider_type or self.provider_type or "ollama")
+            .strip()
+            .lower()
+        )
+        if embedding_provider == "anthropic":
+            missing.append("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
+        elif embedding_provider == "openai" and not self.openai_api_key:
+            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
+        return list(dict.fromkeys(missing))
 
     def runtime_missing_fields(self) -> list[str]:
         missing: list[str] = []
@@ -178,4 +298,19 @@ class Settings:
             missing.append("SUPPORT_GRAPH_CHAT_MODEL")
         if not self.embedding_model:
             missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        return missing
+        provider = (self.provider_type or "ollama").strip().lower()
+        if provider == "openai" and not self.openai_api_key:
+            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
+        elif provider == "anthropic" and not self.anthropic_api_key:
+            missing.append("SUPPORT_GRAPH_ANTHROPIC_API_KEY")
+
+        embedding_provider = (
+            (self.embedding_provider_type or self.provider_type or "ollama")
+            .strip()
+            .lower()
+        )
+        if embedding_provider == "anthropic":
+            missing.append("SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE")
+        elif embedding_provider == "openai" and not self.openai_api_key:
+            missing.append("SUPPORT_GRAPH_OPENAI_API_KEY")
+        return list(dict.fromkeys(missing))

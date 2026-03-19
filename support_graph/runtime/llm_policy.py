@@ -11,6 +11,7 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_exponential_jitter
 
 from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.providers import chat_provider_base_url
 
 
 _T = TypeVar("_T")
@@ -27,7 +28,7 @@ def shared_llm_semaphore(config: RuntimeConfigLike) -> asyncio.Semaphore:
     key = (
         id(loop),
         str(config.provider_type),
-        str(config.ollama_base_url or ""),
+        str(chat_provider_base_url(config) or ""),
         str(config.chat_model or ""),
         max_concurrency,
     )

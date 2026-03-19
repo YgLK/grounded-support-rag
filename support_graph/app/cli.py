@@ -187,16 +187,36 @@ def _format_eval_output(result: dict, settings: Settings) -> list[str]:
     generation = result.get("metrics", {}).get("generation", {}).get("answer", {})
     failure_counts = result.get("failure_counts", {})
     output_dir = Path(result.get("output_dir"))
+    retrieval_top_k = result.get("retrieval_top_k", settings.retrieval_top_k)
+
+    def format_metric(value: float | None, *, metric_k: int | None = None) -> str:
+        if value is not None:
+            return f"{value:.3f}"
+        if (
+            metric_k is not None
+            and retrieval_top_k is not None
+            and retrieval_top_k < metric_k
+        ):
+            return f"n/a (retrieval_top_k={retrieval_top_k})"
+        return "n/a"
+
     lines = [
         "SupportGraph Eval",
         f"Run: {result.get('run_id')}",
         f"Subset: {result.get('subset_label')}",
         "",
         "Headline Metrics",
-        f"Doc Recall@3: {(retrieval.get('doc_recall_at_3') or 0.0):.3f}",
-        f"Span Recall@5: {(retrieval.get('span_recall_at_5') or 0.0):.3f}",
-        f"ROUGE-L: {(generation.get('rouge_l') or 0.0):.3f}",
-        f"F1: {(generation.get('token_f1') or 0.0):.3f}",
+        f"Doc Recall@3: {format_metric(retrieval.get('doc_recall_at_3'), metric_k=3)}",
+        f"Span Recall@5: {format_metric(retrieval.get('span_recall_at_5'), metric_k=5)}",
+        f"ROUGE-L: {format_metric(generation.get('rouge_l'))}",
+        f"F1: {format_metric(generation.get('token_f1'))}",
+        "",
+        "Paper Reference",
+        f"Recall@1: {format_metric(retrieval.get('doc_recall_at_1'), metric_k=1)}",
+        f"Recall@5: {format_metric(retrieval.get('doc_recall_at_5'), metric_k=5)}",
+        f"Recall@10: {format_metric(retrieval.get('doc_recall_at_10'), metric_k=10)}",
+        f"Exact Match: {format_metric(generation.get('exact_match'))}",
+        f"SacreBLEU: {format_metric(generation.get('sacrebleu'))}",
         "",
         "Failure Snapshot",
     ]
@@ -334,6 +354,22 @@ def _format_trace_show_output(
 ) -> list[str]:
     node_latency_ms = trace_summary.get("node_latency_ms", {})
     fallbacks = trace_summary.get("fallbacks", [])
+    observability = trace_summary.get("observability", {})
+    observability_lines: list[str] = []
+    if observability:
+        otel = observability.get("opentelemetry", {})
+        langsmith = observability.get("langsmith", {})
+        if otel.get("enabled"):
+            observability_lines.append(
+                "OpenTelemetry: {service} via {exporter}".format(
+                    service=otel.get("service_name", "support-graph"),
+                    exporter=otel.get("exporter", "console"),
+                )
+            )
+        if langsmith.get("enabled"):
+            observability_lines.append(
+                f"LangSmith: {langsmith.get('project', 'support-graph')}"
+            )
     lines = [
         "SupportGraph Trace Show",
         f"Run: {run_id}",
@@ -365,6 +401,9 @@ def _format_trace_show_output(
             )
     else:
         lines.append("none")
+
+    lines.extend(["", "Observability"])
+    lines.extend(observability_lines or ["none"])
 
     lines.extend(
         [

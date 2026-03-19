@@ -57,12 +57,16 @@ def summarize_trace_events(
     retrieval_ranked_count = 0
     retrieved_count = 0
     fallback_events: list[dict] = []
+    observability: dict = {}
 
     for event in ordered_events:
         node = str(event.get("node") or "").strip()
         latency_ms = event.get("latency_ms")
         if node and latency_ms is not None:
             node_latency_ms.setdefault(node, []).append(float(latency_ms))
+        raw_observability = event.get("observability")
+        if isinstance(raw_observability, dict):
+            observability = dict(raw_observability)
         raw_fallback = event.get("fallback")
         if isinstance(raw_fallback, dict):
             fallback = dict(raw_fallback)
@@ -107,6 +111,8 @@ def summarize_trace_events(
         ],
         "fallbacks": fallback_events,
     }
+    if observability:
+        summary["observability"] = observability
     if trace_path is not None:
         summary["trace_path"] = str(trace_path)
     return summary

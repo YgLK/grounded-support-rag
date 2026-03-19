@@ -11,6 +11,7 @@ from typing import Any, Literal, TypedDict, cast
 from pydantic import BaseModel, Field
 
 from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.runtime.observability import Observability
 from support_graph.runtime.prompts import PromptSet
 
 
@@ -124,6 +125,16 @@ class Runtime:
     run_id: str
     event_sink: GraphEventSink | None = None
     stream_responses: bool = False
+    observability: Observability | None = None
+
+
+@dataclass(slots=True)
+class RuntimeResources:
+    vectorstore: Any
+    chat_model: Any
+    chunk_records_by_doc: dict[str, list[dict]]
+    prompts: PromptSet
+    llm_semaphore: asyncio.Semaphore
 
 
 def attach_fallback_metadata(
@@ -168,6 +179,7 @@ __all__ = [
     "GraphState",
     "ResponseModel",
     "Runtime",
+    "RuntimeResources",
     "attach_fallback_metadata",
     "fallback_metadata",
     "strip_internal_fields",

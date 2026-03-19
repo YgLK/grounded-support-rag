@@ -13,6 +13,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+from sacrebleu.metrics import BLEU
+
 from support_graph.config.runtime import (
     RuntimeConfig,
     RuntimeSettingsLike,
@@ -26,11 +28,13 @@ from support_graph.data.examples import (
     load_examples_jsonl,
     write_examples_jsonl,
 )
-from support_graph.runtime.graph import run_graph_async
+from support_graph.providers import chat_provider_base_url, embedding_provider_base_url
+from support_graph.runtime.graph import resolve_runtime_resources_async, run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 
 
 END_TO_END_TEXT_THRESHOLD = 0.35
+_SACREBLEU = BLEU(effective_order=True)
 MANUAL_REVIEW_COLUMNS = [
     "run_id",
     "example_id",
@@ -100,6 +104,24 @@ def token_f1(prediction: str, reference: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
+def exact_match(prediction: str, reference: str) -> float:
+    normalized_prediction = " ".join(_normalize_text(prediction))
+    normalized_reference = " ".join(_normalize_text(reference))
+    if not normalized_prediction or not normalized_reference:
+        return 0.0
+    return 1.0 if normalized_prediction == normalized_reference else 0.0
+
+
+def sacrebleu_score(prediction: str, reference: str) -> float:
+    cleaned_prediction = str(prediction).strip()
+    cleaned_reference = str(reference).strip()
+    if not cleaned_prediction or not cleaned_reference:
+        return 0.0
+    return (
+        _SACREBLEU.sentence_score(cleaned_prediction, [cleaned_reference]).score / 100.0
+    )
+
+
 def doc_recall_at_k(
     gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 3
 ) -> float | None:
@@ -160,6 +182,10 @@ def citations_map_to_retrieved(
     return all(chunk_id in retrieved_chunk_ids for chunk_id in citation_chunk_ids)
 
 
+def _retrieval_metric_available(retrieval_top_k: int | None, *, k: int) -> bool:
+    return retrieval_top_k is None or int(retrieval_top_k) >= k
+
+
 def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
     target_mode = example.get("target_mode")
     decision = prediction.get("decision")
@@ -167,30 +193,27 @@ def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None
         if decision == "clarify":
             return "bad_clarification"
         if decision == "abstain":
-            if (
-                metrics.get("doc_recall_at_3", 0.0) > 0
-                or metrics.get("span_recall_at_5", 0.0) > 0
+            if ((metrics.get("doc_recall_at_3") or 0.0) > 0) or (
+                (metrics.get("span_recall_at_5") or 0.0) > 0
             ):
                 return "abstained_with_evidence"
             return "wrong_doc"
-        if metrics.get("doc_recall_at_3", 0.0) == 0.0:
+        if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
             if len(example.get("turns_before_target", [])) >= 3:
                 return "missed_history"
             return "wrong_doc"
-        if (
-            metrics.get("doc_recall_at_3", 0.0) > 0.0
-            and metrics.get("span_recall_at_5", 0.0) == 0.0
-        ):
+        if (metrics.get("doc_recall_at_3") or 0.0) > 0.0 and (
+            metrics.get("span_recall_at_5") or 0.0
+        ) == 0.0:
             return "right_doc_wrong_section"
-        if (
-            metrics.get("citations_valid", 0.0) == 0.0
-            or metrics.get("citation_coverage", 0.0) < 1.0
-        ):
+        if (metrics.get("citations_valid") or 0.0) == 0.0 or (
+            metrics.get("citation_coverage") or 0.0
+        ) < 1.0:
             return "weak_citations"
-        if metrics.get("end_to_end_success", 0.0) == 0.0:
+        if (metrics.get("end_to_end_success") or 0.0) == 0.0:
             return "unsupported_answer"
         return None
-    if metrics.get("doc_recall_at_3", 0.0) == 0.0:
+    if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
         return "wrong_doc"
     return None
 
@@ -237,22 +260,52 @@ def build_run_id(
     return "-".join(parts)
 
 
-def _prediction_metrics(example: dict, prediction: dict) -> dict:
+def _prediction_metrics(
+    example: dict,
+    prediction: dict,
+    *,
+    retrieval_top_k: int | None = None,
+) -> dict:
     target_text = str(example.get("target_turn", {}).get("utterance", ""))
     retrieval_ranked_chunks = prediction.get(
         "retrieval_ranked_chunks", prediction.get("retrieved_chunks", [])
     )
     retrieved_chunks = prediction.get("retrieved_chunks", retrieval_ranked_chunks)
     citations = prediction.get("citations", [])
-    doc_recall = doc_recall_at_k(
-        example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=3
+    doc_recall_at_1 = (
+        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=1)
+        if _retrieval_metric_available(retrieval_top_k, k=1)
+        else None
     )
-    span_recall = span_recall_at_k(
-        example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5
+    doc_recall = (
+        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=3)
+        if _retrieval_metric_available(retrieval_top_k, k=3)
+        else None
     )
-    mrr = mrr_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=5)
+    doc_recall_at_5 = (
+        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=5)
+        if _retrieval_metric_available(retrieval_top_k, k=5)
+        else None
+    )
+    doc_recall_at_10 = (
+        doc_recall_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=10)
+        if _retrieval_metric_available(retrieval_top_k, k=10)
+        else None
+    )
+    span_recall = (
+        span_recall_at_k(example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5)
+        if _retrieval_metric_available(retrieval_top_k, k=5)
+        else None
+    )
+    mrr = (
+        mrr_at_k(example.get("gold_doc_ids", []), retrieval_ranked_chunks, k=5)
+        if _retrieval_metric_available(retrieval_top_k, k=5)
+        else None
+    )
     rouge = rouge_l_f1(str(prediction.get("response_text", "")), target_text)
     f1 = token_f1(str(prediction.get("response_text", "")), target_text)
+    em = exact_match(str(prediction.get("response_text", "")), target_text)
+    bleu = sacrebleu_score(str(prediction.get("response_text", "")), target_text)
     citation_cov = citation_coverage(example.get("gold_span_ids", []), citations)
     citations_valid = (
         1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
@@ -267,11 +320,16 @@ def _prediction_metrics(example: dict, prediction: dict) -> dict:
         and text_success
     )
     return {
+        "doc_recall_at_1": doc_recall_at_1,
         "doc_recall_at_3": doc_recall,
+        "doc_recall_at_5": doc_recall_at_5,
+        "doc_recall_at_10": doc_recall_at_10,
         "span_recall_at_5": span_recall,
         "mrr_at_5": mrr,
         "rouge_l": rouge,
         "token_f1": f1,
+        "exact_match": em,
+        "sacrebleu": bleu,
         "citation_coverage": citation_cov,
         "citations_valid": citations_valid,
         "end_to_end_success": 1.0 if end_to_end_success else 0.0,
@@ -283,6 +341,23 @@ def _safe_mean(values: list[float | None]) -> float | None:
     if not present:
         return None
     return mean(present)
+
+
+def _metric_display(
+    value: float | None,
+    *,
+    retrieval_top_k: int | None = None,
+    metric_k: int | None = None,
+) -> str:
+    if value is not None:
+        return f"{value:.3f}"
+    if (
+        metric_k is not None
+        and retrieval_top_k is not None
+        and int(retrieval_top_k) < metric_k
+    ):
+        return f"n/a (retrieval_top_k={int(retrieval_top_k)})"
+    return "n/a"
 
 
 def _rate_map(records: list[dict], key: str) -> dict[str, float]:
@@ -303,8 +378,17 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
 
     def retrieval_metrics(records: list[dict]) -> dict:
         return {
+            "doc_recall_at_1": _safe_mean(
+                [record["metrics"].get("doc_recall_at_1") for record in records]
+            ),
             "doc_recall_at_3": _safe_mean(
                 [record["metrics"].get("doc_recall_at_3") for record in records]
+            ),
+            "doc_recall_at_5": _safe_mean(
+                [record["metrics"].get("doc_recall_at_5") for record in records]
+            ),
+            "doc_recall_at_10": _safe_mean(
+                [record["metrics"].get("doc_recall_at_10") for record in records]
             ),
             "span_recall_at_5": _safe_mean(
                 [record["metrics"].get("span_recall_at_5") for record in records]
@@ -349,6 +433,18 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
                 ),
                 "token_f1": _safe_mean(
                     [record["metrics"].get("token_f1") for record in answer_predictions]
+                ),
+                "exact_match": _safe_mean(
+                    [
+                        record["metrics"].get("exact_match")
+                        for record in answer_predictions
+                    ]
+                ),
+                "sacrebleu": _safe_mean(
+                    [
+                        record["metrics"].get("sacrebleu")
+                        for record in answer_predictions
+                    ]
                 ),
                 "citation_coverage": _safe_mean(
                     [
@@ -525,6 +621,8 @@ def _summary_lines(
     failure_counts: dict[str, int],
     notes: str | None,
     output_dir: Path,
+    *,
+    retrieval_top_k: int | None = None,
 ) -> list[str]:
     retrieval = metrics["retrieval"]["answer"]
     generation = metrics["generation"]["answer"]
@@ -538,12 +636,19 @@ def _summary_lines(
         f"- {notes or 'Phase 4 MVP eval harness run.'}",
         "",
         "## Headline Metrics",
-        f"- Doc Recall@3: {retrieval.get('doc_recall_at_3', 0.0) or 0.0:.3f}",
-        f"- Span Recall@5: {retrieval.get('span_recall_at_5', 0.0) or 0.0:.3f}",
-        f"- MRR@5: {retrieval.get('mrr_at_5', 0.0) or 0.0:.3f}",
-        f"- ROUGE-L: {generation.get('rouge_l', 0.0) or 0.0:.3f}",
-        f"- F1: {generation.get('token_f1', 0.0) or 0.0:.3f}",
-        f"- Citation coverage: {generation.get('citation_coverage', 0.0) or 0.0:.3f}",
+        f"- Doc Recall@3: {_metric_display(retrieval.get('doc_recall_at_3'), retrieval_top_k=retrieval_top_k, metric_k=3)}",
+        f"- Span Recall@5: {_metric_display(retrieval.get('span_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
+        f"- MRR@5: {_metric_display(retrieval.get('mrr_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
+        f"- ROUGE-L: {_metric_display(generation.get('rouge_l'))}",
+        f"- F1: {_metric_display(generation.get('token_f1'))}",
+        f"- Citation coverage: {_metric_display(generation.get('citation_coverage'))}",
+        "",
+        "## Paper-Reference Metrics",
+        f"- Recall@1: {_metric_display(retrieval.get('doc_recall_at_1'), retrieval_top_k=retrieval_top_k, metric_k=1)}",
+        f"- Recall@5: {_metric_display(retrieval.get('doc_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
+        f"- Recall@10: {_metric_display(retrieval.get('doc_recall_at_10'), retrieval_top_k=retrieval_top_k, metric_k=10)}",
+        f"- Exact Match: {_metric_display(generation.get('exact_match'))}",
+        f"- SacreBLEU: {_metric_display(generation.get('sacrebleu'))}",
         "",
         "## Biggest Wins",
         f"- Retrieval is working over {metrics['counts']['examples']} evaluated examples.",
@@ -590,6 +695,55 @@ async def _maybe_await_result(value: Any) -> Any:
     return value
 
 
+def _runtime_error_record(
+    example: dict,
+    exc: Exception,
+    *,
+    retrieval_top_k: int | None = None,
+) -> dict:
+    prediction = {
+        "decision": "abstain",
+        "response_text": "",
+        "citations": [],
+        "retrieval_ranked_chunks": [],
+        "retrieved_chunks": [],
+        "trace_summary": {
+            "retrieval_attempts": 0,
+            "graph_path": [],
+            "latency_ms": None,
+            "trace_path": "",
+            "error": str(exc),
+            "exception_type": type(exc).__name__,
+        },
+        "latest_user_utterance": example.get("latest_user_utterance"),
+    }
+    return {
+        "example_id": example.get("example_id"),
+        "target_mode": example.get("target_mode"),
+        "target_turn_id": example.get("target_turn_id"),
+        "latest_user_utterance": example.get("latest_user_utterance"),
+        "gold_doc_ids": example.get("gold_doc_ids", []),
+        "gold_span_ids": example.get("gold_span_ids", []),
+        "target_text": example.get("target_turn", {}).get("utterance", ""),
+        "decision": prediction.get("decision"),
+        "response_text": prediction.get("response_text"),
+        "citations": prediction.get("citations", []),
+        "retrieval_ranked_chunks": prediction.get("retrieval_ranked_chunks", []),
+        "retrieved_chunks": prediction.get("retrieved_chunks", []),
+        "trace_summary": prediction.get("trace_summary", {}),
+        "metrics": _prediction_metrics(
+            example,
+            prediction,
+            retrieval_top_k=retrieval_top_k,
+        ),
+        "failure_label": "runtime_error",
+        "runtime_error": {
+            "exception_type": type(exc).__name__,
+            "error": str(exc),
+        },
+    }
+
+
 async def evaluate_examples_async(
     examples: list[dict],
     *,
@@ -615,20 +769,37 @@ async def evaluate_examples_async(
     output_dir = settings.eval_dir / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_config = config or build_eval_config(settings, domain)
+    shared_runtime_resources = None
+    if run_graph_func is run_graph_async:
+        shared_runtime_resources = await resolve_runtime_resources_async(
+            resolved_config
+        )
 
     semaphore = asyncio.Semaphore(max(1, int(max_concurrency)))
 
     async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
-        async with semaphore:
-            prediction = await _maybe_await_result(
-                run_graph_func(
-                    example=example,
-                    config=resolved_config,
-                    max_attempts=resolved_config.max_retrieval_attempts,
-                    trace_dir=settings.trace_dir,
-                )
+        try:
+            async with semaphore:
+                call_kwargs = {
+                    "example": example,
+                    "config": resolved_config,
+                    "max_attempts": resolved_config.max_retrieval_attempts,
+                    "trace_dir": settings.trace_dir,
+                }
+                if shared_runtime_resources is not None:
+                    call_kwargs["_runtime_resources"] = shared_runtime_resources
+                prediction = await _maybe_await_result(run_graph_func(**call_kwargs))
+        except Exception as exc:
+            return index, _runtime_error_record(
+                example,
+                exc,
+                retrieval_top_k=resolved_config.retrieval_top_k,
             )
-        metrics = _prediction_metrics(example, prediction)
+        metrics = _prediction_metrics(
+            example,
+            prediction,
+            retrieval_top_k=resolved_config.retrieval_top_k,
+        )
         record = {
             "example_id": example.get("example_id"),
             "target_mode": example.get("target_mode"),
@@ -689,7 +860,12 @@ async def evaluate_examples_async(
         ),
         "provider": {
             "type": settings.provider_type,
-            "base_url": settings.ollama_base_url,
+            "chat_base_url": chat_provider_base_url(settings),
+            "embedding_type": settings.embedding_provider_type
+            or settings.provider_type,
+            "embedding_base_url": embedding_provider_base_url(settings)
+            if settings.embedding_model
+            else None,
             "chat_model": settings.chat_model,
             "embedding_model": settings.embedding_model,
         },
@@ -754,6 +930,7 @@ async def evaluate_examples_async(
                 failure_counts,
                 notes,
                 output_dir,
+                retrieval_top_k=resolved_config.retrieval_top_k,
             )
         )
         + "\n",
@@ -775,6 +952,7 @@ async def evaluate_examples_async(
             "summary": summary_path,
         },
         "metrics": metrics,
+        "retrieval_top_k": resolved_config.retrieval_top_k,
         "failure_counts": failure_counts,
         "predictions": predictions,
         "failures": failures,

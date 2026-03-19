@@ -10,17 +10,18 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
 from support_graph.config.runtime import RuntimeConfigLike
 from support_graph.logging_utils import get_logger
+from support_graph.providers import build_chat_model as build_provider_chat_model
 from support_graph.retrieval.index import load_chunk_records
 from support_graph.retrieval.retrieve import build_legacy_query
 from support_graph.retrieval.retrieve import build_query as build_retrieval_query
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.retrieval.retrieve import get_vectorstore, retrieve_chunks
 from support_graph.runtime.llm_policy import ainvoke_with_retry, shared_llm_semaphore
+from support_graph.runtime.observability import build_observability
 from support_graph.runtime.prompts import resolve_prompt_set
 from support_graph.runtime.schemas import (
     EvidenceGradeModel,
@@ -29,29 +30,59 @@ from support_graph.runtime.schemas import (
     GraphStreamEvent,
     ResponseModel,
     Runtime,
+    RuntimeResources,
     attach_fallback_metadata,
 )
+from support_graph.runtime.traces import write_trace_event
 
 
 logger = get_logger(__name__)
 
 
 def build_chat_model(
-    config: RuntimeConfigLike, chat_model_cls: type[ChatOllama] = ChatOllama
+    config: RuntimeConfigLike,
+    chat_model_cls: type[Any] | None = None,
 ) -> Any:
-    return chat_model_cls(
-        model=config.chat_model,
-        base_url=config.ollama_base_url,
-        temperature=0,
+    return build_provider_chat_model(
+        config,
+        chat_model_cls=chat_model_cls,
     )
 
 
-async def _emit_stream_event(runtime: Runtime, event: GraphStreamEvent) -> None:
+async def _emit_graph_event(runtime: Runtime, event: GraphStreamEvent) -> None:
     if runtime.event_sink is None:
         return
     result = runtime.event_sink(event)
     if inspect.isawaitable(result):
         await result
+
+
+async def _trace(runtime: Runtime, node: str, event: dict) -> None:
+    await asyncio.to_thread(
+        write_trace_event,
+        runtime.trace_dir,
+        runtime.run_id,
+        {
+            "node": node,
+            **event,
+        },
+    )
+
+
+def _response_started_event(
+    *,
+    state: GraphState,
+    runtime: Runtime,
+    node_name: str,
+    decision: str | None,
+) -> GraphStreamEvent:
+    return {
+        "kind": "response_started",
+        "node": node_name,
+        "run_id": runtime.run_id,
+        "example_id": state.get("example_id"),
+        "decision": decision,
+    }
 
 
 def _response_deltas(text: str) -> list[str]:
@@ -62,7 +93,36 @@ def _response_deltas(text: str) -> list[str]:
     return deltas or [stripped]
 
 
-async def _emit_response_preview(
+def _stream_chunk_text(chunk: Any) -> str:
+    if chunk is None:
+        return ""
+    if isinstance(chunk, str):
+        return chunk
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, Mapping):
+        return str(content.get("text") or content.get("content") or "")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, Mapping):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+                continue
+            text = getattr(item, "text", None) or getattr(item, "content", None)
+            if text:
+                parts.append(str(text))
+        return "".join(parts)
+    text = getattr(chunk, "text", None)
+    if isinstance(text, str):
+        return text
+    return ""
+
+
+async def _emit_buffered_response_preview(
     *,
     state: GraphState,
     runtime: Runtime,
@@ -72,18 +132,17 @@ async def _emit_response_preview(
     if not runtime.stream_responses:
         return
 
-    await _emit_stream_event(
+    await _emit_graph_event(
         runtime,
-        {
-            "kind": "response_started",
-            "node": node_name,
-            "run_id": runtime.run_id,
-            "example_id": state.get("example_id"),
-            "decision": payload.get("decision"),
-        },
+        _response_started_event(
+            state=state,
+            runtime=runtime,
+            node_name=node_name,
+            decision=payload.get("decision"),
+        ),
     )
     for delta in _response_deltas(str(payload.get("response_text", ""))):
-        await _emit_stream_event(
+        await _emit_graph_event(
             runtime,
             {
                 "kind": "response_delta",
@@ -93,6 +152,68 @@ async def _emit_response_preview(
                 "delta": delta,
             },
         )
+
+
+async def _emit_streaming_answer_preview(
+    *,
+    state: GraphState,
+    runtime: Runtime,
+    node_name: str,
+    payload: dict[str, Any],
+) -> str | None:
+    if not runtime.stream_responses or runtime.chat_model is None:
+        return None
+    if payload.get("decision") != "answer":
+        return None
+
+    astream = getattr(runtime.chat_model, "astream", None)
+    if not callable(astream):
+        return None
+
+    await _emit_graph_event(
+        runtime,
+        _response_started_event(
+            state=state,
+            runtime=runtime,
+            node_name=node_name,
+            decision=payload.get("decision"),
+        ),
+    )
+    messages = runtime.prompts.streaming_answer.format_messages(
+        conversation=_render_conversation(state.get("conversation", [])),
+        latest_user_utterance=state.get("latest_user_utterance") or "",
+        evidence_grade=state.get("evidence_grade", {}),
+        retrieved_chunks=_render_chunks(_reasoning_chunks(state)),
+    )
+    deltas: list[str] = []
+    try:
+        async with runtime.llm_semaphore:
+            async for chunk in astream(messages):
+                delta = _stream_chunk_text(chunk)
+                if not delta:
+                    continue
+                deltas.append(delta)
+                await _emit_graph_event(
+                    runtime,
+                    {
+                        "kind": "response_delta",
+                        "node": node_name,
+                        "run_id": runtime.run_id,
+                        "example_id": state.get("example_id"),
+                        "delta": delta,
+                    },
+                )
+    except Exception as exc:
+        logger.warning(
+            "%s preview streaming fell back to buffered output: %s",
+            node_name,
+            exc,
+            exc_info=exc,
+        )
+        return None
+
+    streamed_text = "".join(deltas).strip()
+    return streamed_text or None
 
 
 def _render_conversation(conversation: list[dict], max_turns: int = 8) -> str:
@@ -141,8 +262,20 @@ async def _ainvoke_structured_prompt(
     chain = prompt | runtime.chat_model.with_structured_output(
         schema, method="json_schema"
     )
+
+    async def invoke_chain() -> Any:
+        try:
+            return await chain.ainvoke(
+                payload,
+                config={"run_name": f"support_graph.{schema.__name__}"},
+            )
+        except TypeError as exc:
+            if "unexpected keyword argument 'config'" not in str(exc):
+                raise
+            return await chain.ainvoke(payload)
+
     result = await ainvoke_with_retry(
-        lambda: chain.ainvoke(payload),
+        invoke_chain,
         semaphore=runtime.llm_semaphore,
         max_attempts=runtime.config.llm_max_retries,
         base_delay_seconds=runtime.config.llm_retry_base_delay_seconds,
@@ -167,9 +300,16 @@ def _heuristic_evidence_grade(retrieved_chunks: list[dict]) -> dict:
             "reason": "No relevant documentation was retrieved.",
             "missing_information": [],
         }
+    best_chunk = _best_retrieved_chunk(retrieved_chunks)
+    if best_chunk is not None and _is_substantive_chunk(best_chunk):
+        return {
+            "verdict": "sufficient",
+            "reason": "A substantive retrieved chunk supports a grounded next-step answer.",
+            "missing_information": [],
+        }
     return {
         "verdict": "partial",
-        "reason": "Retrieved evidence needs model review.",
+        "reason": "Retrieved evidence needs model review before answering safely.",
         "missing_information": [],
     }
 
@@ -398,6 +538,14 @@ def _best_retrieved_chunk(chunks: list[dict]) -> dict | None:
     )
 
 
+def _is_substantive_chunk(chunk: dict) -> bool:
+    if _is_title_chunk(chunk):
+        return False
+    text = str(chunk.get("text", "")).strip()
+    span_count = len(chunk.get("span_ids", []))
+    return len(text.split()) > 12 or span_count > 1
+
+
 def _best_chunk_for_answer(state: GraphState) -> dict | None:
     return _best_retrieved_chunk(_reasoning_chunks(state))
 
@@ -567,7 +715,7 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
     grade = state.get("evidence_grade", {})
     if not runtime.config.chat_model or runtime.chat_model is None:
         payload = _heuristic_response(state)
-        await _emit_response_preview(
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="generate_response",
@@ -587,7 +735,15 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
                 "retrieved_chunks": _render_chunks(retrieved_chunks),
             },
         )
-        await _emit_response_preview(
+        streamed_text = await _emit_streaming_answer_preview(
+            state=state,
+            runtime=runtime,
+            node_name="generate_response",
+            payload=payload,
+        )
+        if streamed_text is not None:
+            return {**payload, "response_text": streamed_text}
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="generate_response",
@@ -601,7 +757,7 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
             node="generate_response",
             exc=exc,
         )
-        await _emit_response_preview(
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="generate_response",
@@ -626,7 +782,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
                 "citation_chunk_ids": [best_chunk.get("chunk_id")],
                 "confidence_label": "low",
             }
-            await _emit_response_preview(
+            await _emit_buffered_response_preview(
                 state=state,
                 runtime=runtime,
                 node_name="resolve_without_answer",
@@ -635,7 +791,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
             return payload
     if not runtime.config.chat_model or runtime.chat_model is None:
         payload = _heuristic_non_answer_response(state)
-        await _emit_response_preview(
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="resolve_without_answer",
@@ -655,7 +811,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
                 "retrieved_chunks": _render_chunks(retrieved_chunks),
             },
         )
-        await _emit_response_preview(
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="resolve_without_answer",
@@ -669,7 +825,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
             node="resolve_without_answer",
             exc=exc,
         )
-        await _emit_response_preview(
+        await _emit_buffered_response_preview(
             state=state,
             runtime=runtime,
             node_name="resolve_without_answer",
@@ -767,11 +923,40 @@ async def build_runtime_async(
     vectorstore: Any = None,
     chat_model: Any = None,
     *,
+    resources: RuntimeResources | None = None,
     event_sink: Any = None,
     stream_responses: bool = False,
 ) -> Runtime:
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     resolved_trace_dir = Path(trace_dir or config.trace_dir)
+    resolved_resources = resources
+    if resolved_resources is None:
+        resolved_resources = await resolve_runtime_resources_async(
+            config,
+            vectorstore=vectorstore,
+            chat_model=chat_model,
+        )
+    return Runtime(
+        config=config,
+        vectorstore=resolved_resources.vectorstore,
+        chat_model=resolved_resources.chat_model,
+        chunk_records_by_doc=resolved_resources.chunk_records_by_doc,
+        prompts=resolved_resources.prompts,
+        llm_semaphore=resolved_resources.llm_semaphore,
+        trace_dir=resolved_trace_dir,
+        run_id=run_id,
+        event_sink=event_sink,
+        stream_responses=stream_responses,
+        observability=build_observability(config),
+    )
+
+
+async def resolve_runtime_resources_async(
+    config: RuntimeConfigLike,
+    *,
+    vectorstore: Any = None,
+    chat_model: Any = None,
+) -> RuntimeResources:
     resolved_vectorstore = vectorstore
     if resolved_vectorstore is None and config.postgres_dsn and config.embedding_model:
         resolved_vectorstore = await asyncio.to_thread(get_vectorstore, config)
@@ -781,21 +966,19 @@ async def build_runtime_async(
         resolved_chat_model = build_chat_model(config)
 
     chunk_records_by_doc = await asyncio.to_thread(_load_chunk_records_by_doc, config)
-    return Runtime(
-        config=config,
+    return RuntimeResources(
         vectorstore=resolved_vectorstore,
         chat_model=resolved_chat_model,
         chunk_records_by_doc=chunk_records_by_doc,
         prompts=resolve_prompt_set(config.prompt_version),
         llm_semaphore=shared_llm_semaphore(config),
-        trace_dir=resolved_trace_dir,
-        run_id=run_id,
-        event_sink=event_sink,
-        stream_responses=stream_responses,
     )
 
 
 __all__ = [
+    "_build_evidence_chunks",
+    "_emit_graph_event",
+    "_trace",
     "build_chat_model",
     "build_runtime_async",
     "expand_neighbor_sections",
@@ -804,6 +987,7 @@ __all__ = [
     "grade_evidence",
     "prepare_query",
     "refine_query",
+    "resolve_runtime_resources_async",
     "resolve_without_answer",
     "retrieve_docs",
 ]
