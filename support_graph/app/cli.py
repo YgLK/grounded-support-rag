@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import argparse
+import inspect
 import json
 import math
 from pathlib import Path
@@ -20,19 +22,19 @@ from support_graph.data.examples import build_turn_examples, write_examples_json
 from support_graph.data.examples import (
     load_example_record as load_example_record_from_paths,
 )
-from support_graph.evaluation.ablation import run_smoke10_ablation
+from support_graph.evaluation.ablation import run_smoke10_ablation_async
 from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
     load_benchmark_chunk_records,
 )
-from support_graph.evaluation.evaluate import evaluate_split
+from support_graph.evaluation.evaluate import evaluate_split_async
 from support_graph.retrieval.index import (
     collection_row_count,
     index_documents,
     load_chunk_records,
 )
 from support_graph.logging_utils import configure_logging, get_logger
-from support_graph.runtime.graph import run_graph
+from support_graph.runtime.graph import run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 
 
@@ -87,6 +89,12 @@ def _shorten(text: str, limit: int = 88) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return f"{cleaned[: max(0, limit - 3)].rstrip()}..."
+
+
+def _run_async_boundary(value: object) -> object:
+    if inspect.isawaitable(value):
+        return asyncio.run(value)
+    return value
 
 
 def load_example_record(
@@ -681,11 +689,13 @@ def _run_example(args: argparse.Namespace) -> int:
         )
         return 1
 
-    result = run_graph(
-        example=example,
-        config=run_config,
-        max_attempts=settings.max_retrieval_attempts,
-        trace_dir=settings.trace_dir,
+    result = _run_async_boundary(
+        run_graph_async(
+            example=example,
+            config=run_config,
+            max_attempts=settings.max_retrieval_attempts,
+            trace_dir=settings.trace_dir,
+        )
     )
     _print_lines(_format_run_output(result, verbose=args.verbose))
     return 0
@@ -733,13 +743,16 @@ def _eval_split(args: argparse.Namespace) -> int:
         )
         return 1
 
-    result = evaluate_split(
-        settings=settings,
-        domain=domain,
-        split=args.split,
-        subset=args.subset,
-        limit=args.limit,
-        notes=args.notes,
+    result = _run_async_boundary(
+        evaluate_split_async(
+            settings=settings,
+            domain=domain,
+            split=args.split,
+            subset=args.subset,
+            limit=args.limit,
+            notes=args.notes,
+            max_concurrency=args.max_concurrency,
+        )
     )
     _print_lines(_format_eval_output(result, settings))
     return 0
@@ -787,11 +800,13 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
         )
         return 1
 
-    result = run_smoke10_ablation(
-        settings=settings,
-        domain=domain,
-        split=args.split,
-        limit=args.limit,
+    result = _run_async_boundary(
+        run_smoke10_ablation_async(
+            settings=settings,
+            domain=domain,
+            split=args.split,
+            limit=args.limit,
+        )
     )
     _print_lines(_format_ablation_output(result, settings))
     return 0
@@ -1063,6 +1078,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_parser.add_argument(
         "--notes", default=None, help="Optional run note stored in the manifest."
+    )
+    eval_parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=1,
+        help="Maximum number of examples to evaluate concurrently.",
     )
     eval_parser.set_defaults(func=_eval_split)
 

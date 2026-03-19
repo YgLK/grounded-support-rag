@@ -1,18 +1,17 @@
 """Targeted ablation runner for DMV Smoke-10."""
 
 from __future__ import annotations
-
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from support_graph.evaluation.evaluate import (
     build_eval_config,
-    evaluate_examples,
+    evaluate_examples_async,
     load_eval_examples,
     with_config_overrides,
 )
-from support_graph.runtime.graph import run_graph
+from support_graph.runtime.graph import run_graph_async
 
 
 PRIMARY_METRICS = (
@@ -321,7 +320,7 @@ def write_ablation_summary(
     return path
 
 
-def run_smoke10_ablation(
+async def run_smoke10_ablation_async(
     *,
     settings: Any,
     domain: str = "dmv",
@@ -343,7 +342,7 @@ def run_smoke10_ablation(
             ablation_options=variant["ablation_options"],
             **variant["config_overrides"],
         )
-        result = evaluate_examples(
+        result = await evaluate_examples_async(
             selected_examples,
             settings=settings,
             domain=domain,
@@ -355,7 +354,9 @@ def run_smoke10_ablation(
             config=variant_config,
             run_id_slug=variant["id"],
             subset_label=f"{domain} {split} / smoke first {limit} / {variant['title']}",
-            run_graph_func=run_graph_func if run_graph_func is not None else run_graph,
+            run_graph_func=run_graph_func
+            if run_graph_func is not None
+            else run_graph_async,
             manifest_overrides={
                 "ablation": {
                     "variant_id": variant["id"],
@@ -387,7 +388,7 @@ def run_smoke10_ablation(
             ablation_options=variant["ablation_options"],
             **variant["config_overrides"],
         )
-        frozen_result = evaluate_examples(
+        frozen_result = await evaluate_examples_async(
             frozen_examples,
             settings=settings,
             domain=domain,
@@ -399,7 +400,9 @@ def run_smoke10_ablation(
             config=variant_config,
             run_id_slug=f"{variant['id']}-frozen200",
             subset_label=f"{domain} {split} / frozen 200 / {variant['title']}",
-            run_graph_func=run_graph_func if run_graph_func is not None else run_graph,
+            run_graph_func=run_graph_func
+            if run_graph_func is not None
+            else run_graph_async,
             manifest_overrides={
                 "ablation": {
                     "variant_id": variant["id"],

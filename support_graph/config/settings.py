@@ -51,6 +51,12 @@ def _int_value(value: str | None, default: int) -> int:
     return int(value)
 
 
+def _float_value(value: str | None, default: float) -> float:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
@@ -61,9 +67,14 @@ class Settings:
     ollama_base_url: str
     chat_model: str | None
     embedding_model: str | None
+    prompt_version: str
     retrieval_top_k: int
     retrieval_candidate_k: int
     max_retrieval_attempts: int
+    llm_max_concurrency: int
+    llm_max_retries: int
+    llm_retry_base_delay_seconds: float
+    llm_retry_max_delay_seconds: float
     trace_dir: Path
     eval_dir: Path
     derived_dir: Path
@@ -114,12 +125,23 @@ class Settings:
             ),
             chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
             embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
+            prompt_version=env.get("SUPPORT_GRAPH_PROMPT_VERSION", "v1"),
             retrieval_top_k=_int_value(env.get("SUPPORT_GRAPH_RETRIEVAL_TOP_K"), 5),
             retrieval_candidate_k=_int_value(
                 env.get("SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K"), 12
             ),
             max_retrieval_attempts=_int_value(
                 env.get("SUPPORT_GRAPH_MAX_RETRIEVAL_ATTEMPTS"), 2
+            ),
+            llm_max_concurrency=_int_value(
+                env.get("SUPPORT_GRAPH_LLM_MAX_CONCURRENCY"), 4
+            ),
+            llm_max_retries=_int_value(env.get("SUPPORT_GRAPH_LLM_MAX_RETRIES"), 3),
+            llm_retry_base_delay_seconds=_float_value(
+                env.get("SUPPORT_GRAPH_LLM_RETRY_BASE_DELAY_SECONDS"), 0.5
+            ),
+            llm_retry_max_delay_seconds=_float_value(
+                env.get("SUPPORT_GRAPH_LLM_RETRY_MAX_DELAY_SECONDS"), 4.0
             ),
             trace_dir=trace_dir,
             eval_dir=eval_dir,

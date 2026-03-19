@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
+import inspect
 import json
 import re
 from collections import Counter
@@ -24,12 +26,7 @@ from support_graph.data.examples import (
     load_examples_jsonl,
     write_examples_jsonl,
 )
-from support_graph.runtime.prompts import (
-    ANSWER_PROMPT_VERSION,
-    EVIDENCE_PROMPT_VERSION,
-    QUERY_PROMPT_VERSION,
-)
-from support_graph.runtime.graph import run_graph
+from support_graph.runtime.graph import run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 
 
@@ -587,7 +584,13 @@ def _summary_lines(
     return lines
 
 
-def evaluate_examples(
+async def _maybe_await_result(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def evaluate_examples_async(
     examples: list[dict],
     *,
     settings: Any,
@@ -596,12 +599,13 @@ def evaluate_examples(
     subset_name: str,
     limit: int | None = None,
     notes: str | None = None,
-    run_graph_func: Any = run_graph,
+    run_graph_func: Any = run_graph_async,
     now: datetime | None = None,
     config: RuntimeConfig | None = None,
     run_id_slug: str | None = None,
     subset_label: str | None = None,
     manifest_overrides: dict[str, Any] | None = None,
+    max_concurrency: int = 1,
 ) -> dict:
     selected_examples = examples[:limit] if limit is not None else examples
     if not selected_examples:
@@ -612,15 +616,18 @@ def evaluate_examples(
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_config = config or build_eval_config(settings, domain)
 
-    predictions: list[dict] = []
-    failures: list[dict] = []
-    for example in selected_examples:
-        prediction = run_graph_func(
-            example=example,
-            config=resolved_config,
-            max_attempts=settings.max_retrieval_attempts,
-            trace_dir=settings.trace_dir,
-        )
+    semaphore = asyncio.Semaphore(max(1, int(max_concurrency)))
+
+    async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
+        async with semaphore:
+            prediction = await _maybe_await_result(
+                run_graph_func(
+                    example=example,
+                    config=resolved_config,
+                    max_attempts=resolved_config.max_retrieval_attempts,
+                    trace_dir=settings.trace_dir,
+                )
+            )
         metrics = _prediction_metrics(example, prediction)
         record = {
             "example_id": example.get("example_id"),
@@ -643,9 +650,21 @@ def evaluate_examples(
         }
         failure_label = _failure_label(example, prediction, metrics)
         record["failure_label"] = failure_label
-        predictions.append(record)
-        if failure_label is not None:
-            failures.append(record)
+        return index, record
+
+    completed = await asyncio.gather(
+        *[
+            evaluate_one(index, example)
+            for index, example in enumerate(selected_examples)
+        ]
+    )
+    ordered_predictions = [
+        record for _, record in sorted(completed, key=lambda item: item[0])
+    ]
+    predictions = list(ordered_predictions)
+    failures = [
+        record for record in predictions if record.get("failure_label") is not None
+    ]
 
     metrics = _aggregate_metrics(predictions)
     failure_counts = dict(
@@ -687,37 +706,46 @@ def evaluate_examples(
             "neighbor_expansion": bool(resolved_config.neighbor_expansion),
         },
         "graph": {
-            "enable_retry": True,
+            "enable_retry": resolved_config.llm_max_retries > 1,
             "decision_policy_version": "v1",
         },
-        "prompt": {
-            "answer_prompt_version": ANSWER_PROMPT_VERSION,
-            "query_prompt_version": QUERY_PROMPT_VERSION,
-            "evidence_prompt_version": EVIDENCE_PROMPT_VERSION,
-        },
+        "prompt_version": resolved_config.prompt_version,
         "notes": notes or "Phase 4 MVP eval harness run.",
     }
     if manifest_overrides:
         manifest.update(manifest_overrides)
 
-    _write_json(output_dir / "manifest.json", manifest)
-    _write_json(
-        output_dir / "metrics.json", {**metrics, "failure_counts": failure_counts}
+    await asyncio.to_thread(_write_json, output_dir / "manifest.json", manifest)
+    await asyncio.to_thread(
+        _write_json,
+        output_dir / "metrics.json",
+        {**metrics, "failure_counts": failure_counts},
     )
-    _write_jsonl(output_dir / "predictions.jsonl", predictions)
-    _write_jsonl(output_dir / "failures.jsonl", failures)
+    await asyncio.to_thread(_write_jsonl, output_dir / "predictions.jsonl", predictions)
+    await asyncio.to_thread(_write_jsonl, output_dir / "failures.jsonl", failures)
     manual_review_path = output_dir / "manual_review.csv"
     retrieval_examples_path = output_dir / "retrieval_examples.jsonl"
     trace_index_path = output_dir / "trace_index.json"
-    _write_csv(
+    await asyncio.to_thread(
+        _write_csv,
         manual_review_path,
         MANUAL_REVIEW_COLUMNS,
         _manual_review_rows(run_id, predictions),
     )
-    _write_jsonl(retrieval_examples_path, _retrieval_example_records(predictions))
-    _write_json(trace_index_path, {"entries": _trace_index_records(predictions)})
+    await asyncio.to_thread(
+        _write_jsonl,
+        retrieval_examples_path,
+        _retrieval_example_records(predictions),
+    )
+    trace_index_records = await asyncio.to_thread(_trace_index_records, predictions)
+    await asyncio.to_thread(
+        _write_json,
+        trace_index_path,
+        {"entries": trace_index_records},
+    )
     summary_path = output_dir / "summary.md"
-    summary_path.write_text(
+    await asyncio.to_thread(
+        summary_path.write_text,
         "\n".join(
             _summary_lines(
                 run_id,
@@ -753,7 +781,7 @@ def evaluate_examples(
     }
 
 
-def evaluate_split(
+async def evaluate_split_async(
     *,
     settings: Any,
     domain: str,
@@ -761,11 +789,12 @@ def evaluate_split(
     subset: str = "smoke",
     limit: int | None = None,
     notes: str | None = None,
-    run_graph_func: Any = run_graph,
+    run_graph_func: Any = run_graph_async,
     now: datetime | None = None,
+    max_concurrency: int = 1,
 ) -> dict:
     examples, subset_name = load_eval_examples(settings, domain, split, subset)
-    return evaluate_examples(
+    return await evaluate_examples_async(
         examples,
         settings=settings,
         domain=domain,
@@ -775,4 +804,5 @@ def evaluate_split(
         notes=notes,
         run_graph_func=run_graph_func,
         now=now,
+        max_concurrency=max_concurrency,
     )

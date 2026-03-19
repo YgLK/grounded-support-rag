@@ -1,8 +1,11 @@
-"""Phase 3 graph wiring and public runtime entrypoints."""
+"""Phase 3 graph wiring and async runtime entrypoints."""
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +16,7 @@ from support_graph.retrieval.retrieve import build_query_context
 from support_graph.runtime.nodes import (
     _build_evidence_chunks,
     build_chat_model,
-    build_runtime,
+    build_runtime_async,
     expand_neighbor_sections,
     finalize,
     generate_response,
@@ -24,7 +27,9 @@ from support_graph.runtime.nodes import (
     retrieve_docs,
 )
 from support_graph.runtime.schemas import (
+    GraphEventSink,
     GraphState,
+    GraphStreamEvent,
     Runtime,
     fallback_metadata,
     strip_internal_fields,
@@ -48,8 +53,15 @@ def _retrieval_trace_chunks(chunks: list[dict], limit: int = 5) -> list[dict]:
     return summaries
 
 
-def _trace(runtime: Runtime, node: str, event: dict) -> None:
-    write_trace_event(
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _trace(runtime: Runtime, node: str, event: dict) -> None:
+    await asyncio.to_thread(
+        write_trace_event,
         runtime.trace_dir,
         runtime.run_id,
         {
@@ -57,6 +69,14 @@ def _trace(runtime: Runtime, node: str, event: dict) -> None:
             **event,
         },
     )
+
+
+async def _emit_graph_event(runtime: Runtime, event: GraphStreamEvent) -> None:
+    if runtime.event_sink is None:
+        return
+    emitted = runtime.event_sink(event)
+    if inspect.isawaitable(emitted):
+        await emitted
 
 
 def _normalize_final_output(state: GraphState, payload: dict) -> dict:
@@ -111,21 +131,35 @@ def _updated_fallback_events(state: GraphState, payload: dict) -> list[dict] | N
     return list(state.get("fallback_events", [])) + [dict(fallback)]
 
 
-def run_graph(
+async def _emit_fallback_event(
+    *,
+    runtime: Runtime,
+    state: GraphState,
+    node_name: str,
+    fallback_events: list[dict] | None,
+) -> None:
+    if not fallback_events:
+        return
+    await _emit_graph_event(
+        runtime,
+        {
+            "kind": "fallback",
+            "node": node_name,
+            "run_id": runtime.run_id,
+            "example_id": state.get("example_id"),
+            "fallback": fallback_events[-1],
+        },
+    )
+
+
+def _initial_state(
     *,
     example: dict,
     config: RuntimeConfigLike,
-    max_attempts: int | None = None,
-    trace_dir: str | Path | None = None,
-    vectorstore: Any = None,
-    chat_model: Any = None,
-) -> dict:
-    run_started = time.perf_counter()
-    runtime = build_runtime(
-        config, trace_dir=trace_dir, vectorstore=vectorstore, chat_model=chat_model
-    )
-
-    initial_state: GraphState = {
+    runtime: Runtime,
+    max_attempts: int | None,
+) -> GraphState:
+    return {
         "example": example,
         "example_id": example.get("example_id"),
         "domain": example.get("domain") or config.domain,
@@ -142,11 +176,13 @@ def run_graph(
         "fallback_events": [],
     }
 
+
+def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
     graph_builder = StateGraph(GraphState)
 
-    def prepare_query_node(state: GraphState) -> GraphState:
+    async def prepare_query_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        prepared = prepare_query(state=state, runtime=runtime)
+        prepared = await _maybe_await(prepare_query(state=state, runtime=runtime))
         if isinstance(prepared, tuple):
             query, query_context = prepared
         else:
@@ -160,13 +196,24 @@ def run_graph(
                 }
             )
         path = state.get("graph_path", []) + ["prepare_query"]
-        _trace(
+        await _trace(
             runtime,
             "prepare_query",
             {
                 "query": query,
                 "query_context": query_context,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+        )
+        await _emit_graph_event(
+            runtime,
+            {
+                "kind": "query_ready",
+                "node": "prepare_query",
+                "run_id": runtime.run_id,
+                "example_id": state.get("example_id"),
+                "query": query,
+                "query_context": query_context,
             },
         )
         return {
@@ -176,9 +223,9 @@ def run_graph(
             "graph_path": path,
         }
 
-    def retrieve_docs_node(state: GraphState) -> GraphState:
+    async def retrieve_docs_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        ranked_chunks = retrieve_docs(state=state, runtime=runtime)
+        ranked_chunks = await _maybe_await(retrieve_docs(state=state, runtime=runtime))
         evidence_chunks = _build_evidence_chunks(
             state=state,
             runtime=runtime,
@@ -186,7 +233,7 @@ def run_graph(
         )
         attempts = state.get("retrieval_attempts", 0) + 1
         path = state.get("graph_path", []) + ["retrieve_docs"]
-        _trace(
+        await _trace(
             runtime,
             "retrieve_docs",
             {
@@ -199,6 +246,18 @@ def run_graph(
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             },
         )
+        await _emit_graph_event(
+            runtime,
+            {
+                "kind": "retrieval_complete",
+                "node": "retrieve_docs",
+                "run_id": runtime.run_id,
+                "example_id": state.get("example_id"),
+                "retrieval_attempts": attempts,
+                "retrieval_ranked_chunks": ranked_chunks,
+                "retrieved_chunks": evidence_chunks,
+            },
+        )
         return {
             "retrieval_ranked_chunks": ranked_chunks,
             "retrieved_chunks": evidence_chunks,
@@ -206,9 +265,9 @@ def run_graph(
             "graph_path": path,
         }
 
-    def grade_evidence_node(state: GraphState) -> GraphState:
+    async def grade_evidence_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        raw_grade = grade_evidence(state=state, runtime=runtime)
+        raw_grade = await _maybe_await(grade_evidence(state=state, runtime=runtime))
         grade = strip_internal_fields(raw_grade)
         path = state.get("graph_path", []) + ["grade_evidence"]
         event = {
@@ -218,17 +277,33 @@ def run_graph(
         fallback_events = _updated_fallback_events(state, raw_grade)
         if fallback_events is not None:
             event["fallback"] = fallback_events[-1]
-        _trace(runtime, "grade_evidence", event)
+        await _trace(runtime, "grade_evidence", event)
+        await _emit_graph_event(
+            runtime,
+            {
+                "kind": "evidence_graded",
+                "node": "grade_evidence",
+                "run_id": runtime.run_id,
+                "example_id": state.get("example_id"),
+                "evidence_grade": grade,
+            },
+        )
+        await _emit_fallback_event(
+            runtime=runtime,
+            state=state,
+            node_name="grade_evidence",
+            fallback_events=fallback_events,
+        )
         result: GraphState = {"evidence_grade": grade, "graph_path": path}
         if fallback_events is not None:
             result["fallback_events"] = fallback_events
         return result
 
-    def refine_query_node(state: GraphState) -> GraphState:
+    async def refine_query_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        query = refine_query(state=state, runtime=runtime)
+        query = await _maybe_await(refine_query(state=state, runtime=runtime))
         path = state.get("graph_path", []) + ["refine_query"]
-        _trace(
+        await _trace(
             runtime,
             "refine_query",
             {
@@ -238,9 +313,11 @@ def run_graph(
         )
         return {"refined_query": query, "final_query": query, "graph_path": path}
 
-    def generate_response_node(state: GraphState) -> GraphState:
+    async def generate_response_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        raw_response = generate_response(state=state, runtime=runtime)
+        raw_response = await _maybe_await(
+            generate_response(state=state, runtime=runtime)
+        )
         response = strip_internal_fields(raw_response)
         path = state.get("graph_path", []) + ["generate_response"]
         event = {
@@ -251,7 +328,13 @@ def run_graph(
         fallback_events = _updated_fallback_events(state, raw_response)
         if fallback_events is not None:
             event["fallback"] = fallback_events[-1]
-        _trace(runtime, "generate_response", event)
+        await _trace(runtime, "generate_response", event)
+        await _emit_fallback_event(
+            runtime=runtime,
+            state=state,
+            node_name="generate_response",
+            fallback_events=fallback_events,
+        )
         result: GraphState = {
             "decision": response.get("decision"),
             "response_text": response.get("response_text"),
@@ -264,9 +347,11 @@ def run_graph(
             result["fallback_events"] = fallback_events
         return result
 
-    def resolve_without_answer_node(state: GraphState) -> GraphState:
+    async def resolve_without_answer_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
-        raw_response = resolve_without_answer(state=state, runtime=runtime)
+        raw_response = await _maybe_await(
+            resolve_without_answer(state=state, runtime=runtime)
+        )
         response = strip_internal_fields(raw_response)
         path = state.get("graph_path", []) + ["resolve_without_answer"]
         event = {
@@ -277,7 +362,13 @@ def run_graph(
         fallback_events = _updated_fallback_events(state, raw_response)
         if fallback_events is not None:
             event["fallback"] = fallback_events[-1]
-        _trace(runtime, "resolve_without_answer", event)
+        await _trace(runtime, "resolve_without_answer", event)
+        await _emit_fallback_event(
+            runtime=runtime,
+            state=state,
+            node_name="resolve_without_answer",
+            fallback_events=fallback_events,
+        )
         result: GraphState = {
             "decision": response.get("decision"),
             "response_text": response.get("response_text"),
@@ -290,10 +381,10 @@ def run_graph(
             result["fallback_events"] = fallback_events
         return result
 
-    def finalize_node(state: GraphState) -> GraphState:
+    async def finalize_node(state: GraphState) -> GraphState:
         started = time.perf_counter()
         payload = state.get("response_payload", {})
-        finalized_payload = finalize(state=state, payload=payload)
+        finalized_payload = await _maybe_await(finalize(state=state, payload=payload))
         finalized = _normalize_final_output(
             {
                 **state,
@@ -303,7 +394,7 @@ def run_graph(
             },
             finalized_payload,
         )
-        _trace(
+        await _trace(
             runtime,
             "finalize",
             {
@@ -318,6 +409,21 @@ def run_graph(
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             },
         )
+        if runtime.stream_responses:
+            await _emit_graph_event(
+                runtime,
+                {
+                    "kind": "response_completed",
+                    "node": "finalize",
+                    "run_id": runtime.run_id,
+                    "example_id": state.get("example_id"),
+                    "decision": finalized.get("decision"),
+                    "response_text": finalized.get("response_text"),
+                    "citations": finalized.get("citations", []),
+                    "confidence_label": finalized.get("confidence_label"),
+                    "trace_summary": finalized.get("trace_summary", {}),
+                },
+            )
         return {"final_output": finalized}
 
     graph_builder.add_node("prepare_query", prepare_query_node)
@@ -344,13 +450,92 @@ def run_graph(
     graph_builder.add_edge("generate_response", "finalize")
     graph_builder.add_edge("resolve_without_answer", "finalize")
     graph_builder.add_edge("finalize", END)
+    return graph_builder.compile()
 
-    app = graph_builder.compile()
-    result = app.invoke(initial_state)
+
+async def run_graph_async(
+    *,
+    example: dict,
+    config: RuntimeConfigLike,
+    max_attempts: int | None = None,
+    trace_dir: str | Path | None = None,
+    vectorstore: Any = None,
+    chat_model: Any = None,
+    _event_sink: GraphEventSink | None = None,
+    _stream_responses: bool = False,
+) -> dict:
+    run_started = time.perf_counter()
+    runtime = await build_runtime_async(
+        config,
+        trace_dir=trace_dir,
+        vectorstore=vectorstore,
+        chat_model=chat_model,
+        event_sink=_event_sink,
+        stream_responses=_stream_responses,
+    )
+    initial_state = _initial_state(
+        example=example,
+        config=config,
+        runtime=runtime,
+        max_attempts=max_attempts,
+    )
+    app = _build_graph_app(runtime, run_started=run_started)
+    result = await app.ainvoke(initial_state)
     return result["final_output"]
 
 
+async def astream_graph_events(
+    *,
+    example: dict,
+    config: RuntimeConfigLike,
+    max_attempts: int | None = None,
+    trace_dir: str | Path | None = None,
+    vectorstore: Any = None,
+    chat_model: Any = None,
+) -> AsyncIterator[GraphStreamEvent]:
+    queue: asyncio.Queue[GraphStreamEvent | None] = asyncio.Queue()
+
+    async def event_sink(event: GraphStreamEvent) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        try:
+            await run_graph_async(
+                example=example,
+                config=config,
+                max_attempts=max_attempts,
+                trace_dir=trace_dir,
+                vectorstore=vectorstore,
+                chat_model=chat_model,
+                _event_sink=event_sink,
+                _stream_responses=True,
+            )
+        except Exception as exc:
+            await event_sink(
+                {
+                    "kind": "error",
+                    "node": "run_graph_async",
+                    "example_id": example.get("example_id"),
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                }
+            )
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(runner())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        await task
+
+
 __all__ = [
+    "astream_graph_events",
     "build_chat_model",
     "expand_neighbor_sections",
     "finalize",
@@ -360,6 +545,6 @@ __all__ = [
     "refine_query",
     "resolve_without_answer",
     "retrieve_docs",
-    "run_graph",
+    "run_graph_async",
     "write_trace_event",
 ]

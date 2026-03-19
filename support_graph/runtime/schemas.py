@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict, cast
@@ -9,10 +11,21 @@ from typing import Any, Literal, TypedDict, cast
 from pydantic import BaseModel, Field
 
 from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.runtime.prompts import PromptSet
 
 
 Decision = Literal["answer", "clarify", "abstain"]
 EvidenceVerdict = Literal["sufficient", "partial", "insufficient"]
+GraphStreamEventKind = Literal[
+    "query_ready",
+    "retrieval_complete",
+    "evidence_graded",
+    "response_started",
+    "response_delta",
+    "response_completed",
+    "fallback",
+    "error",
+]
 
 _FALLBACK_KEY = "_fallback"
 
@@ -43,6 +56,31 @@ class FallbackTrace(TypedDict, total=False):
     mode: Literal["heuristic"]
     exception_type: str
     error: str
+
+
+class GraphStreamEvent(TypedDict, total=False):
+    kind: GraphStreamEventKind
+    node: str
+    run_id: str
+    example_id: str
+    query: str
+    query_context: dict
+    retrieval_attempts: int
+    retrieval_ranked_chunks: list[dict]
+    retrieved_chunks: list[dict]
+    evidence_grade: dict
+    decision: Decision
+    response_text: str
+    delta: str
+    citations: list[dict]
+    confidence_label: str
+    trace_summary: dict
+    fallback: FallbackTrace
+    error: str
+    exception_type: str
+
+
+GraphEventSink = Callable[[GraphStreamEvent], Awaitable[None] | None]
 
 
 class GraphState(TypedDict, total=False):
@@ -80,8 +118,12 @@ class Runtime:
     vectorstore: Any
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
+    prompts: PromptSet
+    llm_semaphore: asyncio.Semaphore
     trace_dir: Path
     run_id: str
+    event_sink: GraphEventSink | None = None
+    stream_responses: bool = False
 
 
 def attach_fallback_metadata(
@@ -120,6 +162,9 @@ __all__ = [
     "EvidenceVerdict",
     "FallbackResponseModel",
     "FallbackTrace",
+    "GraphEventSink",
+    "GraphStreamEvent",
+    "GraphStreamEventKind",
     "GraphState",
     "ResponseModel",
     "Runtime",
