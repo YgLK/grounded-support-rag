@@ -8,7 +8,7 @@ import re
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel
 
@@ -37,6 +37,7 @@ from support_graph.runtime.traces import write_trace_event
 
 
 logger = get_logger(__name__)
+QueryMode = Literal["legacy_transcript", "latest_user_only", "structured"]
 
 
 def build_chat_model(
@@ -93,6 +94,20 @@ def _response_deltas(text: str) -> list[str]:
     return deltas or [stripped]
 
 
+def _stream_item_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, Mapping):
+        return str(item.get("text") or item.get("content") or "")
+    text = getattr(item, "text", None)
+    if isinstance(text, str):
+        return text
+    content = getattr(item, "content", None)
+    if isinstance(content, str):
+        return content
+    raise TypeError(f"Unsupported stream item type: {type(item).__name__}")
+
+
 def _stream_chunk_text(chunk: Any) -> str:
     if chunk is None:
         return ""
@@ -104,22 +119,11 @@ def _stream_chunk_text(chunk: Any) -> str:
     if isinstance(content, Mapping):
         return str(content.get("text") or content.get("content") or "")
     if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-                continue
-            if isinstance(item, Mapping):
-                parts.append(str(item.get("text") or item.get("content") or ""))
-                continue
-            text = getattr(item, "text", None) or getattr(item, "content", None)
-            if text:
-                parts.append(str(text))
-        return "".join(parts)
+        return "".join(_stream_item_text(item) for item in content)
     text = getattr(chunk, "text", None)
     if isinstance(text, str):
         return text
-    return ""
+    raise TypeError(f"Unsupported stream chunk type: {type(chunk).__name__}")
 
 
 async def _emit_buffered_response_preview(
@@ -314,34 +318,46 @@ def _heuristic_evidence_grade(retrieved_chunks: list[dict]) -> dict:
     }
 
 
-def _heuristic_response(state: GraphState) -> dict:
-    grade = state.get("evidence_grade", {})
-    chunks = _reasoning_chunks(state)
-    if grade.get("verdict") == "sufficient" and chunks:
-        chunk = _best_retrieved_chunk(chunks)
-        return {
-            "decision": "answer",
-            "response_text": chunk.get("text", "").strip()
-            or "Relevant documentation was found.",
-            "citation_chunk_ids": [chunk.get("chunk_id")]
-            if chunk and chunk.get("chunk_id")
-            else [],
-            "confidence_label": "medium",
-        }
-    if grade.get("verdict") == "partial":
-        missing = grade.get("missing_information") or ["one missing detail"]
-        return {
-            "decision": "clarify",
-            "response_text": f"Need one detail before answering: {missing[0]}.",
-            "citation_chunk_ids": [chunks[0].get("chunk_id")] if chunks else [],
-            "confidence_label": "low",
-        }
+def _answer_payload(chunk: dict) -> dict:
+    chunk_id = chunk.get("chunk_id")
+    return {
+        "decision": "answer",
+        "response_text": chunk.get("text", "").strip()
+        or "Relevant documentation was found.",
+        "citation_chunk_ids": [chunk_id] if chunk_id else [],
+        "confidence_label": "medium",
+    }
+
+
+def _clarify_payload(chunks: list[dict], missing: str) -> dict:
+    return {
+        "decision": "clarify",
+        "response_text": f"Need one detail before answering: {missing}.",
+        "citation_chunk_ids": [chunks[0].get("chunk_id")] if chunks else [],
+        "confidence_label": "low",
+    }
+
+
+def _abstain_payload() -> dict:
     return {
         "decision": "abstain",
         "response_text": "No sufficient support was found in the indexed documentation.",
         "citation_chunk_ids": [],
         "confidence_label": "low",
     }
+
+
+def _heuristic_response(state: GraphState) -> dict:
+    grade = state.get("evidence_grade", {})
+    chunks = _reasoning_chunks(state)
+    if grade.get("verdict") == "sufficient" and chunks:
+        chunk = _best_retrieved_chunk(chunks)
+        assert chunk is not None
+        return _answer_payload(chunk)
+    if grade.get("verdict") == "partial":
+        missing = grade.get("missing_information") or ["one missing detail"]
+        return _clarify_payload(chunks, missing[0])
+    return _abstain_payload()
 
 
 def _heuristic_non_answer_response(state: GraphState) -> dict:
@@ -351,18 +367,8 @@ def _heuristic_non_answer_response(state: GraphState) -> dict:
         missing = grade.get("missing_information") or [
             "what condition changed in your DMV case"
         ]
-        return {
-            "decision": "clarify",
-            "response_text": f"Need one detail before answering: {missing[0]}.",
-            "citation_chunk_ids": [chunks[0].get("chunk_id")] if chunks else [],
-            "confidence_label": "low",
-        }
-    return {
-        "decision": "abstain",
-        "response_text": "No sufficient support was found in the indexed documentation.",
-        "citation_chunk_ids": [],
-        "confidence_label": "low",
-    }
+        return _clarify_payload(chunks, missing[0])
+    return _abstain_payload()
 
 
 def _query_example_from_state(state: GraphState) -> dict:
@@ -379,22 +385,42 @@ def _reasoning_chunks(state: GraphState) -> list[dict]:
     return list(state.get("retrieved_chunks", []))
 
 
+def _llm_available(runtime: Runtime) -> bool:
+    return runtime.chat_model is not None
+
+
+def _ablation_bool(state: GraphState, key: str, default: bool) -> bool:
+    ablation_options = state.get("ablation_options", {})
+    if key in ablation_options:
+        return bool(ablation_options[key])
+    return default
+
+
+def _query_mode(state: GraphState) -> QueryMode:
+    mode = state.get("ablation_options", {}).get("query_mode", "structured")
+    if mode in {"legacy_transcript", "latest_user_only", "structured"}:
+        return cast(QueryMode, mode)
+    raise AssertionError(f"Unknown query_mode: {mode}")
+
+
 def _is_title_chunk(chunk: dict) -> bool:
     return str(chunk.get("section_id", "")).startswith("t_")
 
 
 def _content_only_reasoning_enabled(*, state: GraphState, runtime: Runtime) -> bool:
-    ablation_options = state.get("ablation_options", {})
-    if "content_only_reasoning" in ablation_options:
-        return bool(ablation_options["content_only_reasoning"])
-    return bool(runtime.config.content_only_reasoning)
+    return _ablation_bool(
+        state,
+        "content_only_reasoning",
+        bool(runtime.config.content_only_reasoning),
+    )
 
 
 def _neighbor_expansion_enabled(*, state: GraphState, runtime: Runtime) -> bool:
-    ablation_options = state.get("ablation_options", {})
-    if "neighbor_expansion" in ablation_options:
-        return bool(ablation_options["neighbor_expansion"])
-    return bool(runtime.config.neighbor_expansion)
+    return _ablation_bool(
+        state,
+        "neighbor_expansion",
+        bool(runtime.config.neighbor_expansion),
+    )
 
 
 def _content_only_chunks(chunks: list[dict]) -> list[dict]:
@@ -608,50 +634,46 @@ def _build_evidence_chunks(
 
 def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     del runtime
-    ablation_options = state.get("ablation_options", {})
     query_example = _query_example_from_state(state)
-    if ablation_options.get("query_mode") == "legacy_transcript":
-        return build_legacy_query(
-            query_example, history_turn_limit=4
-        ), build_query_context(query_example)
-    if ablation_options.get("query_mode") == "latest_user_only":
+    query_context = build_query_context(query_example)
+    mode = _query_mode(state)
+    if mode == "legacy_transcript":
+        return build_legacy_query(query_example, history_turn_limit=4), query_context
+    if mode == "latest_user_only":
         return (
             build_retrieval_query(
-                query_example, history_turn_limit=0, include_history=False
+                query_example,
+                history_turn_limit=0,
+                include_history=False,
             ),
-            build_query_context(query_example),
+            query_context,
         )
-    return build_retrieval_query(
-        query_example, history_turn_limit=4
-    ), build_query_context(query_example)
+    return build_retrieval_query(query_example, history_turn_limit=4), query_context
 
 
 async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
     ablation_options = state.get("ablation_options", {})
-    rerank_enabled = bool(
-        ablation_options.get("retrieval_rerank", runtime.config.retrieval_rerank)
-    )
-    candidate_k = int(
-        ablation_options.get(
-            "retrieval_candidate_k",
-            runtime.config.retrieval_candidate_k,
-        )
-    )
+    query = state.get("refined_query") or state.get("query")
+    assert query is not None
     return await asyncio.to_thread(
         retrieve_chunks,
-        example={
-            "domain": state.get("domain"),
-            "conversation": state.get("conversation", []),
-            "latest_user_turn_id": state.get("latest_user_turn_id"),
-            "latest_user_utterance": state.get("latest_user_utterance"),
-        },
+        example=_query_example_from_state(state),
         vectorstore=runtime.vectorstore,
         config=runtime.config,
         top_k=runtime.config.retrieval_top_k,
-        candidate_k=candidate_k,
-        query=state.get("refined_query") or state.get("query"),
+        candidate_k=int(
+            ablation_options.get(
+                "retrieval_candidate_k",
+                runtime.config.retrieval_candidate_k,
+            )
+        ),
+        query=query,
         query_context=state.get("query_context"),
-        rerank=rerank_enabled,
+        rerank=_ablation_bool(
+            state,
+            "retrieval_rerank",
+            bool(runtime.config.retrieval_rerank),
+        ),
     )
 
 
@@ -659,7 +681,7 @@ async def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
     retrieved_chunks = _reasoning_chunks(state)
     if not retrieved_chunks:
         return _heuristic_evidence_grade(retrieved_chunks)
-    if not runtime.config.chat_model or runtime.chat_model is None:
+    if not _llm_available(runtime):
         return _heuristic_evidence_grade(retrieved_chunks)
 
     try:
@@ -713,7 +735,7 @@ def refine_query(*, state: GraphState, runtime: Runtime) -> str:
 async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
     retrieved_chunks = _reasoning_chunks(state)
     grade = state.get("evidence_grade", {})
-    if not runtime.config.chat_model or runtime.chat_model is None:
+    if not _llm_available(runtime):
         payload = _heuristic_response(state)
         await _emit_buffered_response_preview(
             state=state,
@@ -789,7 +811,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
                 payload=payload,
             )
             return payload
-    if not runtime.config.chat_model or runtime.chat_model is None:
+    if not _llm_available(runtime):
         payload = _heuristic_non_answer_response(state)
         await _emit_buffered_response_preview(
             state=state,
@@ -851,35 +873,39 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
     ablation_options = state.get("ablation_options", {})
 
     if verdict == "sufficient":
-        if decision != "answer" or not payload.get("response_text"):
-            fallback = _heuristic_response(state)
-            payload = {**payload, **fallback}
-            citations = _normalize_citations(payload, chunk_map)
-        elif not citations and best_chunk is not None:
-            citations = [_normalize_citation_from_chunk(best_chunk)]
-    elif verdict == "partial":
+        if decision == "answer" and payload.get("response_text"):
+            if not citations and best_chunk is not None:
+                citations = [_normalize_citation_from_chunk(best_chunk)]
+            return {**payload, "citations": citations}
+        payload = {**payload, **_heuristic_response(state)}
+        return {**payload, "citations": _normalize_citations(payload, chunk_map)}
+
+    if verdict == "partial":
         if decision == "answer":
-            if not (
+            grounded_answer_allowed = bool(
                 ablation_options.get("answer_forward_grounding")
                 and payload.get("response_text")
                 and (citations or best_chunk is not None)
-            ):
-                fallback = _heuristic_response(state)
-                payload = {**payload, **fallback}
-                citations = _normalize_citations(payload, chunk_map)
-            elif not citations and best_chunk is not None:
-                citations = [_normalize_citation_from_chunk(best_chunk)]
+            )
+            if not grounded_answer_allowed:
+                payload = {**payload, **_heuristic_response(state)}
+                return {
+                    **payload,
+                    "citations": _normalize_citations(payload, chunk_map),
+                }
         elif decision != "clarify":
             payload = {**payload, "decision": "clarify"}
         if not citations and best_chunk is not None:
             citations = [_normalize_citation_from_chunk(best_chunk)]
-    elif verdict == "insufficient":
-        if decision != "abstain":
-            fallback = _heuristic_response(state)
-            payload = {**payload, **fallback}
-            citations = _normalize_citations(payload, chunk_map)
+        return {**payload, "citations": citations}
 
-    return {**payload, "citations": citations}
+    if verdict == "insufficient":
+        if decision == "abstain":
+            return {**payload, "citations": citations}
+        payload = {**payload, **_heuristic_response(state)}
+        return {**payload, "citations": _normalize_citations(payload, chunk_map)}
+
+    raise AssertionError(f"Unknown evidence verdict: {verdict}")
 
 
 def _chunk_sort_key(chunk: dict) -> tuple[int, int, str, str]:

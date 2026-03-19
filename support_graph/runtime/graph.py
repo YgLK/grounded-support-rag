@@ -7,7 +7,7 @@ import inspect
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -42,6 +42,9 @@ from support_graph.runtime.schemas import (
 from support_graph.runtime.traces import trace_file_path
 
 
+GraphRoute = Literal["generate_response", "refine_query", "resolve_without_answer"]
+
+
 def _retrieval_trace_chunks(chunks: list[dict], limit: int = 5) -> list[dict]:
     summaries: list[dict] = []
     for chunk in chunks[:limit]:
@@ -64,6 +67,48 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _latency_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 2)
+
+
+def _graph_path(state: GraphState, node_name: str) -> list[str]:
+    return state.get("graph_path", []) + [node_name]
+
+
+def _query_example(state: GraphState) -> dict:
+    return {
+        "domain": state.get("domain"),
+        "conversation": state.get("conversation", []),
+        "latest_user_turn_id": state.get("latest_user_turn_id"),
+        "latest_user_utterance": state.get("latest_user_utterance"),
+    }
+
+
+def _query_and_context(prepared: Any, state: GraphState) -> tuple[str, dict]:
+    if isinstance(prepared, tuple):
+        return prepared
+    return str(prepared), build_query_context(_query_example(state))
+
+
+def _response_state_update(
+    response: dict,
+    *,
+    path: list[str],
+    fallback_events: list[dict] | None,
+) -> GraphState:
+    result: GraphState = {
+        "decision": response.get("decision"),
+        "response_text": response.get("response_text"),
+        "confidence_label": response.get("confidence_label"),
+        "citations": response.get("citation_chunk_ids", []),
+        "response_payload": response,
+        "graph_path": path,
+    }
+    if fallback_events is not None:
+        result["fallback_events"] = fallback_events
+    return result
+
+
 def _normalize_final_output(
     state: GraphState, payload: dict, *, runtime: Runtime
 ) -> dict:
@@ -75,6 +120,9 @@ def _normalize_final_output(
         for event in fallback_events
         if event.get("node") is not None
     ]
+    observability_summary = (
+        runtime.observability.summary() if runtime.observability is not None else {}
+    )
     return {
         "example_id": state.get("example_id"),
         "decision": payload.get("decision"),
@@ -97,8 +145,8 @@ def _normalize_final_output(
             "fallback_nodes": fallback_nodes,
             "fallbacks": fallback_events,
             **(
-                {"observability": runtime.observability.summary()}
-                if runtime.observability is not None and runtime.observability.summary()
+                {"observability": observability_summary}
+                if observability_summary
                 else {}
             ),
         },
@@ -122,15 +170,18 @@ def _span_attributes(
     return attributes
 
 
-def _route_after_grade(state: GraphState) -> str:
+def _route_after_grade(state: GraphState) -> GraphRoute:
     grade = state.get("evidence_grade", {})
     attempts = state.get("retrieval_attempts", 0)
     max_attempts = state.get("max_attempts", 2)
-    if grade.get("verdict") == "sufficient":
+    verdict = grade.get("verdict")
+    if verdict == "sufficient":
         return "generate_response"
-    if grade.get("verdict") == "partial" and attempts < max_attempts:
+    if verdict == "partial" and attempts < max_attempts:
         return "refine_query"
-    return "resolve_without_answer"
+    if verdict == "partial" or verdict == "insufficient":
+        return "resolve_without_answer"
+    raise AssertionError(f"Unknown evidence verdict: {verdict}")
 
 
 def _updated_fallback_events(state: GraphState, payload: dict) -> list[dict] | None:
@@ -168,12 +219,14 @@ def _initial_state(
     runtime: Runtime,
     max_attempts: int | None,
 ) -> GraphState:
+    conversation = list(example.get("conversation") or []) or list(
+        example.get("turns_before_target") or []
+    )
     return {
         "example": example,
         "example_id": example.get("example_id"),
         "domain": example.get("domain") or config.domain,
-        "conversation": list(example.get("conversation") or [])
-        or list(example.get("turns_before_target") or []),
+        "conversation": conversation,
         "latest_user_turn_id": example.get("latest_user_turn_id"),
         "latest_user_utterance": example.get("latest_user_utterance"),
         "retrieval_attempts": 0,
@@ -197,26 +250,15 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
         ):
             started = time.perf_counter()
             prepared = await _maybe_await(prepare_query(state=state, runtime=runtime))
-            if isinstance(prepared, tuple):
-                query, query_context = prepared
-            else:
-                query = str(prepared)
-                query_context = build_query_context(
-                    {
-                        "domain": state.get("domain"),
-                        "conversation": state.get("conversation", []),
-                        "latest_user_turn_id": state.get("latest_user_turn_id"),
-                        "latest_user_utterance": state.get("latest_user_utterance"),
-                    }
-                )
-            path = state.get("graph_path", []) + ["prepare_query"]
+            query, query_context = _query_and_context(prepared, state)
+            path = _graph_path(state, "prepare_query")
             await _trace(
                 runtime,
                 "prepare_query",
                 {
                     "query": query,
                     "query_context": query_context,
-                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "latency_ms": _latency_ms(started),
                 },
             )
             await _emit_graph_event(
@@ -253,7 +295,7 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                 ranked_chunks=ranked_chunks,
             )
             attempts = state.get("retrieval_attempts", 0) + 1
-            path = state.get("graph_path", []) + ["retrieve_docs"]
+            path = _graph_path(state, "retrieve_docs")
             await _trace(
                 runtime,
                 "retrieve_docs",
@@ -266,7 +308,7 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                     "retrieved_chunks": _retrieval_trace_chunks(
                         evidence_chunks, limit=8
                     ),
-                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "latency_ms": _latency_ms(started),
                 },
             )
             await _emit_graph_event(
@@ -297,10 +339,10 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
             started = time.perf_counter()
             raw_grade = await _maybe_await(grade_evidence(state=state, runtime=runtime))
             grade = strip_internal_fields(raw_grade)
-            path = state.get("graph_path", []) + ["grade_evidence"]
+            path = _graph_path(state, "grade_evidence")
             event = {
                 "evidence_grade": grade,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                "latency_ms": _latency_ms(started),
             }
             fallback_events = _updated_fallback_events(state, raw_grade)
             if fallback_events is not None:
@@ -335,13 +377,13 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
         ):
             started = time.perf_counter()
             query = await _maybe_await(refine_query(state=state, runtime=runtime))
-            path = state.get("graph_path", []) + ["refine_query"]
+            path = _graph_path(state, "refine_query")
             await _trace(
                 runtime,
                 "refine_query",
                 {
                     "refined_query": query,
-                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "latency_ms": _latency_ms(started),
                 },
             )
             return {"refined_query": query, "final_query": query, "graph_path": path}
@@ -357,11 +399,11 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                 generate_response(state=state, runtime=runtime)
             )
             response = strip_internal_fields(raw_response)
-            path = state.get("graph_path", []) + ["generate_response"]
+            path = _graph_path(state, "generate_response")
             event = {
                 "decision": response.get("decision"),
                 "citation_chunk_ids": response.get("citation_chunk_ids", []),
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                "latency_ms": _latency_ms(started),
             }
             fallback_events = _updated_fallback_events(state, raw_response)
             if fallback_events is not None:
@@ -373,17 +415,11 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                 node_name="generate_response",
                 fallback_events=fallback_events,
             )
-            result: GraphState = {
-                "decision": response.get("decision"),
-                "response_text": response.get("response_text"),
-                "confidence_label": response.get("confidence_label"),
-                "citations": response.get("citation_chunk_ids", []),
-                "response_payload": response,
-                "graph_path": path,
-            }
-            if fallback_events is not None:
-                result["fallback_events"] = fallback_events
-            return result
+            return _response_state_update(
+                response,
+                path=path,
+                fallback_events=fallback_events,
+            )
 
     async def resolve_without_answer_node(state: GraphState) -> GraphState:
         with span_context(
@@ -396,11 +432,11 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                 resolve_without_answer(state=state, runtime=runtime)
             )
             response = strip_internal_fields(raw_response)
-            path = state.get("graph_path", []) + ["resolve_without_answer"]
+            path = _graph_path(state, "resolve_without_answer")
             event = {
                 "decision": response.get("decision"),
                 "citation_chunk_ids": response.get("citation_chunk_ids", []),
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                "latency_ms": _latency_ms(started),
             }
             fallback_events = _updated_fallback_events(state, raw_response)
             if fallback_events is not None:
@@ -412,17 +448,11 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                 node_name="resolve_without_answer",
                 fallback_events=fallback_events,
             )
-            result: GraphState = {
-                "decision": response.get("decision"),
-                "response_text": response.get("response_text"),
-                "confidence_label": response.get("confidence_label"),
-                "citations": response.get("citation_chunk_ids", []),
-                "response_payload": response,
-                "graph_path": path,
-            }
-            if fallback_events is not None:
-                result["fallback_events"] = fallback_events
-            return result
+            return _response_state_update(
+                response,
+                path=path,
+                fallback_events=fallback_events,
+            )
 
     async def finalize_node(state: GraphState) -> GraphState:
         with span_context(
@@ -457,7 +487,7 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
                     "fallback_count": finalized.get("trace_summary", {}).get(
                         "fallback_count", 0
                     ),
-                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "latency_ms": _latency_ms(started),
                 },
             )
             if runtime.stream_responses:
@@ -536,9 +566,7 @@ async def run_graph_async(
     with graph_run_context(
         runtime.observability,
         project_name=(
-            runtime.observability.langsmith_project
-            if runtime.observability is not None
-            else None
+            runtime.observability.langsmith_project if runtime.observability else None
         ),
         tags=[
             "support-graph",
@@ -562,7 +590,7 @@ async def run_graph_async(
             },
         ):
             result = await app.ainvoke(initial_state)
-    return result["final_output"]
+    return cast(dict, result["final_output"])
 
 
 async def astream_graph_events(

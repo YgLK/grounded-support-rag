@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Protocol
 
 from langsmith import Client
 from langsmith.run_helpers import tracing_context
@@ -17,27 +17,46 @@ from opentelemetry.trace import ProxyTracerProvider
 
 
 _OTEL_PROVIDER: TracerProvider | None = None
+OtelExporter = Literal["console", "otlp"]
+
+
+class ObservabilityConfigLike(Protocol):
+    otel_enabled: bool
+    otel_service_name: str
+    otel_exporter: str | None
+    otel_endpoint: str | None
+    otel_headers: str | None
+    langsmith_tracing_enabled: bool
+    langsmith_project: str | None
+    langsmith_api_key: str | None
+    langsmith_endpoint: str | None
 
 
 @dataclass(slots=True)
 class Observability:
     tracer: Any | None = None
-    otel_enabled: bool = False
     otel_service_name: str | None = None
-    otel_exporter: str | None = None
-    langsmith_enabled: bool = False
+    otel_exporter: OtelExporter | None = None
     langsmith_project: str | None = None
-    langsmith_client: Any | None = None
+    langsmith_client: Client | None = None
+
+    @property
+    def otel_enabled(self) -> bool:
+        return self.tracer is not None
+
+    @property
+    def langsmith_enabled(self) -> bool:
+        return self.langsmith_client is not None
 
     def summary(self) -> dict[str, Any]:
         summary: dict[str, Any] = {}
-        if self.otel_enabled:
+        if self.tracer is not None:
             summary["opentelemetry"] = {
                 "enabled": True,
                 "service_name": self.otel_service_name or "support-graph",
                 "exporter": self.otel_exporter or "console",
             }
-        if self.langsmith_enabled:
+        if self.langsmith_client is not None:
             summary["langsmith"] = {
                 "enabled": True,
                 "project": self.langsmith_project or "support-graph",
@@ -58,24 +77,32 @@ def _parse_header_mapping(raw_headers: str | None) -> dict[str, str] | None:
     return headers or None
 
 
-def _build_otel_exporter(config: Any) -> Any:
-    exporter = str(getattr(config, "otel_exporter", "") or "").strip().lower()
-    endpoint = getattr(config, "otel_endpoint", None)
-    headers = _parse_header_mapping(getattr(config, "otel_headers", None))
-
+def _resolve_otel_exporter(config: ObservabilityConfigLike) -> OtelExporter:
+    exporter = str(config.otel_exporter or "").strip().lower()
+    endpoint = config.otel_endpoint
     if exporter == "console":
-        return ConsoleSpanExporter()
+        return "console"
     if exporter in {"", "otlp"}:
-        if endpoint is None:
-            return ConsoleSpanExporter()
-        return OTLPSpanExporter(endpoint=endpoint, headers=headers)
+        return "console" if endpoint is None else "otlp"
     raise ValueError(
         "Unsupported SUPPORT_GRAPH_OTEL_EXPORTER "
         f"'{exporter}'. Supported values: console, otlp."
     )
 
 
-def _ensure_otel_provider(config: Any) -> Any:
+def _build_otel_exporter(
+    config: ObservabilityConfigLike,
+    exporter: OtelExporter,
+) -> Any:
+    if exporter == "console":
+        return ConsoleSpanExporter()
+    endpoint = config.otel_endpoint
+    assert endpoint is not None
+    headers = _parse_header_mapping(config.otel_headers)
+    return OTLPSpanExporter(endpoint=endpoint, headers=headers)
+
+
+def _ensure_otel_provider(config: ObservabilityConfigLike) -> Any:
     global _OTEL_PROVIDER
 
     current_provider = trace.get_tracer_provider()
@@ -83,49 +110,45 @@ def _ensure_otel_provider(config: Any) -> Any:
         return current_provider
 
     if _OTEL_PROVIDER is None:
+        exporter = _resolve_otel_exporter(config)
         provider = TracerProvider(
             resource=Resource.create(
                 {
-                    "service.name": getattr(
-                        config, "otel_service_name", "support-graph"
-                    )
-                    or "support-graph",
+                    "service.name": config.otel_service_name or "support-graph",
                 }
             )
         )
-        provider.add_span_processor(BatchSpanProcessor(_build_otel_exporter(config)))
+        provider.add_span_processor(
+            BatchSpanProcessor(_build_otel_exporter(config, exporter))
+        )
         trace.set_tracer_provider(provider)
         _OTEL_PROVIDER = provider
     return trace.get_tracer_provider()
 
 
-def build_observability(config: Any) -> Observability:
+def build_observability(config: ObservabilityConfigLike) -> Observability | None:
+    if not config.otel_enabled and not config.langsmith_tracing_enabled:
+        return None
+
     observability = Observability()
 
-    if bool(getattr(config, "otel_enabled", False)):
+    if config.otel_enabled:
+        exporter = _resolve_otel_exporter(config)
         provider = _ensure_otel_provider(config)
         observability.tracer = trace.get_tracer(
             "support_graph.runtime",
             tracer_provider=provider,
         )
-        observability.otel_enabled = True
-        observability.otel_service_name = getattr(
-            config, "otel_service_name", "support-graph"
-        )
-        observability.otel_exporter = (
-            str(getattr(config, "otel_exporter", "") or "").strip().lower() or "console"
-        )
+        observability.otel_service_name = config.otel_service_name
+        observability.otel_exporter = exporter
 
-    if bool(getattr(config, "langsmith_tracing_enabled", False)):
+    if config.langsmith_tracing_enabled:
         client_kwargs: dict[str, Any] = {}
-        if getattr(config, "langsmith_api_key", None):
-            client_kwargs["api_key"] = getattr(config, "langsmith_api_key")
-        if getattr(config, "langsmith_endpoint", None):
-            client_kwargs["api_url"] = getattr(config, "langsmith_endpoint")
-        observability.langsmith_enabled = True
-        observability.langsmith_project = (
-            getattr(config, "langsmith_project", None) or "support-graph"
-        )
+        if config.langsmith_api_key:
+            client_kwargs["api_key"] = config.langsmith_api_key
+        if config.langsmith_endpoint:
+            client_kwargs["api_url"] = config.langsmith_endpoint
+        observability.langsmith_project = config.langsmith_project or "support-graph"
         observability.langsmith_client = Client(**client_kwargs)
 
     return observability
@@ -138,10 +161,12 @@ def graph_run_context(
     tags: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Any:
-    if observability is None or not observability.langsmith_enabled:
+    if observability is None or observability.langsmith_client is None:
         return nullcontext()
+    project = project_name or observability.langsmith_project
+    assert project is not None
     return tracing_context(
-        project_name=project_name or observability.langsmith_project,
+        project_name=project,
         tags=tags,
         metadata=metadata,
         enabled=True,
@@ -167,6 +192,8 @@ def span_context(
 
 __all__ = [
     "Observability",
+    "ObservabilityConfigLike",
+    "OtelExporter",
     "build_observability",
     "graph_run_context",
     "span_context",
