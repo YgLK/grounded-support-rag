@@ -5,10 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
 
-
-TargetMode = Literal["answer", "follow_up"]
+from support_graph.types import TargetMode
 
 
 def _subset_sort_key(example: dict, salt: str) -> tuple[str, str]:
@@ -29,7 +27,8 @@ def build_subset(
     target_mode: TargetMode = "answer",
     salt: str | None = None,
 ) -> list[dict]:
-    assert size > 0
+    if size <= 0:
+        raise ValueError("size must be positive.")
     effective_salt = _subset_salt(target_mode, size, salt)
     filtered = [
         example for example in examples if example["target_mode"] == target_mode

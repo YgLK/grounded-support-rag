@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from support_graph.providers import ChatProviderType, EmbeddingProviderType
+from support_graph.types import Domain, DomainLike, parse_domain
 
 
 class RuntimeSettingsLike(Protocol):
@@ -39,9 +40,11 @@ class RuntimeSettingsLike(Protocol):
     otel_headers: str | None
     trace_dir: Path
 
-    def collection_name(self, explicit_domain: str | None = None) -> str: ...
+    def collection_name(self, explicit_domain: DomainLike | None = None) -> str: ...
 
-    def chunk_artifact_path(self, explicit_domain: str | None = None) -> Path: ...
+    def chunk_artifact_path(
+        self, explicit_domain: DomainLike | None = None
+    ) -> Path: ...
 
 
 class EmbeddingBenchmarkConfigLike(Protocol):
@@ -59,7 +62,7 @@ class IndexConfigLike(Protocol):
     anthropic_api_key: str | None
     embedding_model: str | None
     embedding_client: Any | None
-    domain: str
+    domain: Domain
     collection_name: str
     chunk_artifact_path: Path | None
 
@@ -105,7 +108,7 @@ class RuntimeConfig:
     embedding_model: str | None = None
     chat_model: str | None = None
     prompt_version: str = "v1"
-    domain: str = "dmv"
+    domain: Domain = Domain.DMV
     collection_name: str = "support_graph_dmv"
     retrieval_top_k: int = 5
     retrieval_candidate_k: int = 12
@@ -134,7 +137,10 @@ class RuntimeConfig:
     embedding_client: Any | None = None
 
 
-def build_runtime_config(settings: RuntimeSettingsLike, domain: str) -> RuntimeConfig:
+def build_runtime_config(
+    settings: RuntimeSettingsLike, domain: DomainLike
+) -> RuntimeConfig:
+    resolved_domain = parse_domain(domain)
     return RuntimeConfig(
         postgres_dsn=settings.postgres_dsn,
         provider_type=settings.provider_type,
@@ -147,8 +153,8 @@ def build_runtime_config(settings: RuntimeSettingsLike, domain: str) -> RuntimeC
         embedding_model=settings.embedding_model,
         chat_model=settings.chat_model,
         prompt_version=settings.prompt_version,
-        domain=domain,
-        collection_name=settings.collection_name(domain),
+        domain=resolved_domain,
+        collection_name=settings.collection_name(resolved_domain),
         retrieval_top_k=settings.retrieval_top_k,
         retrieval_candidate_k=settings.retrieval_candidate_k,
         retrieval_rerank=True,
@@ -169,7 +175,7 @@ def build_runtime_config(settings: RuntimeSettingsLike, domain: str) -> RuntimeC
         otel_endpoint=settings.otel_endpoint,
         otel_headers=settings.otel_headers,
         trace_dir=settings.trace_dir,
-        chunk_artifact_path=settings.chunk_artifact_path(domain),
+        chunk_artifact_path=settings.chunk_artifact_path(resolved_domain),
     )
 
 

@@ -2,27 +2,55 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, cast
+
+from support_graph.types import Domain, DomainLike, TurnRole, parse_domain
 
 
-def normalize_domains(domains: Iterable[str] | str | None) -> set[str] | None:
+SUPPORTED_TURN_ROLES = frozenset({"agent", "user"})
+
+
+def _required_value(record: dict, field: str) -> object:
+    value = record.get(field)
+    if value is None:
+        raise ValueError(f"Missing required field: {field}")
+    return value
+
+
+def _required_list(record: dict, field: str) -> list:
+    value = record.get(field)
+    if not isinstance(value, list):
+        raise ValueError(f"Expected {field} to be a list.")
+    return value
+
+
+def normalize_domains(
+    domains: Iterable[DomainLike] | DomainLike | None,
+) -> set[Domain] | None:
     if domains is None:
         return None
     if isinstance(domains, str):
         values = [part.strip() for part in domains.split(",")]
     else:
         values = [str(domain).strip() for domain in domains]
-    normalized = {value for value in values if value}
+    normalized = {parse_domain(value) for value in values if value}
     return normalized or None
 
 
+def _normalize_turn_role(value: object) -> TurnRole:
+    normalized = str(value).strip().lower()
+    if normalized not in SUPPORTED_TURN_ROLES:
+        supported = ", ".join(sorted(SUPPORTED_TURN_ROLES))
+        raise ValueError(
+            f"Unsupported turn role '{value}'. Expected one of: {supported}"
+        )
+    return cast(TurnRole, normalized)
+
+
 def normalize_reference(reference: dict) -> dict:
-    label = reference.get("label")
-    id_sp = reference.get("id_sp")
-    doc_id = reference.get("doc_id")
-    assert label is not None
-    assert id_sp is not None
-    assert doc_id is not None
+    label = _required_value(reference, "label")
+    id_sp = _required_value(reference, "id_sp")
+    doc_id = _required_value(reference, "doc_id")
     return {
         "label": str(label),
         "id_sp": str(id_sp),
@@ -31,17 +59,13 @@ def normalize_reference(reference: dict) -> dict:
 
 
 def normalize_turn(turn: dict) -> dict:
-    references = turn.get("references")
-    assert isinstance(references, list)
-    role = turn.get("role")
-    da = turn.get("da")
-    utterance = turn.get("utterance")
-    assert role is not None
-    assert da is not None
-    assert utterance is not None
+    references = _required_list(turn, "references")
+    role = _required_value(turn, "role")
+    da = _required_value(turn, "da")
+    utterance = _required_value(turn, "utterance")
     return {
         "turn_id": turn.get("turn_id"),
-        "role": str(role),
+        "role": _normalize_turn_role(role),
         "da": str(da),
         "utterance": str(utterance),
         "references": [

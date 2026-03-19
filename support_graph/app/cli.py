@@ -36,10 +36,13 @@ from support_graph.retrieval.index import (
 from support_graph.logging_utils import configure_logging, get_logger
 from support_graph.runtime.graph import run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
+from support_graph.types import DatasetSplit, Domain, DomainLike, EvalSubset
 
 
 logger = get_logger(__name__)
-RunDecision = {"answer", "clarify", "abstain"}
+DOMAIN_CHOICES = [domain.value for domain in Domain]
+SPLIT_CHOICES = [split.value for split in DatasetSplit]
+EVAL_SUBSET_CHOICES = [subset.value for subset in EvalSubset]
 
 
 def _print_lines(lines: list[str]) -> None:
@@ -58,7 +61,7 @@ def _format_duration(seconds: float) -> str:
     return f"{remaining_seconds}s"
 
 
-def _run_config(settings: Settings, domain: str) -> RuntimeConfig:
+def _run_config(settings: Settings, domain: DomainLike) -> RuntimeConfig:
     return build_runtime_config(settings, domain)
 
 
@@ -118,7 +121,7 @@ def _index_missing_lines(
     *,
     title: str,
     collection_name: str,
-    domain: str,
+    domain: DomainLike,
 ) -> list[str]:
     return [
         title,
@@ -152,7 +155,7 @@ def _index_preflight_error_lines(
     title: str,
     postgres_dsn: str,
     collection_name: str,
-    domain: str,
+    domain: DomainLike,
 ) -> list[str] | None:
     row_count, row_count_error = _checked_collection_row_count(
         postgres_dsn,
@@ -174,7 +177,9 @@ def _index_preflight_error_lines(
 
 
 def load_example_record(
-    example_id: str, settings: Settings, domain: str | None = None
+    example_id: str,
+    settings: Settings,
+    domain: DomainLike | None = None,
 ) -> dict:
     candidate_paths = []
     if domain is not None:
@@ -184,7 +189,9 @@ def load_example_record(
     if not existing_paths:
         selected_domain = domain or settings.selected_domain()
         dialogues = load_dialogues(
-            settings.dataset_root, split="validation", domains=[selected_domain]
+            settings.dataset_root,
+            split=DatasetSplit.VALIDATION,
+            domains=[selected_domain],
         )
         examples = build_turn_examples(dialogues)
         output_path = settings.examples_dir / f"{selected_domain}_validation.jsonl"
@@ -195,18 +202,21 @@ def load_example_record(
 
 def _run_next_lines(result: dict) -> list[str]:
     decision = result.get("decision")
-    assert decision in RunDecision, f"Unknown decision: {decision}"
-    if decision == "answer":
-        return ["Grounded answer produced from retrieved DMV documentation."]
-    if decision == "clarify":
-        return [
-            "Ask one concrete missing-condition question.",
-            "If needed, retry with --verbose to inspect the evidence path.",
-        ]
-    return [
-        "No sufficient support was found for a safe answer.",
-        "Retry with --verbose or inspect outputs/traces/ for the retrieval path.",
-    ]
+    match decision:
+        case "answer":
+            return ["Grounded answer produced from retrieved DMV documentation."]
+        case "clarify":
+            return [
+                "Ask one concrete missing-condition question.",
+                "If needed, retry with --verbose to inspect the evidence path.",
+            ]
+        case "abstain":
+            return [
+                "No sufficient support was found for a safe answer.",
+                "Retry with --verbose or inspect outputs/traces/ for the retrieval path.",
+            ]
+        case _:
+            raise ValueError(f"Unknown decision: {decision}")
 
 
 def _format_run_output(result: dict, verbose: bool = False) -> list[str]:
@@ -759,10 +769,12 @@ def _run_example(args: argparse.Namespace) -> int:
     example = load_example_record(args.example_id, settings)
     domain = example.get("domain") or settings.selected_domain()
     run_config = _run_config(settings, domain)
-    assert run_config.postgres_dsn is not None
+    postgres_dsn = run_config.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for run.")
     error_lines = _index_preflight_error_lines(
         title="SupportGraph Run",
-        postgres_dsn=run_config.postgres_dsn,
+        postgres_dsn=postgres_dsn,
         collection_name=run_config.collection_name,
         domain=domain,
     )
@@ -796,10 +808,12 @@ def _eval_split(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    assert settings.postgres_dsn is not None
+    postgres_dsn = settings.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for evaluation.")
     error_lines = _index_preflight_error_lines(
         title="SupportGraph Eval",
-        postgres_dsn=settings.postgres_dsn,
+        postgres_dsn=postgres_dsn,
         collection_name=settings.collection_name(domain),
         domain=domain,
     )
@@ -836,10 +850,12 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
         return 1
 
     domain = settings.selected_domain(args.domain)
-    assert settings.postgres_dsn is not None
+    postgres_dsn = settings.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for ablation.")
     error_lines = _index_preflight_error_lines(
         title="SupportGraph Ablation",
-        postgres_dsn=settings.postgres_dsn,
+        postgres_dsn=postgres_dsn,
         collection_name=settings.collection_name(domain),
         domain=domain,
     )
@@ -1004,6 +1020,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_chunks_parser.add_argument(
         "--domain",
         default=None,
+        choices=DOMAIN_CHOICES,
         help="Domain to build. Defaults to the configured MVP domain.",
     )
     build_chunks_parser.add_argument("--max-tokens-per-chunk", type=int, default=512)
@@ -1018,10 +1035,11 @@ def build_parser() -> argparse.ArgumentParser:
     build_examples_parser.add_argument(
         "--domain",
         default=None,
+        choices=DOMAIN_CHOICES,
         help="Domain to build. Defaults to the configured MVP domain.",
     )
     build_examples_parser.add_argument(
-        "--split", default="validation", choices=["train", "validation", "test"]
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
     )
     build_examples_parser.add_argument(
         "--output", default=None, help="Optional JSONL output path."
@@ -1034,10 +1052,11 @@ def build_parser() -> argparse.ArgumentParser:
     build_subsets_parser.add_argument(
         "--domain",
         default=None,
+        choices=DOMAIN_CHOICES,
         help="Domain to build. Defaults to the configured MVP domain.",
     )
     build_subsets_parser.add_argument(
-        "--split", default="validation", choices=["train", "validation", "test"]
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
     )
     build_subsets_parser.add_argument("--smoke-size", type=int, default=25)
     build_subsets_parser.add_argument("--frozen-size", type=int, default=200)
@@ -1052,6 +1071,7 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_embeddings_parser.add_argument(
         "--domain",
         default=None,
+        choices=DOMAIN_CHOICES,
         help="Domain to benchmark. Defaults to the configured MVP domain.",
     )
     benchmark_embeddings_parser.add_argument(
@@ -1077,6 +1097,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_docs_parser.add_argument(
         "--domain",
         default=None,
+        choices=DOMAIN_CHOICES,
         help="Domain to index. Defaults to the configured MVP domain.",
     )
     index_docs_parser.add_argument(
@@ -1111,13 +1132,13 @@ def build_parser() -> argparse.ArgumentParser:
         "eval", help="Run the Phase 4 evaluation harness."
     )
     eval_parser.add_argument(
-        "--split", default="validation", choices=["train", "validation", "test"]
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
     )
-    eval_parser.add_argument("--domain", default=None)
+    eval_parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
     eval_parser.add_argument(
         "--subset",
-        default="smoke",
-        choices=["smoke", "frozen_ablation", "full_validation"],
+        default=EvalSubset.SMOKE,
+        choices=EVAL_SUBSET_CHOICES,
         help="Eval subset. Defaults to the developer-friendly smoke subset.",
     )
     eval_parser.add_argument(
@@ -1139,9 +1160,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the DMV Smoke-10 ablation variants and write a comparison note.",
     )
     ablation_parser.add_argument(
-        "--split", default="validation", choices=["train", "validation", "test"]
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
     )
-    ablation_parser.add_argument("--domain", default=None)
+    ablation_parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
     ablation_parser.add_argument(
         "--limit",
         type=int,

@@ -162,7 +162,8 @@ def fallback_metadata(payload: dict[str, Any]) -> FallbackTrace | None:
     raw = payload.get(_FALLBACK_KEY)
     if raw is None:
         return None
-    assert isinstance(raw, dict)
+    if not isinstance(raw, dict):
+        raise TypeError("Fallback metadata must be a dict.")
     return cast(FallbackTrace, dict(raw))
 
 

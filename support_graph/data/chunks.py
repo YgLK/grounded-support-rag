@@ -181,7 +181,8 @@ def build_chunks(
     `_approximate_token_count`, not a model tokenizer.
     """
 
-    assert max_tokens_per_chunk > 0
+    if max_tokens_per_chunk <= 0:
+        raise ValueError("max_tokens_per_chunk must be positive.")
     domain_filter = normalize_domains(domains)
     chunks: list[dict] = []
 

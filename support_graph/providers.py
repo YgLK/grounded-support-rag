@@ -73,22 +73,22 @@ def resolve_embedding_provider_type(
 
 def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
     provider = validate_chat_provider_type(config.provider_type)
-    if provider == "ollama":
-        return config.ollama_base_url
-    if provider == "openai":
-        return config.openai_base_url
-    if provider == "anthropic":
-        return config.anthropic_base_url
-    raise AssertionError(provider)
+    match provider:
+        case "ollama":
+            return config.ollama_base_url
+        case "openai":
+            return config.openai_base_url
+        case "anthropic":
+            return config.anthropic_base_url
 
 
 def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
     provider = resolve_embedding_provider_type(config)
-    if provider == "ollama":
-        return config.ollama_base_url
-    if provider == "openai":
-        return config.openai_base_url
-    raise AssertionError(provider)
+    match provider:
+        case "ollama":
+            return config.ollama_base_url
+        case "openai":
+            return config.openai_base_url
 
 
 def _without_none(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -99,46 +99,46 @@ def _chat_provider_kwargs(
     config: ProviderConfigLike,
     provider: ChatProviderType,
 ) -> dict[str, Any]:
-    if provider == "ollama":
-        return _without_none(
-            {
-                "temperature": 0,
-                "base_url": config.ollama_base_url,
-            }
-        )
-    if provider == "openai":
-        return _without_none(
-            {
-                "temperature": 0,
-                "api_key": config.openai_api_key,
-                "base_url": config.openai_base_url,
-            }
-        )
-    if provider == "anthropic":
-        return _without_none(
-            {
-                "temperature": 0,
-                "api_key": config.anthropic_api_key,
-                "base_url": config.anthropic_base_url,
-            }
-        )
-    raise AssertionError(provider)
+    match provider:
+        case "ollama":
+            return _without_none(
+                {
+                    "temperature": 0,
+                    "base_url": config.ollama_base_url,
+                }
+            )
+        case "openai":
+            return _without_none(
+                {
+                    "temperature": 0,
+                    "api_key": config.openai_api_key,
+                    "base_url": config.openai_base_url,
+                }
+            )
+        case "anthropic":
+            return _without_none(
+                {
+                    "temperature": 0,
+                    "api_key": config.anthropic_api_key,
+                    "base_url": config.anthropic_base_url,
+                }
+            )
 
 
 def _embedding_provider_kwargs(
     config: ProviderConfigLike,
     provider: EmbeddingProviderType,
 ) -> dict[str, Any]:
-    if provider == "ollama":
-        return _without_none({"base_url": config.ollama_base_url})
-    if provider == "openai":
-        return _without_none(
-            {
-                "api_key": config.openai_api_key,
-                "base_url": config.openai_base_url,
-            }
-        )
-    raise AssertionError(provider)
+    match provider:
+        case "ollama":
+            return _without_none({"base_url": config.ollama_base_url})
+        case "openai":
+            return _without_none(
+                {
+                    "api_key": config.openai_api_key,
+                    "base_url": config.openai_base_url,
+                }
+            )
 
 
 def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:

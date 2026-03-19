@@ -24,7 +24,8 @@ _SHARED_SEMAPHORES: dict[SemaphoreKey, asyncio.Semaphore] = {}
 
 
 def _max_concurrency(config: RuntimeConfigLike) -> int:
-    assert config.llm_max_concurrency > 0
+    if config.llm_max_concurrency <= 0:
+        raise ValueError("llm_max_concurrency must be positive.")
     return config.llm_max_concurrency
 
 
@@ -91,9 +92,14 @@ async def ainvoke_with_retry(
     base_delay_seconds: float,
     max_delay_seconds: float,
 ) -> _T:
-    assert max_attempts > 0
-    assert base_delay_seconds >= 0.0
-    assert max_delay_seconds >= base_delay_seconds
+    if max_attempts <= 0:
+        raise ValueError("max_attempts must be positive.")
+    if base_delay_seconds < 0.0:
+        raise ValueError("base_delay_seconds must be non-negative.")
+    if max_delay_seconds < base_delay_seconds:
+        raise ValueError(
+            "max_delay_seconds must be greater than or equal to base_delay_seconds."
+        )
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential_jitter(

@@ -350,25 +350,36 @@ def _abstain_payload() -> dict:
 def _heuristic_response(state: GraphState) -> dict:
     grade = state.get("evidence_grade", {})
     chunks = _reasoning_chunks(state)
-    if grade.get("verdict") == "sufficient" and chunks:
-        chunk = _best_retrieved_chunk(chunks)
-        assert chunk is not None
-        return _answer_payload(chunk)
-    if grade.get("verdict") == "partial":
-        missing = grade.get("missing_information") or ["one missing detail"]
-        return _clarify_payload(chunks, missing[0])
-    return _abstain_payload()
+    match grade.get("verdict"):
+        case "sufficient":
+            if not chunks:
+                return _abstain_payload()
+            chunk = _best_retrieved_chunk(chunks)
+            if chunk is None:
+                raise ValueError(
+                    "Missing best retrieved chunk for sufficient evidence."
+                )
+            return _answer_payload(chunk)
+        case "partial":
+            missing = grade.get("missing_information") or ["one missing detail"]
+            return _clarify_payload(chunks, missing[0])
+        case "insufficient" | None:
+            return _abstain_payload()
+    raise ValueError(f"Unknown evidence verdict: {grade.get('verdict')}")
 
 
 def _heuristic_non_answer_response(state: GraphState) -> dict:
     grade = state.get("evidence_grade", {})
     chunks = _reasoning_chunks(state)
-    if grade.get("verdict") == "partial":
-        missing = grade.get("missing_information") or [
-            "what condition changed in your DMV case"
-        ]
-        return _clarify_payload(chunks, missing[0])
-    return _abstain_payload()
+    match grade.get("verdict"):
+        case "partial":
+            missing = grade.get("missing_information") or [
+                "what condition changed in your DMV case"
+            ]
+            return _clarify_payload(chunks, missing[0])
+        case "sufficient" | "insufficient" | None:
+            return _abstain_payload()
+    raise ValueError(f"Unknown evidence verdict: {grade.get('verdict')}")
 
 
 def _query_example_from_state(state: GraphState) -> dict:
@@ -398,9 +409,10 @@ def _ablation_bool(state: GraphState, key: str, default: bool) -> bool:
 
 def _query_mode(state: GraphState) -> QueryMode:
     mode = state.get("ablation_options", {}).get("query_mode", "structured")
-    if mode in {"legacy_transcript", "latest_user_only", "structured"}:
-        return cast(QueryMode, mode)
-    raise AssertionError(f"Unknown query_mode: {mode}")
+    match mode:
+        case "legacy_transcript" | "latest_user_only" | "structured":
+            return cast(QueryMode, mode)
+    raise ValueError(f"Unknown query_mode: {mode}")
 
 
 def _is_title_chunk(chunk: dict) -> bool:
@@ -637,24 +649,31 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     query_example = _query_example_from_state(state)
     query_context = build_query_context(query_example)
     mode = _query_mode(state)
-    if mode == "legacy_transcript":
-        return build_legacy_query(query_example, history_turn_limit=4), query_context
-    if mode == "latest_user_only":
-        return (
-            build_retrieval_query(
-                query_example,
-                history_turn_limit=0,
-                include_history=False,
-            ),
-            query_context,
-        )
-    return build_retrieval_query(query_example, history_turn_limit=4), query_context
+    match mode:
+        case "legacy_transcript":
+            return build_legacy_query(
+                query_example, history_turn_limit=4
+            ), query_context
+        case "latest_user_only":
+            return (
+                build_retrieval_query(
+                    query_example,
+                    history_turn_limit=0,
+                    include_history=False,
+                ),
+                query_context,
+            )
+        case "structured":
+            return build_retrieval_query(
+                query_example, history_turn_limit=4
+            ), query_context
 
 
 async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
     ablation_options = state.get("ablation_options", {})
     query = state.get("refined_query") or state.get("query")
-    assert query is not None
+    if query is None:
+        raise ValueError("Missing retrieval query.")
     return await asyncio.to_thread(
         retrieve_chunks,
         example=_query_example_from_state(state),
@@ -872,40 +891,38 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
     decision = payload.get("decision")
     ablation_options = state.get("ablation_options", {})
 
-    if verdict == "sufficient":
-        if decision == "answer" and payload.get("response_text"):
+    match verdict:
+        case "sufficient":
+            if decision == "answer" and payload.get("response_text"):
+                if not citations and best_chunk is not None:
+                    citations = [_normalize_citation_from_chunk(best_chunk)]
+                return {**payload, "citations": citations}
+            payload = {**payload, **_heuristic_response(state)}
+            return {**payload, "citations": _normalize_citations(payload, chunk_map)}
+        case "partial":
+            if decision == "answer":
+                grounded_answer_allowed = bool(
+                    ablation_options.get("answer_forward_grounding")
+                    and payload.get("response_text")
+                    and (citations or best_chunk is not None)
+                )
+                if not grounded_answer_allowed:
+                    payload = {**payload, **_heuristic_response(state)}
+                    return {
+                        **payload,
+                        "citations": _normalize_citations(payload, chunk_map),
+                    }
+            elif decision != "clarify":
+                payload = {**payload, "decision": "clarify"}
             if not citations and best_chunk is not None:
                 citations = [_normalize_citation_from_chunk(best_chunk)]
             return {**payload, "citations": citations}
-        payload = {**payload, **_heuristic_response(state)}
-        return {**payload, "citations": _normalize_citations(payload, chunk_map)}
-
-    if verdict == "partial":
-        if decision == "answer":
-            grounded_answer_allowed = bool(
-                ablation_options.get("answer_forward_grounding")
-                and payload.get("response_text")
-                and (citations or best_chunk is not None)
-            )
-            if not grounded_answer_allowed:
-                payload = {**payload, **_heuristic_response(state)}
-                return {
-                    **payload,
-                    "citations": _normalize_citations(payload, chunk_map),
-                }
-        elif decision != "clarify":
-            payload = {**payload, "decision": "clarify"}
-        if not citations and best_chunk is not None:
-            citations = [_normalize_citation_from_chunk(best_chunk)]
-        return {**payload, "citations": citations}
-
-    if verdict == "insufficient":
-        if decision == "abstain":
-            return {**payload, "citations": citations}
-        payload = {**payload, **_heuristic_response(state)}
-        return {**payload, "citations": _normalize_citations(payload, chunk_map)}
-
-    raise AssertionError(f"Unknown evidence verdict: {verdict}")
+        case "insufficient":
+            if decision == "abstain":
+                return {**payload, "citations": citations}
+            payload = {**payload, **_heuristic_response(state)}
+            return {**payload, "citations": _normalize_citations(payload, chunk_map)}
+    raise ValueError(f"Unknown evidence verdict: {verdict}")
 
 
 def _chunk_sort_key(chunk: dict) -> tuple[int, int, str, str]:

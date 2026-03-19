@@ -15,7 +15,8 @@ class EmbeddingsClient(Protocol):
 
 
 def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> list[dict]:
-    assert sample_size > 0
+    if sample_size <= 0:
+        raise ValueError("sample_size must be positive.")
     if sample_size >= len(chunk_records):
         return list(chunk_records)
 
@@ -50,7 +51,8 @@ def benchmark_embeddings(
     warmup: bool = True,
     embeddings: EmbeddingsClient | None = None,
 ) -> dict:
-    assert batch_size > 0
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
 
     sample_records = select_benchmark_records(chunk_records, sample_size)
     sample_texts = chunk_records_to_texts(sample_records)

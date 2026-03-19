@@ -175,13 +175,16 @@ def _route_after_grade(state: GraphState) -> GraphRoute:
     attempts = state.get("retrieval_attempts", 0)
     max_attempts = state.get("max_attempts", 2)
     verdict = grade.get("verdict")
-    if verdict == "sufficient":
-        return "generate_response"
-    if verdict == "partial" and attempts < max_attempts:
-        return "refine_query"
-    if verdict == "partial" or verdict == "insufficient":
-        return "resolve_without_answer"
-    raise AssertionError(f"Unknown evidence verdict: {verdict}")
+    match verdict:
+        case "sufficient":
+            return "generate_response"
+        case "partial":
+            if attempts < max_attempts:
+                return "refine_query"
+            return "resolve_without_answer"
+        case "insufficient":
+            return "resolve_without_answer"
+    raise ValueError(f"Unknown evidence verdict: {verdict}")
 
 
 def _updated_fallback_events(state: GraphState, payload: dict) -> list[dict] | None:

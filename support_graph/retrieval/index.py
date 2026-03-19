@@ -12,14 +12,15 @@ from langchain_postgres import PGVector
 
 from support_graph.config.runtime import IndexConfigLike
 from support_graph.providers import build_embeddings as build_provider_embeddings
+from support_graph.types import DomainLike, parse_domain
 
 
 class VectorStoreWithAddDocuments(Protocol):
     def add_documents(self, documents: list[Document], *, ids: list[str]) -> Any: ...
 
 
-def build_collection_name(domain: str) -> str:
-    return f"support_graph_{domain}"
+def build_collection_name(domain: DomainLike) -> str:
+    return f"support_graph_{parse_domain(domain)}"
 
 
 def build_vector_id(collection_name: str, chunk_id: str) -> str:
@@ -160,7 +161,8 @@ def index_documents(
     batch_size: int = 1,
 ) -> Any:
     validate_index_config(config)
-    assert config.postgres_dsn is not None
+    if config.postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for indexing.")
 
     if chunk_records is None:
         chunk_artifact_path = config.chunk_artifact_path

@@ -80,10 +80,11 @@ def _parse_header_mapping(raw_headers: str | None) -> dict[str, str] | None:
 def _resolve_otel_exporter(config: ObservabilityConfigLike) -> OtelExporter:
     exporter = str(config.otel_exporter or "").strip().lower()
     endpoint = config.otel_endpoint
-    if exporter == "console":
-        return "console"
-    if exporter in {"", "otlp"}:
-        return "console" if endpoint is None else "otlp"
+    match exporter:
+        case "console":
+            return "console"
+        case "" | "otlp":
+            return "console" if endpoint is None else "otlp"
     raise ValueError(
         "Unsupported SUPPORT_GRAPH_OTEL_EXPORTER "
         f"'{exporter}'. Supported values: console, otlp."
@@ -94,10 +95,13 @@ def _build_otel_exporter(
     config: ObservabilityConfigLike,
     exporter: OtelExporter,
 ) -> Any:
-    if exporter == "console":
-        return ConsoleSpanExporter()
-    endpoint = config.otel_endpoint
-    assert endpoint is not None
+    match exporter:
+        case "console":
+            return ConsoleSpanExporter()
+        case "otlp":
+            endpoint = config.otel_endpoint
+    if endpoint is None:
+        raise ValueError("OTLP exporter requires otel_endpoint.")
     headers = _parse_header_mapping(config.otel_headers)
     return OTLPSpanExporter(endpoint=endpoint, headers=headers)
 
@@ -164,7 +168,8 @@ def graph_run_context(
     if observability is None or observability.langsmith_client is None:
         return nullcontext()
     project = project_name or observability.langsmith_project
-    assert project is not None
+    if project is None:
+        raise ValueError("LangSmith tracing requires a project name.")
     return tracing_context(
         project_name=project,
         tags=tags,

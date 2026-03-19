@@ -8,13 +8,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, cast
 
 from support_graph.data._utils import normalize_domains, normalize_turn
+from support_graph.types import (
+    DatasetSplitLike,
+    DomainLike,
+    parse_dataset_split,
+    parse_domain,
+)
 
 DOC_FILENAME = "multidoc2dial_doc.json"
 DIAL_FILENAME_TEMPLATE = "multidoc2dial_dial_{split}.json"
-SUPPORTED_SPLITS = {"train", "validation", "test"}
 _MISSING_POSITION = 10**18
 
 
@@ -30,17 +35,31 @@ def _load_json(path: Path) -> dict:
         return json.load(handle)
 
 
+def _require_dict(value: object, name: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected {name} to be an object.")
+    return cast(dict, value)
+
+
+def _require_list(value: object, name: str) -> list:
+    if not isinstance(value, list):
+        raise ValueError(f"Expected {name} to be a list.")
+    return cast(list, value)
+
+
+def _require_value(record: dict, field: str) -> object:
+    value = record.get(field)
+    if value is None:
+        raise ValueError(f"Missing required field: {field}")
+    return value
+
+
 def _normalize_span(span: dict) -> dict:
-    parent_titles = span.get("parent_titles")
-    assert isinstance(parent_titles, list)
-    tag = span.get("tag")
-    text_sp = span.get("text_sp")
-    title = span.get("title")
-    text_sec = span.get("text_sec")
-    assert tag is not None
-    assert text_sp is not None
-    assert title is not None
-    assert text_sec is not None
+    parent_titles = _require_list(span.get("parent_titles"), "parent_titles")
+    tag = _require_value(span, "tag")
+    text_sp = _require_value(span, "text_sp")
+    title = _require_value(span, "title")
+    text_sec = _require_value(span, "text_sec")
     return {
         "id_sp": str(span.get("id_sp", "")),
         "tag": str(tag),
@@ -61,7 +80,8 @@ def _normalize_span(span: dict) -> dict:
 
 
 def load_documents(
-    dataset_root: str | Path, domains: Iterable[str] | str | None = None
+    dataset_root: str | Path,
+    domains: Iterable[DomainLike] | DomainLike | None = None,
 ) -> list[dict]:
     """Load raw MultiDoc2Dial documents.
 
@@ -72,18 +92,20 @@ def load_documents(
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
     payload = _load_json(dataset_root / DOC_FILENAME)
-    doc_data = payload.get("doc_data")
-    assert isinstance(doc_data, dict)
+    doc_data = _require_dict(payload.get("doc_data"), "doc_data")
     documents: list[dict] = []
 
     for domain, docs in _sorted_items(doc_data):
-        if domain_filter is not None and domain not in domain_filter:
+        resolved_domain = parse_domain(domain)
+        if domain_filter is not None and resolved_domain not in domain_filter:
             continue
-        assert isinstance(docs, dict)
+        docs = _require_dict(docs, f"doc_data[{domain}]")
         for doc_id, doc in _sorted_items(docs):
-            assert isinstance(doc, dict)
-            spans = doc.get("spans")
-            assert isinstance(spans, dict)
+            doc = _require_dict(doc, f"doc_data[{domain}][{doc_id}]")
+            spans = _require_dict(
+                doc.get("spans"),
+                f"doc_data[{domain}][{doc_id}].spans",
+            )
             normalized_spans = sorted(
                 (_normalize_span(span) for span in spans.values()),
                 key=lambda span: (
@@ -98,7 +120,7 @@ def load_documents(
             )
             documents.append(
                 {
-                    "domain": domain,
+                    "domain": str(resolved_domain),
                     "doc_id": str(doc_id),
                     "title": str(doc["title"]),
                     "doc_text": str(doc["doc_text"]),
@@ -114,29 +136,28 @@ def load_documents(
 
 def load_dialogues(
     dataset_root: str | Path,
-    split: str,
-    domains: Iterable[str] | str | None = None,
+    split: DatasetSplitLike,
+    domains: Iterable[DomainLike] | DomainLike | None = None,
 ) -> list[dict]:
     """Load raw MultiDoc2Dial dialogue records for a split."""
 
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
-    if split not in SUPPORTED_SPLITS:
-        supported = ", ".join(sorted(SUPPORTED_SPLITS))
-        raise ValueError(f"Unsupported split '{split}'. Expected one of: {supported}")
-    payload = _load_json(dataset_root / DIAL_FILENAME_TEMPLATE.format(split=split))
-    dial_data = payload.get("dial_data")
-    assert isinstance(dial_data, dict)
+    resolved_split = parse_dataset_split(split)
+    payload = _load_json(
+        dataset_root / DIAL_FILENAME_TEMPLATE.format(split=resolved_split)
+    )
+    dial_data = _require_dict(payload.get("dial_data"), "dial_data")
     dialogues: list[dict] = []
 
     for domain, dials in _sorted_items(dial_data):
-        if domain_filter is not None and domain not in domain_filter:
+        resolved_domain = parse_domain(domain)
+        if domain_filter is not None and resolved_domain not in domain_filter:
             continue
-        assert isinstance(dials, list)
+        dials = _require_list(dials, f"dial_data[{domain}]")
         for dial in dials:
-            assert isinstance(dial, dict)
-            turns = dial.get("turns")
-            assert isinstance(turns, list)
+            dial = _require_dict(dial, f"dial_data[{domain}][]")
+            turns = _require_list(dial.get("turns"), f"dial_data[{domain}][].turns")
             turns = sorted(
                 turns,
                 key=lambda turn: (
@@ -146,7 +167,7 @@ def load_dialogues(
             )
             dialogues.append(
                 {
-                    "domain": domain,
+                    "domain": str(resolved_domain),
                     "dial_id": str(dial["dial_id"]),
                     "turns": [normalize_turn(turn) for turn in turns],
                 }

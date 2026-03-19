@@ -13,6 +13,7 @@ from support_graph.evaluation.evaluate import (
     with_config_overrides,
 )
 from support_graph.runtime.graph import run_graph_async
+from support_graph.types import DatasetSplit, DatasetSplitLike, Domain, DomainLike
 
 
 VariantId = Literal[
@@ -202,8 +203,8 @@ async def _run_variant(
     *,
     settings: Any,
     examples: list[dict],
-    domain: str,
-    split: str,
+    domain: DomainLike,
+    split: DatasetSplitLike,
     subset_name: str,
     started_at: datetime,
     base_config: Any,
@@ -315,7 +316,7 @@ def _summary_table_rows(results: list[dict]) -> list[str]:
 def write_ablation_summary(
     *,
     settings: AblationSettingsLike,
-    domain: str,
+    domain: DomainLike,
     limit: int,
     results: list[dict],
     summary_timestamp: datetime,
@@ -399,8 +400,8 @@ def write_ablation_summary(
 async def run_smoke10_ablation_async(
     *,
     settings: Any,
-    domain: str = "dmv",
-    split: str = "validation",
+    domain: DomainLike = Domain.DMV,
+    split: DatasetSplitLike = DatasetSplit.VALIDATION,
     limit: int = 10,
     run_graph_func: Any | None = None,
     now: datetime | None = None,

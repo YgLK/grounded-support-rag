@@ -31,6 +31,16 @@ from support_graph.data.examples import (
 from support_graph.providers import chat_provider_base_url, embedding_provider_base_url
 from support_graph.runtime.graph import resolve_runtime_resources_async, run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
+from support_graph.types import (
+    DatasetSplit,
+    DatasetSplitLike,
+    DomainLike,
+    EvalSubset,
+    EvalSubsetLike,
+    parse_dataset_split,
+    parse_domain,
+    parse_eval_subset,
+)
 
 
 END_TO_END_TEXT_THRESHOLD = 0.35
@@ -189,57 +199,75 @@ def _retrieval_metric_available(retrieval_top_k: int | None, *, k: int) -> bool:
 def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
     target_mode = example.get("target_mode")
     decision = prediction.get("decision")
-    if target_mode == "answer":
-        if decision == "clarify":
-            return "bad_clarification"
-        if decision == "abstain":
-            if ((metrics.get("doc_recall_at_3") or 0.0) > 0) or (
-                (metrics.get("span_recall_at_5") or 0.0) > 0
-            ):
-                return "abstained_with_evidence"
-            return "wrong_doc"
-        if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
-            if len(example.get("turns_before_target", [])) >= 3:
-                return "missed_history"
-            return "wrong_doc"
-        if (metrics.get("doc_recall_at_3") or 0.0) > 0.0 and (
-            metrics.get("span_recall_at_5") or 0.0
-        ) == 0.0:
-            return "right_doc_wrong_section"
-        if (metrics.get("citations_valid") or 0.0) == 0.0 or (
-            metrics.get("citation_coverage") or 0.0
-        ) < 1.0:
-            return "weak_citations"
-        if (metrics.get("end_to_end_success") or 0.0) == 0.0:
-            return "unsupported_answer"
-        return None
-    assert target_mode == "follow_up", f"Unknown target_mode: {target_mode}"
-    if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
-        return "wrong_doc"
-    return None
+    match target_mode:
+        case "answer":
+            if decision == "clarify":
+                return "bad_clarification"
+            if decision == "abstain":
+                if ((metrics.get("doc_recall_at_3") or 0.0) > 0) or (
+                    (metrics.get("span_recall_at_5") or 0.0) > 0
+                ):
+                    return "abstained_with_evidence"
+                return "wrong_doc"
+            if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
+                if len(example.get("turns_before_target", [])) >= 3:
+                    return "missed_history"
+                return "wrong_doc"
+            if (metrics.get("doc_recall_at_3") or 0.0) > 0.0 and (
+                metrics.get("span_recall_at_5") or 0.0
+            ) == 0.0:
+                return "right_doc_wrong_section"
+            if (metrics.get("citations_valid") or 0.0) == 0.0 or (
+                metrics.get("citation_coverage") or 0.0
+            ) < 1.0:
+                return "weak_citations"
+            if (metrics.get("end_to_end_success") or 0.0) == 0.0:
+                return "unsupported_answer"
+            return None
+        case "follow_up":
+            if (metrics.get("doc_recall_at_3") or 0.0) == 0.0:
+                return "wrong_doc"
+            return None
+    raise ValueError(f"Unknown target_mode: {target_mode}")
 
 
-def _load_or_build_examples(settings: Any, domain: str, split: str) -> list[dict]:
-    path = settings.examples_dir / f"{domain}_{split}.jsonl"
+def _load_or_build_examples(
+    settings: Any,
+    domain: DomainLike,
+    split: DatasetSplitLike,
+) -> list[dict]:
+    resolved_domain = parse_domain(domain)
+    resolved_split = parse_dataset_split(split)
+    path = settings.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
     if path.exists():
         return load_examples_jsonl(path)
-    dialogues = load_dialogues(settings.dataset_root, split=split, domains=[domain])
+    dialogues = load_dialogues(
+        settings.dataset_root,
+        split=resolved_split,
+        domains=[resolved_domain],
+    )
     examples = build_turn_examples(dialogues)
     write_examples_jsonl(examples, path)
     return examples
 
 
 def load_eval_examples(
-    settings: Any, domain: str, split: str, subset: str
+    settings: Any,
+    domain: DomainLike,
+    split: DatasetSplitLike,
+    subset: EvalSubsetLike,
 ) -> tuple[list[dict], str]:
-    if subset in {"smoke", "frozen_ablation"}:
-        path = settings.project_root / "data/eval_subsets" / f"{subset}.jsonl"
-        return load_subset_jsonl(path), subset
+    resolved_subset = parse_eval_subset(subset)
+    if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_ABLATION}:
+        path = settings.project_root / "data/eval_subsets" / f"{resolved_subset}.jsonl"
+        return load_subset_jsonl(path), str(resolved_subset)
     examples = _load_or_build_examples(settings, domain, split)
-    return examples, "full_validation"
+    return examples, str(EvalSubset.FULL_VALIDATION)
 
 
-def build_eval_config(settings: RuntimeSettingsLike, domain: str) -> RuntimeConfig:
+def build_eval_config(
+    settings: RuntimeSettingsLike, domain: DomainLike
+) -> RuntimeConfig:
     return build_runtime_config(settings, domain)
 
 
@@ -248,14 +276,14 @@ def with_config_overrides(config: RuntimeConfig, **overrides: Any) -> RuntimeCon
 
 
 def build_run_id(
-    domain: str,
+    domain: DomainLike,
     subset: str,
     now: datetime | None = None,
     *,
     slug: str | None = None,
 ) -> str:
     current = now or datetime.now().astimezone()
-    parts = [current.strftime("%Y%m%d-%H%M%S"), domain, subset]
+    parts = [current.strftime("%Y%m%d-%H%M%S"), str(parse_domain(domain)), subset]
     if slug:
         parts.append(slug)
     return "-".join(parts)
@@ -744,8 +772,8 @@ async def evaluate_examples_async(
     examples: list[dict],
     *,
     settings: Any,
-    domain: str,
-    split: str,
+    domain: DomainLike,
+    split: DatasetSplitLike,
     subset_name: str,
     limit: int | None = None,
     notes: str | None = None,
@@ -757,16 +785,19 @@ async def evaluate_examples_async(
     manifest_overrides: dict[str, Any] | None = None,
     max_concurrency: int = 1,
 ) -> dict:
+    resolved_domain = parse_domain(domain)
+    resolved_split = parse_dataset_split(split)
     selected_examples = examples[:limit] if limit is not None else examples
     if not selected_examples:
         raise ValueError("No examples available for evaluation.")
-    assert max_concurrency > 0
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be positive.")
 
-    run_id = build_run_id(domain, subset_name, now=now, slug=run_id_slug)
+    run_id = build_run_id(resolved_domain, subset_name, now=now, slug=run_id_slug)
     output_dir = settings.eval_dir / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_config = (
-        config if config is not None else build_eval_config(settings, domain)
+        config if config is not None else build_eval_config(settings, resolved_domain)
     )
     shared_runtime_resources = (
         await resolve_runtime_resources_async(resolved_config)
@@ -839,13 +870,15 @@ async def evaluate_examples_async(
             ).items()
         )
     )
-    resolved_subset_label = subset_label or f"{domain} {split} / {subset_name}"
+    resolved_subset_label = (
+        subset_label or f"{resolved_domain} {resolved_split} / {subset_name}"
+    )
     manifest = {
         "run_id": run_id,
         "created_at": (now or datetime.now().astimezone()).isoformat(),
         "dataset_root": str(settings.dataset_root),
-        "domains": [domain],
-        "split": split,
+        "domains": [str(resolved_domain)],
+        "split": str(resolved_split),
         "eval_subset": subset_name,
         "target_modes": sorted(
             {example.get("target_mode", "answer") for example in selected_examples}
@@ -954,21 +987,29 @@ async def evaluate_examples_async(
 async def evaluate_split_async(
     *,
     settings: Any,
-    domain: str,
-    split: str = "validation",
-    subset: str = "smoke",
+    domain: DomainLike,
+    split: DatasetSplitLike = DatasetSplit.VALIDATION,
+    subset: EvalSubsetLike = EvalSubset.SMOKE,
     limit: int | None = None,
     notes: str | None = None,
     run_graph_func: Any = run_graph_async,
     now: datetime | None = None,
     max_concurrency: int = 1,
 ) -> dict:
-    examples, subset_name = load_eval_examples(settings, domain, split, subset)
+    resolved_domain = parse_domain(domain)
+    resolved_split = parse_dataset_split(split)
+    resolved_subset = parse_eval_subset(subset)
+    examples, subset_name = load_eval_examples(
+        settings,
+        resolved_domain,
+        resolved_split,
+        resolved_subset,
+    )
     return await evaluate_examples_async(
         examples,
         settings=settings,
-        domain=domain,
-        split=split,
+        domain=resolved_domain,
+        split=resolved_split,
         subset_name=subset_name,
         limit=limit,
         notes=notes,

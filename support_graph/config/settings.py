@@ -12,6 +12,7 @@ from support_graph.providers import (
     validate_chat_provider_type,
     validate_embedding_provider_type,
 )
+from support_graph.types import Domain, DomainLike, parse_domain, parse_domains
 
 
 def _repo_root() -> Path:
@@ -104,11 +105,14 @@ def _read_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
-def _csv_to_tuple(value: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
+def _csv_to_domains(
+    value: str | None, default: tuple[Domain, ...]
+) -> tuple[Domain, ...]:
     if not value:
         return default
-    items = tuple(part.strip() for part in value.split(",") if part.strip())
-    return items or default
+    items = [part.strip() for part in value.split(",") if part.strip()]
+    resolved = parse_domains(items)
+    return resolved or default
 
 
 def _int_value(value: str | None, default: int) -> int:
@@ -133,7 +137,7 @@ def _bool_value(value: str | None, default: bool = False) -> bool:
 class Settings:
     project_root: Path
     dataset_root: Path
-    enabled_domains: tuple[str, ...]
+    enabled_domains: tuple[Domain, ...]
     postgres_dsn: str | None
     provider_type: ChatProviderType
     embedding_provider_type: EmbeddingProviderType | None
@@ -212,8 +216,8 @@ class Settings:
         return cls(
             project_root=project_root,
             dataset_root=dataset_root,
-            enabled_domains=_csv_to_tuple(
-                env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), ("dmv",)
+            enabled_domains=_csv_to_domains(
+                env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), (Domain.DMV,)
             ),
             postgres_dsn=env.get("SUPPORT_GRAPH_POSTGRES_DSN") or None,
             provider_type=provider_type,
@@ -290,16 +294,17 @@ class Settings:
             dotenv_path=resolved_dotenv,
         )
 
-    def selected_domain(self, explicit_domain: str | None = None) -> str:
+    def selected_domain(self, explicit_domain: DomainLike | None = None) -> Domain:
         if explicit_domain:
-            return explicit_domain
-        assert self.enabled_domains
+            return parse_domain(explicit_domain)
+        if not self.enabled_domains:
+            raise ValueError("enabled_domains must contain at least one domain.")
         return self.enabled_domains[0]
 
-    def chunk_artifact_path(self, explicit_domain: str | None = None) -> Path:
+    def chunk_artifact_path(self, explicit_domain: DomainLike | None = None) -> Path:
         return self.chunks_dir / f"{self.selected_domain(explicit_domain)}.jsonl"
 
-    def collection_name(self, explicit_domain: str | None = None) -> str:
+    def collection_name(self, explicit_domain: DomainLike | None = None) -> str:
         return f"support_graph_{self.selected_domain(explicit_domain)}"
 
     def index_missing_fields(self) -> list[str]:
@@ -324,13 +329,18 @@ class Settings:
         return list(dict.fromkeys(missing))
 
     def _chat_provider_missing_fields(self) -> list[str]:
-        if self.provider_type == "ollama":
-            return []
-        if self.provider_type == "openai":
-            return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
-        if self.provider_type == "anthropic":
-            return [] if self.anthropic_api_key else ["SUPPORT_GRAPH_ANTHROPIC_API_KEY"]
-        raise AssertionError(self.provider_type)
+        match self.provider_type:
+            case "ollama":
+                return []
+            case "openai":
+                return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
+            case "anthropic":
+                return (
+                    []
+                    if self.anthropic_api_key
+                    else ["SUPPORT_GRAPH_ANTHROPIC_API_KEY"]
+                )
+        raise ValueError(f"Unknown provider_type: {self.provider_type!r}")
 
     def _embedding_provider_missing_fields(self) -> list[str]:
         if not self.embedding_model:
@@ -338,8 +348,9 @@ class Settings:
         if self.embedding_provider_type is None and self.provider_type == "anthropic":
             return ["SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE"]
         provider = self.embedding_provider_type or self.provider_type
-        if provider == "ollama":
-            return []
-        if provider == "openai":
-            return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
-        raise AssertionError(provider)
+        match provider:
+            case "ollama":
+                return []
+            case "openai":
+                return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
+        raise ValueError(f"Unknown embedding provider_type: {provider}")

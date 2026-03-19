@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
 
 from support_graph.data._utils import normalize_turn
-
-
-TargetMode = Literal["answer", "follow_up"]
+from support_graph.types import TargetMode
 
 
 def _target_mode(turn: dict) -> TargetMode:
