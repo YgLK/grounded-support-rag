@@ -19,6 +19,15 @@ EVAL_RUN_REQUIRED_FILES = (
     "trace_index.json",
     "summary.md",
 )
+EVAL_REPORT_REQUIRED_FILES = (
+    "manifest.json",
+    "report.md",
+)
+STANDALONE_RUN_REQUIRED_FILES = (
+    "manifest.json",
+    "result.json",
+    "trace.jsonl",
+)
 
 
 @dataclass(frozen=True, slots=True)
