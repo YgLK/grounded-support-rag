@@ -7,7 +7,7 @@ This package is the CLI surface. It is the only layer that speaks directly to th
 | File | Responsibility | Connects To |
 | --- | --- | --- |
 | `__init__.py` | Marks the package and keeps the namespace clean. | No runtime logic. |
-| `cli.py` | Defines all CLI commands, formats terminal output, performs config and index preflight checks, and dispatches into the data, retrieval, runtime, and evaluation modules. | Calls `config/` to load settings, `data/` for deterministic prep, `retrieval/index.py` for indexing, `runtime/graph.py` for single-example runs, `runtime/traces.py` for trace inspection, and `evaluation/` for evals, ablations, and benchmarks. |
+| `cli.py` | Defines all CLI commands, formats terminal output, performs config and index preflight checks, and dispatches into the data, retrieval, runtime, evaluation, and UI modules. | Calls `config/` to load settings, `data/` for deterministic prep, `retrieval/index.py` for indexing, `runtime/graph.py` for single-example runs, `runtime/traces.py` for trace inspection, `evaluation/` for evals and ablations, and `ui/` for the Workbench server. |
 
 ## How It Connects Later On
 
@@ -16,3 +16,4 @@ This package is the CLI surface. It is the only layer that speaks directly to th
 3. Runtime commands build a `RuntimeConfig`, then call `support_graph.runtime.graph.run_graph_async`.
 4. Eval and ablation commands call `support_graph.evaluation.evaluate` and `support_graph.evaluation.ablation`, which themselves reuse the same runtime graph used by `run`.
 5. Trace review commands read the JSONL trace files produced by `support_graph.runtime.traces` and summarize them for terminal inspection.
+6. The `ui` command serves `support_graph.ui.create_app`, which layers HTML, HTMX partials, and live SSE streaming on top of the existing artifact contracts.

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "_macros.html" import artifact_paths, chunk_panel, status_pill, trace_events_panel %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card detail-hero">
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+          <div>
+            <div class="text-secondary small text-uppercase mb-2">Standalone Run</div>
+            <h2 class="h3 mono mb-2">{{ detail.summary.run_id }}</h2>
+            <div class="d-flex flex-wrap gap-2">
+              {{ status_pill(detail.summary.decision|slug_label, detail.summary.decision|decision_tone) }}
+              {{ status_pill(detail.summary.provider.type, "status-neutral") }}
+              {{ status_pill(detail.manifest.domain, "status-neutral") }}
+            </div>
+          </div>
+          <div class="text-end">
+            <div class="text-secondary small">Created</div>
+            <div class="fw-semibold">{{ detail.summary.created_at|datetime_label }}</div>
+            <div class="small text-secondary mt-2 mono">{{ detail.summary.example_id }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header"><h3 class="card-title">User Context</h3></div>
+      <div class="card-body">
+        <div class="text-secondary small mb-2">Latest user utterance</div>
+        <div class="response-block">{{ detail.result.latest_user_utterance or "No user utterance recorded." }}</div>
+        <div class="text-secondary small mt-3 mb-2">Final query</div>
+        <div class="query-code">{{ detail.trace_summary.final_query }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-header"><h3 class="card-title">Response</h3></div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          {{ status_pill(detail.result.decision|slug_label, detail.result.decision|decision_tone) }}
+          {{ status_pill(detail.result.confidence_label|slug_label, detail.result.confidence_label|confidence_tone) }}
+          {{ status_pill(detail.result.evidence_grade.verdict|slug_label, detail.result.evidence_grade.verdict|evidence_tone) }}
+        </div>
+        <div class="response-block">{{ detail.result.response_text }}</div>
+        <div class="text-secondary small mt-3 mb-2">Citations</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% for citation in detail.result.citations %}
+          <span class="badge bg-blue-lt mono">{{ citation.doc_id }} :: {{ citation.chunk_id }}</span>
+          {% else %}
+          <span class="text-secondary">No citations attached.</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="row g-4">
+      <div class="col-lg-6">
+        {{ chunk_panel("retrieval_ranked_chunks", detail.result.retrieval_ranked_chunks, true) }}
+      </div>
+      <div class="col-lg-6">
+        {{ chunk_panel("retrieved_chunks", detail.result.retrieved_chunks) }}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card timeline-panel">
+      <div class="card-header">
+        <h3 class="card-title">Trace Summary</h3>
+      </div>
+      <div class="card-body">
+        <div class="hero-grid">
+          <div><div class="text-secondary small text-uppercase">Path</div><div class="fw-semibold">{{ detail.trace_summary.graph_path|join(" -> ") }}</div></div>
+          <div><div class="text-secondary small text-uppercase">Attempts</div><div class="fw-semibold">{{ detail.trace_summary.retrieval_attempts }}</div></div>
+          <div><div class="text-secondary small text-uppercase">Latency</div><div class="fw-semibold">{{ detail.trace_summary.total_latency_ms|metric(1) }} ms</div></div>
+          <div><div class="text-secondary small text-uppercase">Fallbacks</div><div class="fw-semibold">{{ detail.trace_summary.fallback_count }}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    {{ trace_events_panel(detail.trace_events) }}
+  </div>
+
+  <div class="col-12">
+    {{ artifact_paths(detail.artifact_paths) }}
+  </div>
+</div>
+{% endblock %}

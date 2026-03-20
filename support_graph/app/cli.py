@@ -1167,6 +1167,18 @@ def _trace_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _serve_ui(args: argparse.Namespace) -> int:
+    from support_graph.ui import create_app
+    import uvicorn
+
+    uvicorn.run(
+        create_app(),
+        host=args.host,
+        port=args.port,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="support-graph")
     parser.add_argument(
@@ -1357,6 +1369,14 @@ def build_parser() -> argparse.ArgumentParser:
     trace_show_parser.add_argument("--run-id", required=True)
     trace_show_parser.add_argument("--example-id", required=True)
     trace_show_parser.set_defaults(func=_trace_show)
+
+    ui_parser = subparsers.add_parser(
+        "ui",
+        help="Serve the local SupportGraph Workbench UI.",
+    )
+    ui_parser.add_argument("--host", default="127.0.0.1")
+    ui_parser.add_argument("--port", type=int, default=8008)
+    ui_parser.set_defaults(func=_serve_ui)
 
     return parser
 

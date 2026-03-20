@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import metric_card, status_pill %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <div class="hero-grid">
+          <div>
+            <div class="text-secondary small text-uppercase">Eval Run</div>
+            <div class="h3 mono mb-1">{{ table.run.run_id }}</div>
+            <div class="text-secondary">{{ table.run.subset_label }} / {{ table.run.provider.type }}</div>
+          </div>
+          <div>
+            <div class="text-secondary small text-uppercase">Failures Shown</div>
+            <div class="h3 mb-1">{{ table.items|length }}</div>
+            <div class="text-secondary">of {{ table.total_failures }} total failing examples</div>
+          </div>
+          <div>
+            <div class="text-secondary small text-uppercase">Applied Filters</div>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+              {{ status_pill(table.applied_failure_label|default("all", true)|slug_label, (table.applied_failure_label or "all")|failure_tone) }}
+              {{ status_pill(table.applied_target_mode|default("all", true)|slug_label, "status-neutral") }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <form
+      class="filters-bar"
+      hx-get="/evals/{{ run_id }}/failures"
+      hx-target="#failure-table"
+      hx-push-url="true">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label">Failure label</label>
+          <select class="form-select" name="label">
+            <option value="">All labels</option>
+            {% for item in available_failure_labels %}
+            <option value="{{ item }}" {% if table.applied_failure_label == item %}selected{% endif %}>{{ item|slug_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Target mode</label>
+          <select class="form-select" name="target_mode">
+            <option value="">All modes</option>
+            {% for item in target_mode_options %}
+            <option value="{{ item }}" {% if table.applied_target_mode == item %}selected{% endif %}>{{ item|slug_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4 d-grid">
+          <button type="submit" class="btn btn-primary">Refine review table</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-12" id="failure-table">
+    {% include "partials/failure_table.html" %}
+  </div>
+</div>
+{% endblock %}

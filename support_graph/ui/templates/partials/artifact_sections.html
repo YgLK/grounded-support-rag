@@ -1,0 +1,109 @@
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Eval Runs</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Created</th>
+              <th>Subset</th>
+              <th>Provider</th>
+              <th>Doc Recall@3</th>
+              <th>ROUGE-L</th>
+              <th>Failures</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in explorer.eval_runs %}
+            <tr>
+              <td class="mono"><a href="/evals/{{ item.run_id }}">{{ item.run_id }}</a></td>
+              <td>{{ item.created_at|datetime_label }}</td>
+              <td>{{ item.subset_label }}</td>
+              <td>{{ item.provider.type }}</td>
+              <td>{{ item.headline_retrieval.doc_recall_at_3|metric }}</td>
+              <td>{{ item.headline_generation.rouge_l|metric }}</td>
+              <td>
+                {% for label, count in item.failure_counts.items() %}
+                <span class="badge {{ label|failure_tone }}">{{ label|slug_label }} {{ count }}</span>
+                {% else %}
+                <span class="text-secondary">none</span>
+                {% endfor %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-secondary">No eval runs matched the current filters.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Standalone Runs</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Decision</th>
+              <th>Example</th>
+              <th>Query</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in explorer.standalone_runs %}
+            <tr>
+              <td class="mono"><a href="/runs/{{ item.run_id }}">{{ item.run_id }}</a></td>
+              <td><span class="badge {{ item.decision|decision_tone }}">{{ item.decision|slug_label }}</span></td>
+              <td class="mono small">{{ item.example_id }}</td>
+              <td class="mono small">{{ item.final_query }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-secondary">No standalone runs found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Eval Reports</h3>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th>Report</th>
+              <th>Created</th>
+              <th>Type</th>
+              <th>Runs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in explorer.reports %}
+            <tr>
+              <td><a href="/reports/{{ item.report_id }}">{{ item.title }}</a></td>
+              <td>{{ item.created_at|datetime_label }}</td>
+              <td>{{ item.report_type|slug_label }}</td>
+              <td class="small text-secondary">{{ item.related_run_ids|join(", ") }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-secondary">No eval reports found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

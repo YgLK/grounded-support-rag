@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "_macros.html" import artifact_paths, chunk_panel, status_pill, trace_events_panel %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card detail-hero">
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+          <div>
+            <div class="text-secondary small text-uppercase mb-2">Example Detail</div>
+            <h2 class="h3 mono mb-2">{{ detail.prediction.example_id }}</h2>
+            <div class="d-flex flex-wrap gap-2">
+              {{ status_pill(detail.prediction.decision|slug_label, detail.prediction.decision|decision_tone) }}
+              {% if detail.prediction.failure_label %}
+              {{ status_pill(detail.prediction.failure_label|slug_label, detail.prediction.failure_label|failure_tone) }}
+              {% endif %}
+              {{ status_pill(detail.prediction.target_mode|slug_label, "status-neutral") }}
+            </div>
+          </div>
+          <div class="text-end">
+            <div class="small text-secondary">Run</div>
+            <a class="mono" href="/evals/{{ detail.run.run_id }}">{{ detail.run.run_id }}</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">User Context</h3>
+      </div>
+      <div class="card-body">
+        <div class="text-secondary small mb-2">Latest user utterance</div>
+        <div class="response-block">{{ detail.prediction.latest_user_utterance or "No latest user utterance recorded." }}</div>
+        <div class="text-secondary small mt-3 mb-2">Target answer</div>
+        <div class="response-block">{{ detail.prediction.target_text }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Decision and Response</h3>
+      </div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          {{ status_pill(detail.prediction.decision|slug_label, detail.prediction.decision|decision_tone) }}
+          {% set evidence_verdict = detail.trace_summary.evidence_grade.verdict if detail.trace_summary.evidence_grade else "unknown" %}
+          {{ status_pill(evidence_verdict|slug_label, evidence_verdict|evidence_tone) }}
+          <span class="badge bg-blue-lt">Attempts {{ detail.trace_summary.retrieval_attempts }}</span>
+        </div>
+        <div class="text-secondary small mb-2">Response text</div>
+        <div class="response-block">{{ detail.prediction.response_text }}</div>
+        <div class="text-secondary small mt-3 mb-2">Citations</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% for citation in detail.prediction.citations %}
+          <span class="badge bg-blue-lt mono">{{ citation.doc_id }} :: {{ citation.chunk_id }}</span>
+          {% else %}
+          <span class="text-secondary">No citations attached.</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="row g-3">
+      <div class="col-md-6 col-xl-3">
+        <div class="card metric-card h-100"><div class="card-body"><div class="metric-label">Final Query</div><div class="metric-value fs-4 query-code">{{ detail.trace_summary.final_query }}</div></div></div>
+      </div>
+      <div class="col-md-6 col-xl-3">
+        <div class="card metric-card h-100"><div class="card-body"><div class="metric-label">Doc Recall@3</div><div class="metric-value">{{ detail.prediction.metrics.doc_recall_at_3|metric }}</div></div></div>
+      </div>
+      <div class="col-md-6 col-xl-3">
+        <div class="card metric-card h-100"><div class="card-body"><div class="metric-label">Span Recall@5</div><div class="metric-value">{{ detail.prediction.metrics.span_recall_at_5|metric }}</div></div></div>
+      </div>
+      <div class="col-md-6 col-xl-3">
+        <div class="card metric-card h-100"><div class="card-body"><div class="metric-label">Citations Valid</div><div class="metric-value">{{ detail.prediction.metrics.citations_valid|percent }}</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="row g-4">
+      <div class="col-lg-6">
+        {{ chunk_panel("retrieval_ranked_chunks", detail.prediction.retrieval_ranked_chunks, true) }}
+      </div>
+      <div class="col-lg-6">
+        {{ chunk_panel("retrieved_chunks", detail.prediction.retrieved_chunks) }}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card timeline-panel">
+      <div class="card-header">
+        <h3 class="card-title">Trace Inspector</h3>
+      </div>
+      <div class="card-body">
+        <div class="hero-grid mb-3">
+          <div>
+            <div class="text-secondary small text-uppercase">Graph path</div>
+            <div class="fw-semibold">{{ detail.trace_summary.graph_path|join(" -> ") }}</div>
+          </div>
+          <div>
+            <div class="text-secondary small text-uppercase">Latency</div>
+            <div class="fw-semibold">{{ detail.trace_summary.total_latency_ms|metric(1) }} ms</div>
+          </div>
+          <div>
+            <div class="text-secondary small text-uppercase">Fallbacks</div>
+            <div class="fw-semibold">{{ detail.trace_summary.fallback_count }}</div>
+          </div>
+        </div>
+        <div class="timeline-list">
+          {% for node, latencies in detail.trace_summary.node_latency_ms.items() %}
+          <div class="timeline-item">
+            <div class="fw-semibold">{{ node }}</div>
+            <div class="text-secondary small">{{ latencies|join(", ") }} ms</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    {{ trace_events_panel(detail.trace_events) }}
+  </div>
+
+  <div class="col-12">
+    {{ artifact_paths(detail.artifact_paths) }}
+  </div>
+</div>
+{% endblock %}

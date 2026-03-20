@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <form
+          class="row g-3 align-items-end"
+          hx-get="/live/session"
+          hx-target="#live-session"
+          hx-swap="innerHTML">
+          <div class="col-lg-10">
+            <label class="form-label">Example id</label>
+            <input
+              class="form-control mono"
+              type="text"
+              name="example_id"
+              placeholder="dmv::1409501a35697e0ce68561e29577b90a::turn_2">
+          </div>
+          <div class="col-lg-2 d-grid">
+            <button type="submit" class="btn btn-primary">Start live run</button>
+          </div>
+        </form>
+        <div class="text-secondary small mt-3">
+          This screen wraps the same shared runtime graph used by `run` and `eval`, then writes the completed run into `outputs/runs/`.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12" id="live-session">
+    <div class="card">
+      <div class="card-body text-secondary">
+        Start a live run to watch query construction, retrieval, grading, and response generation as SSE events arrive.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

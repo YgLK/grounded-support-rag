@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import metric_card %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-12">
+    <form
+      class="filters-bar"
+      hx-get="/"
+      hx-target="#artifact-sections"
+      hx-push-url="true"
+      hx-indicator="#artifact-loading">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Domain</label>
+          <select class="form-select" name="domain">
+            <option value="">All domains</option>
+            {% for item in filter_options.domains %}
+            <option value="{{ item }}" {% if current_filters.domain == item %}selected{% endif %}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Subset</label>
+          <select class="form-select" name="subset">
+            <option value="">All subsets</option>
+            {% for item in filter_options.subsets %}
+            <option value="{{ item }}" {% if current_filters.subset == item %}selected{% endif %}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Provider</label>
+          <select class="form-select" name="provider">
+            <option value="">All providers</option>
+            {% for item in filter_options.providers %}
+            <option value="{{ item }}" {% if current_filters.provider == item %}selected{% endif %}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Order</label>
+          <select class="form-select" name="order">
+            <option value="desc" {% if current_filters.order == "desc" %}selected{% endif %}>Newest first</option>
+            <option value="asc" {% if current_filters.order == "asc" %}selected{% endif %}>Oldest first</option>
+          </select>
+        </div>
+        <div class="col-md-1 d-grid">
+          <button class="btn btn-primary" type="submit">Apply</button>
+        </div>
+      </div>
+      <div class="small text-secondary mt-3">
+        Filtered eval runs update in place with HTMX. Standalone runs and reports keep the same date ordering for quick scanning.
+        <span class="htmx-indicator ms-2" id="artifact-loading">Refreshing…</span>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-12">
+    <div class="row g-3">
+      {{ metric_card("Eval Runs", explorer.eval_runs|length) }}
+      {{ metric_card("Standalone Runs", explorer.standalone_runs|length) }}
+      {{ metric_card("Reports", explorer.reports|length) }}
+      {{ metric_card("Providers", filter_options.providers|length, "Eval-run filters stay driven by manifest metadata.") }}
+    </div>
+  </div>
+
+  <div class="col-12" id="artifact-sections">
+    {% include "partials/artifact_sections.html" %}
+  </div>
+</div>
+{% endblock %}

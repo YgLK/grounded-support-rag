@@ -1,0 +1,135 @@
+<div
+  class="row g-4"
+  x-data="window.SupportGraphWorkbench.liveRun('{{ session.stream_url }}', '{{ session.run_path }}')"
+  x-init="connect()">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <h3 class="card-title">Run Session</h3>
+      </div>
+      <div class="card-body">
+        <div class="text-secondary small text-uppercase mb-2">Run id</div>
+        <div class="h3 mono mb-3">{{ session.run_id }}</div>
+        <div class="text-secondary small text-uppercase mb-2">Example</div>
+        <div class="mono mb-3">{{ session.example.example_id }}</div>
+        <div class="text-secondary small text-uppercase mb-2">Latest user utterance</div>
+        <div class="response-block">{{ session.example.latest_user_utterance or "No user utterance recorded." }}</div>
+        <div class="text-secondary small text-uppercase mt-3 mb-2">Trace destination</div>
+        <div class="query-code">{{ session.trace_path }}</div>
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <span class="badge" :class="completed ? 'status-answer' : (error ? 'status-failure' : 'status-neutral')" x-text="completed ? 'completed' : (error ? 'error' : status)"></span>
+          <a class="btn btn-sm btn-outline-primary" :class="{ disabled: !completed }" :href="runPath">Open saved run</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="row g-4">
+      <div class="col-12">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">Live Summary</h3>
+          </div>
+          <div class="card-body">
+            <template x-if="error">
+              <div class="alert alert-danger mb-3" x-text="error"></div>
+            </template>
+            <div class="hero-grid">
+              <div>
+                <div class="text-secondary small text-uppercase">Current query</div>
+                <div class="query-code" x-text="query || 'Waiting for query construction…'"></div>
+              </div>
+              <div>
+                <div class="text-secondary small text-uppercase">Retrieval attempts</div>
+                <div class="h3" x-text="retrievalAttempts || 0"></div>
+              </div>
+              <div>
+                <div class="text-secondary small text-uppercase">Decision</div>
+                <div class="h3" x-text="decision || 'Pending'"></div>
+              </div>
+              <div>
+                <div class="text-secondary small text-uppercase">Confidence</div>
+                <div class="h3" x-text="confidence || 'Pending'"></div>
+              </div>
+            </div>
+            <div class="text-secondary small text-uppercase mt-4 mb-2">Evidence grade</div>
+            <div class="response-block" x-text="evidenceGrade ? JSON.stringify(evidenceGrade, null, 2) : 'Waiting for evidence grading…'"></div>
+            <div class="text-secondary small text-uppercase mt-4 mb-2">Response preview</div>
+            <div class="response-block" x-text="responseText || 'Waiting for response output…'"></div>
+            <div class="text-secondary small text-uppercase mt-4 mb-2">Citations</div>
+            <div class="d-flex flex-wrap gap-2">
+              <template x-for="citation in citations" :key="citation.chunk_id">
+                <span class="badge bg-blue-lt mono" x-text="`${citation.doc_id} :: ${citation.chunk_id}`"></span>
+              </template>
+              <template x-if="!citations.length">
+                <span class="text-secondary">No citations yet.</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">Ranked Retrieval</h3>
+          </div>
+          <div class="list-group list-group-flush">
+            <template x-for="chunk in rankedChunks" :key="chunk.chunk_id">
+              <div class="list-group-item">
+                <div class="d-flex justify-content-between gap-3">
+                  <div>
+                    <div class="fw-semibold mono" x-text="chunk.chunk_id"></div>
+                    <div class="small text-secondary" x-text="chunk.doc_id"></div>
+                  </div>
+                  <div class="small text-secondary" x-text="`#${chunk.rank || '?'} ${chunk.score || ''}`"></div>
+                </div>
+              </div>
+            </template>
+            <div class="list-group-item text-secondary" x-show="!rankedChunks.length">Waiting for ranked retrieval.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">Expanded Evidence</h3>
+          </div>
+          <div class="list-group list-group-flush">
+            <template x-for="chunk in retrievedChunks" :key="chunk.chunk_id">
+              <div class="list-group-item">
+                <div class="fw-semibold mono" x-text="chunk.chunk_id"></div>
+                <div class="small text-secondary" x-text="chunk.doc_id"></div>
+              </div>
+            </template>
+            <div class="list-group-item text-secondary" x-show="!retrievedChunks.length">Waiting for expanded evidence.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Event Timeline</h3>
+          </div>
+          <div class="card-body">
+            <div class="trace-stack">
+              <template x-for="item in timeline" :key="`${item.kind}-${item.node}-${item.payload}`">
+                <div class="trace-event">
+                  <div class="d-flex justify-content-between gap-3 mb-2">
+                    <div class="fw-semibold" x-text="item.kind"></div>
+                    <div class="small text-secondary" x-text="item.node || 'graph'"></div>
+                  </div>
+                  <pre class="json-block" x-text="item.payload"></pre>
+                </div>
+              </template>
+              <div class="text-secondary" x-show="!timeline.length">Waiting for the first event.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

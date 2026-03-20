@@ -1,0 +1,37 @@
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Failure Review Table</h3>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter">
+      <thead>
+        <tr>
+          <th>Example</th>
+          <th>Failure</th>
+          <th>Need</th>
+          <th>Decision</th>
+          <th>Target</th>
+          <th>Recall@3</th>
+          <th>Citations</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in table.items %}
+        <tr>
+          <td class="mono">
+            <a href="/evals/{{ run_id }}/examples/{{ item.example_id }}">{{ item.example_id }}</a>
+          </td>
+          <td><span class="badge {{ item.failure_label|failure_tone }}">{{ item.failure_label|slug_label }}</span></td>
+          <td>{{ item.latest_user_utterance or "n/a" }}</td>
+          <td><span class="badge {{ item.final_decision|decision_tone }}">{{ item.final_decision|slug_label }}</span></td>
+          <td>{{ item.target_text }}</td>
+          <td>{{ item.doc_recall_at_3|metric }}</td>
+          <td>{{ item.citations_valid|percent }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-secondary">No failures matched the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

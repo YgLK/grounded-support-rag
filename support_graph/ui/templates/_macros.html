@@ -1,0 +1,119 @@
+{% macro status_pill(label, tone_class="status-neutral") -%}
+<span class="badge rounded-pill {{ tone_class }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro metric_card(label, value, note="") -%}
+<div class="col-sm-6 col-lg-3">
+  <div class="card metric-card h-100">
+    <div class="card-body">
+      <div class="metric-label">{{ label }}</div>
+      <div class="metric-value">{{ value }}</div>
+      {% if note %}
+      <div class="metric-note">{{ note }}</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro artifact_paths(paths) -%}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Artifact Paths</h3>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-vcenter mb-0">
+      <tbody>
+        {% for key, value in paths.items() %}
+        <tr>
+          <td class="text-secondary text-nowrap">{{ key|slug_label }}</td>
+          <td><code class="path-code">{{ value }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro chunk_panel(title, chunks, ranked=false) -%}
+<div class="card evidence-panel h-100">
+  <div class="card-header">
+    <h3 class="card-title">{{ title }}</h3>
+    <div class="card-actions">
+      <span class="badge bg-blue-lt">{{ chunks|length }} chunks</span>
+    </div>
+  </div>
+  {% if chunks %}
+  <div class="list-group list-group-flush">
+    {% for chunk in chunks %}
+    <div class="list-group-item">
+      <div class="d-flex justify-content-between gap-3 align-items-start mb-2">
+        <div>
+          <div class="fw-semibold mono">{{ chunk.chunk_id }}</div>
+          <div class="text-secondary small">
+            {{ chunk.doc_id }}
+            {% if chunk.section_title %}
+            / {{ chunk.section_title }}
+            {% endif %}
+          </div>
+        </div>
+        <div class="text-end small text-secondary">
+          {% if ranked and chunk.rank is not none %}
+          <div>#{{ chunk.rank }}</div>
+          {% endif %}
+          {% if chunk.score is not none %}
+          <div>score {{ chunk.score|metric(3) }}</div>
+          {% endif %}
+          {% if chunk.span_ids %}
+          <div>{{ chunk.span_ids|length }} spans</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="chunk-text">{{ chunk.text }}</div>
+      {% if chunk.span_ids %}
+      <div class="small text-secondary mt-2">
+        spans:
+        {% for span_id in chunk.span_ids %}
+        <code>{{ span_id }}</code>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card-body text-secondary">No chunks recorded.</div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro trace_events_panel(events, title="Raw Trace Events") -%}
+<div class="card" x-data="{ open: false }">
+  <div class="card-header">
+    <h3 class="card-title">{{ title }}</h3>
+    <div class="card-actions">
+      <button type="button" class="btn btn-sm btn-outline-secondary" @click="open = !open">
+        <span x-text="open ? 'Hide' : 'Show'"></span>
+      </button>
+    </div>
+  </div>
+  <div class="card-body pt-0" x-show="open" x-cloak>
+    {% if events %}
+    <div class="trace-stack">
+      {% for event in events %}
+      <div class="trace-event">
+        <div class="d-flex justify-content-between gap-3 mb-2">
+          <div class="fw-semibold">{{ event.node or "event" }}</div>
+          <div class="small text-secondary">{{ event.timestamp or "n/a" }}</div>
+        </div>
+        <pre class="json-block">{{ event.payload|pretty_json }}</pre>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-secondary">No trace events found.</div>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}
