@@ -109,7 +109,6 @@ class GraphState(TypedDict, total=False):
     graph_path: list[str]
     final_query: str
     run_id: str
-    trace_dir: str
     max_attempts: int
     response_payload: dict
     final_output: dict
@@ -125,7 +124,7 @@ class Runtime:
     chunk_records_by_doc: dict[str, list[dict]]
     prompts: PromptSet
     llm_semaphore: asyncio.Semaphore
-    trace_dir: Path
+    trace_path: Path
     run_id: str
     event_sink: GraphEventSink | None = None
     stream_responses: bool = False

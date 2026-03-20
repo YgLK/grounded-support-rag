@@ -15,6 +15,12 @@ from typing import Any
 
 from sacrebleu.metrics import BLEU
 
+from support_graph.artifacts import (
+    build_trace_file,
+    eval_run_artifacts,
+    project_relative_path,
+    resolve_project_path,
+)
 from support_graph.logging_utils import get_logger
 from support_graph.config.runtime import (
     RuntimeConfig,
@@ -31,7 +37,11 @@ from support_graph.data.examples import (
 )
 from support_graph.providers import chat_provider_base_url, embedding_provider_base_url
 from support_graph.runtime.graph import resolve_runtime_resources_async, run_graph_async
-from support_graph.runtime.traces import load_trace_events, summarize_trace_events
+from support_graph.runtime.traces import (
+    load_trace_events,
+    summarize_trace_events,
+    write_trace_event,
+)
 from support_graph.types import (
     DatasetSplit,
     DatasetSplitLike,
@@ -623,17 +633,19 @@ def _retrieval_example_records(predictions: list[dict]) -> list[dict]:
     return records
 
 
-def _trace_index_records(predictions: list[dict]) -> list[dict]:
+def _trace_index_records(predictions: list[dict], *, project_root: Path) -> list[dict]:
     records: list[dict] = []
     for record in predictions:
-        trace_summary = record.get("trace_summary", {})
-        trace_path = trace_summary.get("trace_path")
-        events = load_trace_events(trace_path) if trace_path else []
-        summarized = summarize_trace_events(events, trace_path=trace_path or "")
+        trace_summary = record["trace_summary"]
+        trace_path = resolve_project_path(project_root, trace_summary["trace_path"])
+        summarized = summarize_trace_events(
+            load_trace_events(trace_path),
+            trace_path=project_relative_path(trace_path, project_root),
+        )
         records.append(
             {
-                "example_id": record.get("example_id"),
-                "trace_path": summarized.get("trace_path", trace_path or ""),
+                "example_id": record["example_id"],
+                "trace_file": trace_path.name,
                 "graph_path": summarized.get("graph_path", []),
                 "retrieval_attempts": summarized.get("retrieval_attempts", 0),
                 "final_query": summarized.get("final_query", ""),
@@ -735,6 +747,7 @@ def _runtime_error_record(
     example: dict,
     exc: Exception,
     *,
+    trace_path: str,
     retrieval_top_k: int | None = None,
 ) -> dict:
     prediction = {
@@ -745,11 +758,13 @@ def _runtime_error_record(
         "retrieved_chunks": [],
         "trace_summary": {
             "retrieval_attempts": 0,
+            "final_query": "",
             "graph_path": [],
             "latency_ms": None,
-            "trace_path": "",
-            "error": str(exc),
-            "exception_type": type(exc).__name__,
+            "trace_path": trace_path,
+            "fallback_count": 0,
+            "fallback_nodes": [],
+            "fallbacks": [],
         },
         "latest_user_utterance": example.get("latest_user_utterance"),
     }
@@ -796,8 +811,8 @@ async def evaluate_examples_async(
         raise ValueError("max_concurrency must be positive.")
 
     run_id = build_run_id(resolved_domain, subset_name, now=now, slug=run_id_slug)
-    output_dir = settings.eval_dir / run_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    artifacts = eval_run_artifacts(settings.project_root, run_id)
+    artifacts.output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(
         "Starting eval run %s domain=%s split=%s subset=%s examples=%s max_concurrency=%s",
         run_id,
@@ -837,25 +852,51 @@ async def evaluate_examples_async(
 
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def run_prediction(example: dict) -> dict:
+    def trace_path_for_example(example: dict) -> Path:
+        example_id = str(example["example_id"])
+        return artifacts.trace_path(build_trace_file(example_id))
+
+    async def run_prediction(example: dict, *, trace_path: Path) -> dict:
         call_kwargs = {
             "example": example,
             "config": resolved_config,
+            "run_id": run_id,
+            "trace_path": trace_path,
             "max_attempts": resolved_config.max_retrieval_attempts,
-            "trace_dir": settings.trace_dir,
         }
         if shared_runtime_resources is not None:
             call_kwargs["_runtime_resources"] = shared_runtime_resources
         async with semaphore:
-            return await _maybe_await_result(run_graph_func(**call_kwargs))
+            prediction = await _maybe_await_result(run_graph_func(**call_kwargs))
+        trace_summary = dict(prediction["trace_summary"])
+        trace_summary["trace_path"] = project_relative_path(
+            trace_path,
+            settings.project_root,
+        )
+        return {**prediction, "trace_summary": trace_summary}
 
     async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
+        trace_path = trace_path_for_example(example)
+        relative_trace_path = project_relative_path(trace_path, settings.project_root)
         try:
-            prediction = await run_prediction(example)
+            prediction = await run_prediction(example, trace_path=trace_path)
         except Exception as exc:
+            await asyncio.to_thread(
+                write_trace_event,
+                trace_path,
+                {
+                    "kind": "error",
+                    "node": "run_graph_async",
+                    "run_id": run_id,
+                    "example_id": example.get("example_id"),
+                    "exception_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
             record = _runtime_error_record(
                 example,
                 exc,
+                trace_path=relative_trace_path,
                 retrieval_top_k=resolved_config.retrieval_top_k,
             )
             await _log_prediction_progress(example, record)
@@ -919,6 +960,7 @@ async def evaluate_examples_async(
         "domains": [str(resolved_domain)],
         "split": str(resolved_split),
         "eval_subset": subset_name,
+        "subset_label": resolved_subset_label,
         "target_modes": sorted(
             {example.get("target_mode", "answer") for example in selected_examples}
         ),
@@ -955,38 +997,42 @@ async def evaluate_examples_async(
     if manifest_overrides:
         manifest.update(manifest_overrides)
 
-    logger.info("Writing eval artifacts for run %s to %s", run_id, output_dir)
-    await asyncio.to_thread(_write_json, output_dir / "manifest.json", manifest)
+    logger.info(
+        "Writing eval artifacts for run %s to %s",
+        run_id,
+        artifacts.output_dir,
+    )
+    await asyncio.to_thread(_write_json, artifacts.manifest, manifest)
     await asyncio.to_thread(
         _write_json,
-        output_dir / "metrics.json",
+        artifacts.metrics,
         {**metrics, "failure_counts": failure_counts},
     )
-    await asyncio.to_thread(_write_jsonl, output_dir / "predictions.jsonl", predictions)
-    await asyncio.to_thread(_write_jsonl, output_dir / "failures.jsonl", failures)
-    manual_review_path = output_dir / "manual_review.csv"
-    retrieval_examples_path = output_dir / "retrieval_examples.jsonl"
-    trace_index_path = output_dir / "trace_index.json"
+    await asyncio.to_thread(_write_jsonl, artifacts.predictions, predictions)
+    await asyncio.to_thread(_write_jsonl, artifacts.failures, failures)
     await asyncio.to_thread(
         _write_csv,
-        manual_review_path,
+        artifacts.manual_review,
         MANUAL_REVIEW_COLUMNS,
         _manual_review_rows(run_id, predictions),
     )
     await asyncio.to_thread(
         _write_jsonl,
-        retrieval_examples_path,
+        artifacts.retrieval_examples,
         _retrieval_example_records(predictions),
     )
-    trace_index_records = await asyncio.to_thread(_trace_index_records, predictions)
+    trace_index_records = await asyncio.to_thread(
+        _trace_index_records,
+        predictions,
+        project_root=settings.project_root,
+    )
     await asyncio.to_thread(
         _write_json,
-        trace_index_path,
+        artifacts.trace_index,
         {"entries": trace_index_records},
     )
-    summary_path = output_dir / "summary.md"
     await asyncio.to_thread(
-        summary_path.write_text,
+        artifacts.summary.write_text,
         "\n".join(
             _summary_lines(
                 run_id,
@@ -994,28 +1040,32 @@ async def evaluate_examples_async(
                 metrics,
                 failure_counts,
                 notes,
-                output_dir,
+                artifacts.output_dir,
                 retrieval_top_k=resolved_config.retrieval_top_k,
             )
         )
         + "\n",
         encoding="utf-8",
     )
-    logger.info("Eval run %s complete. Summary written to %s", run_id, summary_path)
+    logger.info(
+        "Eval run %s complete. Summary written to %s",
+        run_id,
+        artifacts.summary,
+    )
 
     return {
         "run_id": run_id,
         "subset_label": resolved_subset_label,
-        "output_dir": output_dir,
+        "output_dir": artifacts.output_dir,
         "artifact_paths": {
-            "manifest": output_dir / "manifest.json",
-            "metrics": output_dir / "metrics.json",
-            "predictions": output_dir / "predictions.jsonl",
-            "failures": output_dir / "failures.jsonl",
-            "manual_review": manual_review_path,
-            "retrieval_examples": retrieval_examples_path,
-            "trace_index": trace_index_path,
-            "summary": summary_path,
+            "manifest": artifacts.manifest,
+            "metrics": artifacts.metrics,
+            "predictions": artifacts.predictions,
+            "failures": artifacts.failures,
+            "manual_review": artifacts.manual_review,
+            "retrieval_examples": artifacts.retrieval_examples,
+            "trace_index": artifacts.trace_index,
+            "summary": artifacts.summary,
         },
         "metrics": metrics,
         "retrieval_top_k": resolved_config.retrieval_top_k,

@@ -7,8 +7,8 @@ This package owns offline measurement and analysis. It runs the shared runtime g
 | File | Responsibility | Connects To |
 | --- | --- | --- |
 | `__init__.py` | Package marker for evaluation helpers. | No runtime logic. |
-| `evaluate.py` | Loads eval examples or subsets, builds runtime configs, repeatedly calls the shared graph, computes retrieval and generation metrics, labels failures, and writes eval artifacts such as `metrics.json`, `predictions.jsonl`, `failures.jsonl`, `manual_review.csv`, and `summary.md`. | Reuses `data/`, `config/`, `runtime/graph.py`, and `runtime/traces.py`. |
-| `ablation.py` | Defines retrieval-side experiment variants, runs the Smoke-10 ladder and optional Frozen-200 follow-through, classifies results, and writes a markdown ablation summary. | Builds on top of `evaluate.py` and still uses the shared runtime graph. |
+| `evaluate.py` | Loads eval examples or subsets, builds runtime configs, repeatedly calls the shared graph, computes retrieval and generation metrics, and writes eval runs under `outputs/evals/runs/<run_id>/` with `metrics.json`, `predictions.jsonl`, `failures.jsonl`, `manual_review.csv`, `retrieval_examples.jsonl`, `trace_index.json`, `summary.md`, and run-local per-example traces. | Reuses `data/`, `config/`, `runtime/graph.py`, and `runtime/traces.py`. |
+| `ablation.py` | Defines retrieval-side experiment variants, runs the Smoke-10 ladder and optional Frozen-200 follow-through, classifies results, and writes structured eval reports under `outputs/evals/reports/<report_id>/`. | Builds on top of `evaluate.py` and still uses the shared runtime graph. |
 | `benchmark.py` | Samples chunk records and measures embedding throughput for a configured embedding provider. | Uses `retrieval/index.py` for chunk loading and embedding construction. |
 
 ## How It Connects Later On

@@ -40,7 +40,6 @@ from support_graph.runtime.schemas import (
     fallback_metadata,
     strip_internal_fields,
 )
-from support_graph.runtime.traces import trace_file_path
 
 
 GraphRoute = Literal["generate_response", "refine_query", "resolve_without_answer"]
@@ -115,7 +114,6 @@ def _normalize_final_output(
     state: GraphState, payload: dict, *, runtime: Runtime
 ) -> dict:
     graph_path = state.get("graph_path", []) + ["finalize"]
-    trace_path = trace_file_path(state.get("trace_dir", ""), state.get("run_id", ""))
     fallback_events = list(state.get("fallback_events", []))
     fallback_nodes = [
         str(event.get("node"))
@@ -142,7 +140,7 @@ def _normalize_final_output(
             or state.get("query"),
             "graph_path": graph_path,
             "latency_ms": state.get("total_latency_ms", 0.0),
-            "trace_path": str(trace_path),
+            "trace_path": str(runtime.trace_path),
             "fallback_count": len(fallback_events),
             "fallback_nodes": fallback_nodes,
             "fallbacks": fallback_events,
@@ -237,7 +235,6 @@ def _initial_state(
         "retrieval_attempts": 0,
         "graph_path": [],
         "run_id": runtime.run_id,
-        "trace_dir": str(runtime.trace_dir),
         "max_attempts": max_attempts or config.max_retrieval_attempts,
         "ablation_options": dict(config.ablation_options or {}),
         "fallback_events": [],
@@ -552,8 +549,9 @@ async def run_graph_async(
     *,
     example: dict,
     config: RuntimeConfigLike,
+    run_id: str,
+    trace_path: str | Path,
     max_attempts: int | None = None,
-    trace_dir: str | Path | None = None,
     vectorstore: Any = None,
     chat_model: Any = None,
     _event_sink: GraphEventSink | None = None,
@@ -568,7 +566,8 @@ async def run_graph_async(
     )
     runtime = await build_runtime_async(
         config,
-        trace_dir=trace_dir,
+        run_id=run_id,
+        trace_path=trace_path,
         vectorstore=vectorstore,
         chat_model=chat_model,
         resources=_runtime_resources,
@@ -624,8 +623,9 @@ async def astream_graph_events(
     *,
     example: dict,
     config: RuntimeConfigLike,
+    run_id: str,
+    trace_path: str | Path,
     max_attempts: int | None = None,
-    trace_dir: str | Path | None = None,
     vectorstore: Any = None,
     chat_model: Any = None,
 ) -> AsyncIterator[GraphStreamEvent]:
@@ -639,8 +639,9 @@ async def astream_graph_events(
             await run_graph_async(
                 example=example,
                 config=config,
+                run_id=run_id,
+                trace_path=trace_path,
                 max_attempts=max_attempts,
-                trace_dir=trace_dir,
                 vectorstore=vectorstore,
                 chat_model=chat_model,
                 _event_sink=event_sink,

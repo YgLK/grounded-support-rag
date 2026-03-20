@@ -8,21 +8,17 @@ from pathlib import Path
 from typing import Iterable
 
 
-def trace_file_path(trace_dir: str | Path, run_id: str) -> Path:
-    return Path(trace_dir) / f"{run_id}.jsonl"
-
-
-def write_trace_event(trace_dir: str | Path, run_id: str, event: dict) -> Path:
-    path = trace_file_path(trace_dir, run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def write_trace_event(path: str | Path, event: dict) -> Path:
+    trace_path = Path(path)
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **event,
     }
-    with path.open("a", encoding="utf-8") as handle:
+    with trace_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=True))
         handle.write("\n")
-    return path
+    return trace_path
 
 
 def load_trace_events(path: str | Path) -> list[dict]:

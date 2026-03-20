@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
-import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -61,8 +60,7 @@ async def _emit_graph_event(runtime: Runtime, event: GraphStreamEvent) -> None:
 async def _trace(runtime: Runtime, node: str, event: dict) -> None:
     await asyncio.to_thread(
         write_trace_event,
-        runtime.trace_dir,
-        runtime.run_id,
+        runtime.trace_path,
         {
             "node": node,
             **event,
@@ -962,22 +960,22 @@ def _load_chunk_records_by_doc(config: RuntimeConfigLike) -> dict[str, list[dict
 
 async def build_runtime_async(
     config: RuntimeConfigLike,
-    trace_dir: str | Path | None = None,
+    *,
+    run_id: str,
+    trace_path: str | Path,
     vectorstore: Any = None,
     chat_model: Any = None,
-    *,
     resources: RuntimeResources | None = None,
     event_sink: Any = None,
     stream_responses: bool = False,
 ) -> Runtime:
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-    resolved_trace_dir = Path(trace_dir or config.trace_dir)
+    resolved_trace_path = Path(trace_path)
     logger.info(
-        "Preparing runtime %s for domain=%s provider=%s trace_dir=%s",
+        "Preparing runtime %s for domain=%s provider=%s trace_path=%s",
         run_id,
         config.domain,
         config.provider_type,
-        resolved_trace_dir,
+        resolved_trace_path,
     )
     resolved_resources = resources
     if resolved_resources is None:
@@ -1000,7 +998,7 @@ async def build_runtime_async(
         chunk_records_by_doc=resolved_resources.chunk_records_by_doc,
         prompts=resolved_resources.prompts,
         llm_semaphore=resolved_resources.llm_semaphore,
-        trace_dir=resolved_trace_dir,
+        trace_path=resolved_trace_path,
         run_id=run_id,
         event_sink=event_sink,
         stream_responses=stream_responses,

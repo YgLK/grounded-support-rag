@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, cast
+from typing import Any, Literal, Protocol, TypedDict, assert_never, cast
 
+from support_graph.artifacts import eval_report_artifacts
 from support_graph.evaluation.evaluate import (
     build_eval_config,
     evaluate_examples_async,
@@ -35,7 +37,7 @@ class AblationVariant(TypedDict):
 
 
 class AblationSettingsLike(Protocol):
-    eval_dir: Path
+    project_root: Path
 
 
 PRIMARY_METRICS = (
@@ -173,6 +175,8 @@ def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
     variant_id = candidate["variant"]["id"]
     positive = max(deltas.values(), default=0.0) > 0.0
 
+    if variant_id == "control":
+        return "Content-only reasoning remains the baseline anchor for comparison."
     if variant_id == "structured-query":
         if positive:
             return "The compact history-aware query preserved the user’s actual need while reducing transcript noise in retrieval."
@@ -185,7 +189,7 @@ def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
         if positive:
             return "Neighbor expansion added nearby evidence from the same document, which improved grounding after the direct retrieval step."
         return "Neighbor expansion increased evidence breadth, but it did not materially improve citations or end-to-end success on Smoke-10."
-    return "Content-only reasoning remains the baseline anchor for comparison."
+    assert_never(variant_id)
 
 
 def _variant_manifest(variant: AblationVariant, *, scope: str) -> dict:
@@ -313,19 +317,39 @@ def _summary_table_rows(results: list[dict]) -> list[str]:
     return lines
 
 
+def _ablation_report_id(
+    *,
+    domain: DomainLike,
+    limit: int,
+    summary_timestamp: datetime,
+) -> str:
+    timestamp_slug = summary_timestamp.strftime("%Y%m%d-%H%M%S")
+    return f"{timestamp_slug}-{domain}-smoke{limit}-ablation-summary"
+
+
 def write_ablation_summary(
     *,
     settings: AblationSettingsLike,
     domain: DomainLike,
+    split: DatasetSplitLike,
     limit: int,
     results: list[dict],
     summary_timestamp: datetime,
     frozen_result: dict | None = None,
-) -> Path:
-    timestamp_slug = summary_timestamp.strftime("%Y%m%d-%H%M%S")
-    path = settings.eval_dir / f"{timestamp_slug}-{domain}-smoke10-ablation-summary.md"
+) -> dict[str, Any]:
+    if not results:
+        raise ValueError("results must not be empty.")
+    report_id = _ablation_report_id(
+        domain=domain,
+        limit=limit,
+        summary_timestamp=summary_timestamp,
+    )
+    artifacts = eval_report_artifacts(settings.project_root, report_id)
     recommendation, recommendation_line = _final_recommendation(results)
     control = results[0]
+    related_run_ids = [result["run_id"] for result in results if "run_id" in result]
+    if frozen_result is not None and "run_id" in frozen_result:
+        related_run_ids.append(frozen_result["run_id"])
 
     lines = [
         f"# DMV Smoke-{limit} Ablation Summary",
@@ -392,9 +416,30 @@ def write_ablation_summary(
             f"- {recommendation_line}",
         ]
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
+    manifest = {
+        "report_id": report_id,
+        "created_at": summary_timestamp.isoformat(),
+        "report_type": "ablation_summary",
+        "title": f"{str(domain).upper()} Smoke-{limit} Ablation Summary",
+        "related_run_ids": related_run_ids,
+        "domain": str(domain),
+        "split": str(split),
+        "subset_label": f"smoke first {limit}",
+        "notes": recommendation_line,
+    }
+    artifacts.output_dir.mkdir(parents=True, exist_ok=True)
+    artifacts.manifest.write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    artifacts.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {
+        "report_id": report_id,
+        "artifact_paths": {
+            "manifest": artifacts.manifest,
+            "report": artifacts.report,
+        },
+    }
 
 
 async def run_smoke10_ablation_async(
@@ -462,9 +507,10 @@ async def run_smoke10_ablation_async(
             manifest_scope="Frozen-200 follow-through after Smoke-10 gate",
         )
 
-    summary_path = write_ablation_summary(
+    report = write_ablation_summary(
         settings=settings,
         domain=domain,
+        split=split,
         limit=limit,
         results=results,
         summary_timestamp=started_at,
@@ -477,7 +523,8 @@ async def run_smoke10_ablation_async(
         "results": results,
         "best_result": best,
         "frozen_result": frozen_result,
-        "summary_path": summary_path,
+        "report_id": report["report_id"],
+        "report_artifact_paths": report["artifact_paths"],
         "recommendation": recommendation,
         "recommendation_line": recommendation_line,
     }

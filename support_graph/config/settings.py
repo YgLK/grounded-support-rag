@@ -164,8 +164,9 @@ class Settings:
     otel_exporter: str | None
     otel_endpoint: str | None
     otel_headers: str | None
-    trace_dir: Path
-    eval_dir: Path
+    eval_runs_dir: Path
+    eval_reports_dir: Path
+    runs_dir: Path
     log_dir: Path
     derived_dir: Path
     chunks_dir: Path
@@ -199,15 +200,20 @@ class Settings:
             project_root=project_root,
             default=project_root / "multidoc2dial",
         )
-        trace_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_TRACE_DIR"),
+        eval_runs_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_EVAL_RUNS_DIR"),
             project_root=project_root,
-            default=project_root / "outputs/traces",
+            default=project_root / "outputs/evals/runs",
         )
-        eval_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_EVAL_DIR"),
+        eval_reports_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_EVAL_REPORTS_DIR"),
             project_root=project_root,
-            default=project_root / "outputs/evals",
+            default=project_root / "outputs/evals/reports",
+        )
+        runs_dir = _resolve_path(
+            env.get("SUPPORT_GRAPH_RUNS_DIR"),
+            project_root=project_root,
+            default=project_root / "outputs/runs",
         )
         log_dir = _resolve_path(
             env.get("SUPPORT_GRAPH_LOG_DIR"),
@@ -291,8 +297,9 @@ class Settings:
             otel_headers=_env_value(
                 env, "SUPPORT_GRAPH_OTEL_HEADERS", "OTEL_EXPORTER_OTLP_HEADERS"
             ),
-            trace_dir=trace_dir,
-            eval_dir=eval_dir,
+            eval_runs_dir=eval_runs_dir,
+            eval_reports_dir=eval_reports_dir,
+            runs_dir=runs_dir,
             log_dir=log_dir,
             derived_dir=derived_dir,
             chunks_dir=chunks_dir,

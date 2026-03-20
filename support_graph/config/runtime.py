@@ -38,7 +38,6 @@ class RuntimeSettingsLike(Protocol):
     otel_exporter: str | None
     otel_endpoint: str | None
     otel_headers: str | None
-    trace_dir: Path
 
     def collection_name(self, explicit_domain: DomainLike | None = None) -> str: ...
 
@@ -89,7 +88,6 @@ class RuntimeConfigLike(IndexConfigLike, Protocol):
     otel_exporter: str | None
     otel_endpoint: str | None
     otel_headers: str | None
-    trace_dir: Path
     chunk_records: list[dict[str, Any]] | None
     ablation_variant: str | None
     ablation_options: dict[str, Any]
@@ -129,7 +127,6 @@ class RuntimeConfig:
     otel_exporter: str | None = None
     otel_endpoint: str | None = None
     otel_headers: str | None = None
-    trace_dir: Path = Path("outputs/traces")
     chunk_artifact_path: Path | None = None
     chunk_records: list[dict[str, Any]] | None = None
     ablation_variant: str | None = None
@@ -174,7 +171,6 @@ def build_runtime_config(
         otel_exporter=settings.otel_exporter,
         otel_endpoint=settings.otel_endpoint,
         otel_headers=settings.otel_headers,
-        trace_dir=settings.trace_dir,
         chunk_artifact_path=settings.chunk_artifact_path(resolved_domain),
     )
 

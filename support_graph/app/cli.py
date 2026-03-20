@@ -7,8 +7,14 @@ import argparse
 import inspect
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 
+from support_graph.artifacts import (
+    EVAL_RUN_REQUIRED_FILES,
+    build_standalone_run_id,
+    standalone_run_artifacts,
+)
 from support_graph.config.runtime import (
     RuntimeConfig,
     build_runtime_config,
@@ -76,6 +82,14 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _load_jsonl(path: Path) -> list[dict]:
     return [
         json.loads(line)
@@ -85,7 +99,11 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 
 def _run_output_dir(settings: Settings, run_id: str) -> Path:
-    return settings.eval_dir / run_id
+    return settings.eval_runs_dir / run_id
+
+
+def _eval_run_is_complete(output_dir: Path) -> bool:
+    return all((output_dir / name).exists() for name in EVAL_RUN_REQUIRED_FILES)
 
 
 def _shorten(text: str, limit: int = 88) -> str:
@@ -213,16 +231,23 @@ def _run_next_lines(result: dict) -> list[str]:
         case "abstain":
             return [
                 "No sufficient support was found for a safe answer.",
-                "Retry with --verbose or inspect outputs/traces/ for the retrieval path.",
+                "Retry with --verbose or inspect the saved trace under outputs/runs/.",
             ]
         case _:
             raise ValueError(f"Unknown decision: {decision}")
 
 
-def _format_run_output(result: dict, verbose: bool = False) -> list[str]:
+def _format_run_output(
+    result: dict,
+    settings: Settings,
+    *,
+    verbose: bool = False,
+) -> list[str]:
     trace_summary = result.get("trace_summary", {})
+    artifact_paths = result["artifact_paths"]
     lines = [
         "SupportGraph Run",
+        f"Run: {result.get('run_id')}",
         f"Example: {result.get('example_id')}",
         "Context",
         f"User: {result.get('latest_user_utterance') or 'No recent user turn found.'}",
@@ -266,6 +291,15 @@ def _format_run_output(result: dict, verbose: bool = False) -> list[str]:
         )
         for chunk in result.get("retrieved_chunks", [])[:5]:
             lines.append(f"- {chunk.get('chunk_id')} :: {chunk.get('text', '')[:160]}")
+    lines.extend(
+        [
+            "",
+            "Artifacts",
+            _relative_path(Path(artifact_paths["manifest"]), settings.project_root),
+            _relative_path(Path(artifact_paths["result"]), settings.project_root),
+            _relative_path(Path(artifact_paths["trace"]), settings.project_root),
+        ]
+    )
     return lines
 
 
@@ -359,7 +393,9 @@ def _format_ablation_output(result: dict, settings: Settings) -> list[str]:
         [
             "",
             "Artifacts",
-            _relative_path(Path(result.get("summary_path")), settings.project_root),
+            _relative_path(
+                Path(result["report_artifact_paths"]["report"]), settings.project_root
+            ),
         ]
     )
     return lines
@@ -867,16 +903,49 @@ def _run_example(args: argparse.Namespace) -> int:
         domain,
         run_config.collection_name,
     )
-    result = _run_async_boundary(
+    created_at = datetime.now().astimezone().isoformat()
+    run_id = build_standalone_run_id()
+    artifacts = standalone_run_artifacts(settings.project_root, run_id)
+    artifacts.output_dir.mkdir(parents=True, exist_ok=True)
+    result_payload = _run_async_boundary(
         run_graph_async(
             example=example,
             config=run_config,
+            run_id=run_id,
+            trace_path=artifacts.trace,
             max_attempts=settings.max_retrieval_attempts,
-            trace_dir=settings.trace_dir,
             _event_sink=_log_graph_event,
         )
     )
-    _print_lines(_format_run_output(result, verbose=args.verbose))
+    trace_summary = dict(result_payload.get("trace_summary", {}))
+    trace_summary["trace_path"] = _relative_path(artifacts.trace, settings.project_root)
+    result_payload = {**result_payload, "trace_summary": trace_summary}
+    manifest = {
+        "run_id": run_id,
+        "created_at": created_at,
+        "example_id": example.get("example_id"),
+        "domain": str(domain),
+        "provider": {
+            "type": settings.provider_type,
+            "chat_model": settings.chat_model,
+            "embedding_type": settings.embedding_provider_type
+            or settings.provider_type,
+            "embedding_model": settings.embedding_model,
+        },
+        "prompt_version": run_config.prompt_version,
+    }
+    _write_json(artifacts.manifest, manifest)
+    _write_json(artifacts.result, result_payload)
+    result = {
+        **result_payload,
+        "run_id": run_id,
+        "artifact_paths": {
+            "manifest": artifacts.manifest,
+            "result": artifacts.result,
+            "trace": artifacts.trace,
+        },
+    }
+    _print_lines(_format_run_output(result, settings, verbose=args.verbose))
     return 0
 
 
@@ -973,8 +1042,6 @@ def _review_failures(args: argparse.Namespace) -> int:
     settings = Settings.from_env(args.env_file)
     output_dir = _run_output_dir(settings, args.run_id)
     failures_path = output_dir / "failures.jsonl"
-    manual_review_path = output_dir / "manual_review.csv"
-    retrieval_examples_path = output_dir / "retrieval_examples.jsonl"
     if not output_dir.exists():
         _print_lines(
             [
@@ -985,16 +1052,15 @@ def _review_failures(args: argparse.Namespace) -> int:
             ]
         )
         return 1
-    required_paths = [failures_path, manual_review_path, retrieval_examples_path]
-    if any(not path.exists() for path in required_paths):
+    if not _eval_run_is_complete(output_dir):
         _print_lines(
             [
                 "SupportGraph Review Failures",
                 "State: artifacts-missing",
                 "Artifacts missing",
-                f"Run {args.run_id} predates the analysis-tooling artifacts or is incomplete.",
+                f"Run {args.run_id} is incomplete under {_relative_path(output_dir, settings.project_root)}.",
                 "Next",
-                "Run eval again to generate failures.jsonl, manual_review.csv, and retrieval_examples.jsonl.",
+                "Run eval again to regenerate the full eval artifact set.",
             ]
         )
         return 1
@@ -1039,15 +1105,15 @@ def _trace_show(args: argparse.Namespace) -> int:
             ]
         )
         return 1
-    if not trace_index_path.exists():
+    if not _eval_run_is_complete(output_dir):
         _print_lines(
             [
                 "SupportGraph Trace Show",
                 "State: artifacts-missing",
                 "Artifacts missing",
-                f"Run {args.run_id} predates trace_index.json or is incomplete.",
+                f"Run {args.run_id} is incomplete under {_relative_path(output_dir, settings.project_root)}.",
                 "Next",
-                "Run eval again to generate trace_index.json.",
+                "Run eval again to regenerate the full eval artifact set.",
             ]
         )
         return 1
@@ -1073,9 +1139,9 @@ def _trace_show(args: argparse.Namespace) -> int:
         )
         return 1
 
-    raw_trace_path = str(entry.get("trace_path", "")).strip()
-    trace_path = Path(raw_trace_path) if raw_trace_path else Path()
-    if not raw_trace_path or not trace_path.exists() or not trace_path.is_file():
+    trace_file = str(entry.get("trace_file", "")).strip()
+    trace_path = output_dir / "traces" / trace_file if trace_file else Path()
+    if not trace_file or not trace_path.exists() or not trace_path.is_file():
         _print_lines(
             [
                 "SupportGraph Trace Show",
@@ -1088,7 +1154,7 @@ def _trace_show(args: argparse.Namespace) -> int:
 
     trace_summary = summarize_trace_events(
         load_trace_events(trace_path),
-        trace_path=trace_path,
+        trace_path=_relative_path(trace_path, settings.project_root),
     )
     _print_lines(
         _format_trace_show_output(
