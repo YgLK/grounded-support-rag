@@ -189,6 +189,7 @@
             status: "connecting",
             source: null,
             timeline: [],
+            milestones: [],
             query: "",
             retrievalAttempts: 0,
             rankedChunks: [],
@@ -201,8 +202,39 @@
             traceSummary: null,
             error: "",
             completed: false,
+            defaultMilestones() {
+              return [
+                { key: "prepare_query", label: "Prepare query", status: "pending", note: "Waiting for query construction." },
+                { key: "retrieve_docs", label: "Retrieve docs", status: "pending", note: "Waiting for ranked retrieval." },
+                { key: "grade_evidence", label: "Grade evidence", status: "pending", note: "Waiting for evidence review." },
+                { key: "response", label: "Build response", status: "pending", note: "Waiting for answer, clarify, or abstain output." },
+                { key: "finalize", label: "Finalize run", status: "pending", note: "Waiting for final trace summary." },
+              ];
+            },
+            updateMilestone(key, status, note) {
+              const item = this.milestones.find((milestone) => milestone.key === key);
+              if (!item) {
+                return;
+              }
+              item.status = status;
+              if (note) {
+                item.note = note;
+              }
+            },
+            milestoneTone(status) {
+              return {
+                done: "status-answer",
+                active: "status-warning",
+                error: "status-failure",
+              }[status] || "status-neutral";
+            },
             connect() {
               this.reset();
+              this.updateMilestone(
+                "prepare_query",
+                "active",
+                "Building the initial query from the latest user turn."
+              );
               this.status = "streaming";
               this.source = new EventSource(this.streamUrl);
               this.source.onmessage = (message) => {
@@ -221,6 +253,7 @@
             },
             reset() {
               this.timeline = [];
+              this.milestones = this.defaultMilestones();
               this.query = "";
               this.retrievalAttempts = 0;
               this.rankedChunks = [];
@@ -244,27 +277,50 @@
             },
             applyEvent(event) {
               this.pushTimeline(event);
-              if (event.kind === "query_ready") {
-                this.query = event.query || "";
-                return;
-              }
-              if (event.kind === "query_refined") {
-                this.query = event.refined_query || this.query;
+              if (event.kind === "query_ready" || event.kind === "query_refined") {
+                const query = event.refined_query || event.query || "";
+                this.query = query;
+                this.updateMilestone("prepare_query", "done", query || "Query ready.");
+                this.updateMilestone(
+                  "retrieve_docs",
+                  "active",
+                  "Retrieving ranked candidates and expanding evidence."
+                );
                 return;
               }
               if (event.kind === "retrieval_complete") {
                 this.retrievalAttempts = event.retrieval_attempts || 0;
                 this.rankedChunks = event.retrieval_ranked_chunks || [];
                 this.retrievedChunks = event.retrieved_chunks || [];
+                this.updateMilestone(
+                  "retrieve_docs",
+                  "done",
+                  `${this.rankedChunks.length} ranked / ${this.retrievedChunks.length} expanded`
+                );
+                this.updateMilestone(
+                  "grade_evidence",
+                  "active",
+                  "Reviewing whether the evidence supports an answer."
+                );
                 return;
               }
               if (event.kind === "evidence_graded") {
                 this.evidenceGrade = event.evidence_grade || null;
+                const verdict = this.evidenceGrade && this.evidenceGrade.verdict
+                  ? this.evidenceGrade.verdict
+                  : "Evidence graded";
+                this.updateMilestone("grade_evidence", "done", verdict);
+                this.updateMilestone(
+                  "response",
+                  "active",
+                  "Preparing the final answer, clarification, or abstention."
+                );
                 return;
               }
               if (event.kind === "response_started") {
                 this.decision = event.decision || this.decision;
                 this.responseText = "";
+                this.updateMilestone("response", "active", event.decision || "Generating response.");
                 return;
               }
               if (event.kind === "response_delta") {
@@ -279,14 +335,31 @@
                 this.citations = event.citations || [];
                 this.confidence = event.confidence_label || "";
                 this.traceSummary = event.trace_summary || null;
+                this.updateMilestone("response", "done", event.decision || "Response completed.");
+                this.updateMilestone(
+                  "finalize",
+                  "done",
+                  this.traceSummary && this.traceSummary.graph_path
+                    ? this.traceSummary.graph_path.join(" -> ")
+                    : "Trace summary ready."
+                );
                 if (this.source) {
                   this.source.close();
                 }
                 return;
               }
+              if (event.kind === "fallback") {
+                this.updateMilestone(
+                  "response",
+                  "active",
+                  "Fallback handling was used while building the response."
+                );
+                return;
+              }
               if (event.kind === "error") {
                 this.error = event.error || "Live run failed.";
                 this.status = "error";
+                this.updateMilestone("finalize", "error", this.error);
                 if (this.source) {
                   this.source.close();
                 }

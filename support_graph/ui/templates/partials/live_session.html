@@ -54,7 +54,11 @@
               </div>
             </div>
             <div class="text-secondary small text-uppercase mt-4 mb-2">Evidence grade</div>
-            <div class="response-block" x-text="evidenceGrade ? JSON.stringify(evidenceGrade, null, 2) : 'Waiting for evidence grading…'"></div>
+            <div class="response-block" x-text="evidenceGrade ? (evidenceGrade.verdict || 'pending') + (evidenceGrade.reason ? ': ' + evidenceGrade.reason : '') : 'Waiting for evidence grading…'"></div>
+            <details class="mt-3" x-show="evidenceGrade">
+              <summary class="small text-secondary">Raw evidence grade</summary>
+              <pre class="json-block mt-2" x-text="JSON.stringify(evidenceGrade, null, 2)"></pre>
+            </details>
             <div class="text-secondary small text-uppercase mt-4 mb-2">Response preview</div>
             <div class="response-block" x-text="responseText || 'Waiting for response output…'"></div>
             <div class="text-secondary small text-uppercase mt-4 mb-2">Citations</div>
@@ -66,6 +70,69 @@
                 <span class="text-secondary">No citations yet.</span>
               </template>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">Milestones</h3>
+          </div>
+          <div class="list-group list-group-flush">
+            <template x-for="milestone in milestones" :key="milestone.key">
+              <div class="list-group-item">
+                <div class="d-flex justify-content-between gap-3 align-items-start">
+                  <div>
+                    <div class="fw-semibold" x-text="milestone.label"></div>
+                    <div class="small text-secondary" x-text="milestone.note"></div>
+                  </div>
+                  <span
+                    class="badge"
+                    :class="milestoneTone(milestone.status)"
+                    x-text="milestone.status"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header">
+            <h3 class="card-title">Trace Summary</h3>
+          </div>
+          <div class="card-body">
+            <template x-if="traceSummary">
+              <div>
+                <div class="hero-grid">
+                  <div>
+                    <div class="text-secondary small text-uppercase">Final query</div>
+                    <div class="query-code" x-text="traceSummary.final_query || query || 'Pending'"></div>
+                  </div>
+                  <div>
+                    <div class="text-secondary small text-uppercase">Latency</div>
+                    <div class="h3" x-text="traceSummary.latency_ms != null ? `${traceSummary.latency_ms} ms` : 'Pending'"></div>
+                  </div>
+                  <div>
+                    <div class="text-secondary small text-uppercase">Retrieval attempts</div>
+                    <div class="h3" x-text="traceSummary.retrieval_attempts != null ? traceSummary.retrieval_attempts : retrievalAttempts"></div>
+                  </div>
+                  <div>
+                    <div class="text-secondary small text-uppercase">Fallbacks</div>
+                    <div class="h3" x-text="traceSummary.fallback_count != null ? traceSummary.fallback_count : 0"></div>
+                  </div>
+                </div>
+                <div class="text-secondary small text-uppercase mt-4 mb-2">Graph path</div>
+                <div class="response-block" x-text="traceSummary.graph_path && traceSummary.graph_path.length ? traceSummary.graph_path.join(' -> ') : 'No graph path recorded.'"></div>
+              </div>
+            </template>
+            <template x-if="!traceSummary">
+              <div class="text-secondary">
+                Waiting for the completed response before the final trace summary is available.
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -85,6 +152,10 @@
                   </div>
                   <div class="small text-secondary" x-text="`#${chunk.rank || '?'} ${chunk.score || ''}`"></div>
                 </div>
+                <details class="mt-2">
+                  <summary class="small text-secondary">Chunk text</summary>
+                  <div class="chunk-text mt-2" x-text="chunk.text || 'No chunk text recorded.'"></div>
+                </details>
               </div>
             </template>
             <div class="list-group-item text-secondary" x-show="!rankedChunks.length">Waiting for ranked retrieval.</div>
@@ -102,6 +173,10 @@
               <div class="list-group-item">
                 <div class="fw-semibold mono" x-text="chunk.chunk_id"></div>
                 <div class="small text-secondary" x-text="chunk.doc_id"></div>
+                <details class="mt-2">
+                  <summary class="small text-secondary">Chunk text</summary>
+                  <div class="chunk-text mt-2" x-text="chunk.text || 'No chunk text recorded.'"></div>
+                </details>
               </div>
             </template>
             <div class="list-group-item text-secondary" x-show="!retrievedChunks.length">Waiting for expanded evidence.</div>
@@ -117,13 +192,13 @@
           <div class="card-body">
             <div class="trace-stack">
               <template x-for="item in timeline" :key="`${item.kind}-${item.node}-${item.payload}`">
-                <div class="trace-event">
-                  <div class="d-flex justify-content-between gap-3 mb-2">
+                <details class="trace-event">
+                  <summary class="d-flex justify-content-between gap-3">
                     <div class="fw-semibold" x-text="item.kind"></div>
                     <div class="small text-secondary" x-text="item.node || 'graph'"></div>
-                  </div>
-                  <pre class="json-block" x-text="item.payload"></pre>
-                </div>
+                  </summary>
+                  <pre class="json-block mt-3" x-text="item.payload"></pre>
+                </details>
               </template>
               <div class="text-secondary" x-show="!timeline.length">Waiting for the first event.</div>
             </div>

@@ -17,15 +17,12 @@ from support_graph.artifacts import (
     standalone_run_artifacts,
 )
 from support_graph.config.runtime import RuntimeSettingsLike, build_runtime_config
-from support_graph.data.dataset import load_dialogues
 from support_graph.data.examples import (
-    build_turn_examples,
     load_example_record as load_example_record_from_paths,
-    write_examples_jsonl,
 )
 from support_graph.runtime.graph import astream_graph_events
 from support_graph.runtime.schemas import GraphStreamEvent
-from support_graph.types import DatasetSplit, DomainLike
+from support_graph.types import DomainLike
 
 
 class LiveRunSettings(RuntimeSettingsLike, Protocol):
@@ -135,29 +132,20 @@ def prepare_live_run_session(
 def load_example_record(
     settings: LiveRunSettings,
     example_id: str,
-    *,
-    domain: DomainLike | None = None,
 ) -> dict[str, object]:
-    candidate_paths: list[Path] = []
-    if domain is not None:
-        candidate_paths.append(settings.examples_dir / f"{domain}_validation.jsonl")
-    candidate_paths.extend(sorted(settings.examples_dir.glob("*.jsonl")))
-    existing_paths = [path for path in candidate_paths if path.exists()]
+    existing_paths = sorted(settings.examples_dir.glob("*.jsonl"))
     if not existing_paths:
-        selected_domain = domain or settings.selected_domain()
-        dialogues = load_dialogues(
-            settings.dataset_root,
-            split=DatasetSplit.VALIDATION,
-            domains=[selected_domain],
+        raise LiveRunExampleNotFoundError(
+            "Derived examples not found under "
+            f"{project_relative_path(settings.examples_dir, settings.project_root)}. "
+            "Run `uv run support-graph build-examples --domain dmv --split validation` first."
         )
-        examples = build_turn_examples(dialogues)
-        output_path = settings.examples_dir / f"{selected_domain}_validation.jsonl"
-        write_examples_jsonl(examples, output_path)
-        existing_paths = [output_path]
     try:
         return load_example_record_from_paths(example_id, existing_paths)
     except FileNotFoundError as exc:
-        raise LiveRunExampleNotFoundError(str(exc)) from exc
+        raise LiveRunExampleNotFoundError(
+            f"Example not found in derived examples: {example_id}."
+        ) from exc
 
 
 async def iter_live_run_stream(
