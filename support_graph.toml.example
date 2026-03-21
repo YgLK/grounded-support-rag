@@ -1,0 +1,59 @@
+# SupportGraph config template.
+# Copy this file to `support_graph.toml` and edit it for your local setup.
+# Secrets belong in `.env`, not here.
+
+[dataset]
+root = "multidoc2dial"
+enabled_domains = ["dmv"]
+
+[paths]
+eval_runs_dir = "outputs/evals/runs"
+eval_reports_dir = "outputs/evals/reports"
+runs_dir = "outputs/runs"
+log_dir = "logs"
+log_level = "INFO"
+
+[runtime]
+# Supported providers: "openrouter", "ollama"
+chat_provider_type = "openrouter"
+embedding_provider_type = "openrouter"
+
+ollama_base_url = "http://localhost:11434"
+openrouter_base_url = "https://openrouter.ai/api/v1"
+
+# Default OpenRouter template.
+chat_model = "openai/gpt-4.1-mini"
+embedding_model = "openai/text-embedding-3-small"
+
+# Ollama-only example:
+# chat_provider_type = "ollama"
+# embedding_provider_type = "ollama"
+# chat_model = "qwen3:8b-q4_K_M"
+# embedding_model = "qwen3-embedding:4b-q4_K_M"
+
+# Mixed-provider example:
+# chat_provider_type = "openrouter"
+# embedding_provider_type = "ollama"
+# chat_model = "openai/gpt-oss-120b:nitro"
+# embedding_model = "qwen3-embedding:4b-q4_K_M"
+
+prompt_version = "v1"
+retrieval_top_k = 5
+retrieval_candidate_k = 12
+max_retrieval_attempts = 2
+llm_max_concurrency = 4
+llm_timeout_seconds = 60.0
+llm_max_retries = 3
+llm_retry_base_delay_seconds = 0.5
+llm_retry_max_delay_seconds = 4.0
+
+[observability.langsmith]
+tracing_enabled = false
+project = "support-graph"
+endpoint = ""
+
+[observability.otel]
+enabled = false
+service_name = "support-graph"
+exporter = "otlp"
+endpoint = ""
