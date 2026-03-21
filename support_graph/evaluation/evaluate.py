@@ -24,10 +24,10 @@ from support_graph.artifacts import (
 from support_graph.logging_utils import get_logger
 from support_graph.config.runtime import (
     RuntimeConfig,
-    RuntimeSettingsLike,
-    build_runtime_config,
-    with_runtime_config_overrides,
+    RuntimeExperimentOverrides,
+    apply_runtime_experiment_overrides,
 )
+from support_graph.config.settings import Settings
 from support_graph.data.dataset import load_dialogues
 from support_graph.data.eval_subsets import load_subset_jsonl
 from support_graph.data.examples import (
@@ -250,11 +250,11 @@ def _load_or_build_examples(
 ) -> list[dict]:
     resolved_domain = parse_domain(domain)
     resolved_split = parse_dataset_split(split)
-    path = settings.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
+    path = settings.paths.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
     if path.exists():
         return load_examples_jsonl(path)
     dialogues = load_dialogues(
-        settings.dataset_root,
+        settings.dataset.root,
         split=resolved_split,
         domains=[resolved_domain],
     )
@@ -271,20 +271,25 @@ def load_eval_examples(
 ) -> tuple[list[dict], str]:
     resolved_subset = parse_eval_subset(subset)
     if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_ABLATION}:
-        path = settings.project_root / "data/eval_subsets" / f"{resolved_subset}.jsonl"
+        path = (
+            settings.paths.project_root
+            / "data/eval_subsets"
+            / f"{resolved_subset}.jsonl"
+        )
         return load_subset_jsonl(path), str(resolved_subset)
     examples = _load_or_build_examples(settings, domain, split)
     return examples, str(EvalSubset.FULL_VALIDATION)
 
 
-def build_eval_config(
-    settings: RuntimeSettingsLike, domain: DomainLike
+def build_eval_config(settings: Settings, domain: DomainLike) -> RuntimeConfig:
+    return settings.runtime_for(domain)
+
+
+def with_config_overrides(
+    config: RuntimeConfig,
+    experiment: RuntimeExperimentOverrides,
 ) -> RuntimeConfig:
-    return build_runtime_config(settings, domain)
-
-
-def with_config_overrides(config: RuntimeConfig, **overrides: Any) -> RuntimeConfig:
-    return with_runtime_config_overrides(config, **overrides)
+    return apply_runtime_experiment_overrides(config, experiment)
 
 
 def build_run_id(
@@ -811,7 +816,7 @@ async def evaluate_examples_async(
         raise ValueError("max_concurrency must be positive.")
 
     run_id = build_run_id(resolved_domain, subset_name, now=now, slug=run_id_slug)
-    artifacts = eval_run_artifacts(settings.project_root, run_id)
+    artifacts = eval_run_artifacts(settings.paths.project_root, run_id)
     artifacts.output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(
         "Starting eval run %s domain=%s split=%s subset=%s examples=%s max_concurrency=%s",
@@ -871,13 +876,15 @@ async def evaluate_examples_async(
         trace_summary = dict(prediction["trace_summary"])
         trace_summary["trace_path"] = project_relative_path(
             trace_path,
-            settings.project_root,
+            settings.paths.project_root,
         )
         return {**prediction, "trace_summary": trace_summary}
 
     async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
         trace_path = trace_path_for_example(example)
-        relative_trace_path = project_relative_path(trace_path, settings.project_root)
+        relative_trace_path = project_relative_path(
+            trace_path, settings.paths.project_root
+        )
         try:
             prediction = await run_prediction(example, trace_path=trace_path)
         except Exception as exc:
@@ -956,7 +963,7 @@ async def evaluate_examples_async(
     manifest = {
         "run_id": run_id,
         "created_at": (now or datetime.now().astimezone()).isoformat(),
-        "dataset_root": str(settings.dataset_root),
+        "dataset_root": str(settings.dataset.root),
         "domains": [str(resolved_domain)],
         "split": str(resolved_split),
         "eval_subset": subset_name,
@@ -965,15 +972,14 @@ async def evaluate_examples_async(
             {example.get("target_mode", "answer") for example in selected_examples}
         ),
         "provider": {
-            "type": settings.provider_type,
-            "chat_base_url": chat_provider_base_url(settings),
-            "embedding_type": settings.embedding_provider_type
-            or settings.provider_type,
-            "embedding_base_url": embedding_provider_base_url(settings)
-            if settings.embedding_model
+            "type": settings.runtime.provider_type,
+            "chat_base_url": chat_provider_base_url(settings.runtime),
+            "embedding_type": settings.runtime.provider_type,
+            "embedding_base_url": embedding_provider_base_url(settings.runtime)
+            if settings.runtime.embedding_model
             else None,
-            "chat_model": settings.chat_model,
-            "embedding_model": settings.embedding_model,
+            "chat_model": settings.runtime.chat_model,
+            "embedding_model": settings.runtime.embedding_model,
         },
         "chunking": {
             "strategy": "section_with_deterministic_subchunks",
@@ -1024,7 +1030,7 @@ async def evaluate_examples_async(
     trace_index_records = await asyncio.to_thread(
         _trace_index_records,
         predictions,
-        project_root=settings.project_root,
+        project_root=settings.paths.project_root,
     )
     await asyncio.to_thread(
         _write_json,

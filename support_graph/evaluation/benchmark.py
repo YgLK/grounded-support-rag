@@ -6,8 +6,7 @@ import math
 import time
 from typing import Protocol
 
-from support_graph.config.runtime import EmbeddingBenchmarkConfigLike
-from support_graph.retrieval.index import build_embeddings, load_chunk_records
+from support_graph.retrieval.index import load_chunk_records
 
 
 class EmbeddingsClient(Protocol):
@@ -43,31 +42,30 @@ def chunk_records_to_texts(chunk_records: list[dict]) -> list[str]:
 
 
 def benchmark_embeddings(
-    config: EmbeddingBenchmarkConfigLike,
     *,
+    embedding_model: str | None,
     chunk_records: list[dict],
+    embeddings: EmbeddingsClient,
     sample_size: int = 100,
     batch_size: int = 1,
     warmup: bool = True,
-    embeddings: EmbeddingsClient | None = None,
 ) -> dict:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive.")
 
     sample_records = select_benchmark_records(chunk_records, sample_size)
     sample_texts = chunk_records_to_texts(sample_records)
-    embedding_client = build_embeddings(config) if embeddings is None else embeddings
 
     warmup_seconds = 0.0
     if warmup and sample_texts:
         start = time.perf_counter()
-        embedding_client.embed_documents(sample_texts[:1])
+        embeddings.embed_documents(sample_texts[:1])
         warmup_seconds = time.perf_counter() - start
 
     start = time.perf_counter()
     for offset in range(0, len(sample_texts), batch_size):
         batch = sample_texts[offset : offset + batch_size]
-        embedding_client.embed_documents(batch)
+        embeddings.embed_documents(batch)
     elapsed_seconds = time.perf_counter() - start
 
     measured_chunks = len(sample_texts)
@@ -78,7 +76,7 @@ def benchmark_embeddings(
     )
 
     return {
-        "model": config.embedding_model,
+        "model": embedding_model,
         "sample_size": measured_chunks,
         "total_chunks": total_chunks,
         "batch_size": batch_size,

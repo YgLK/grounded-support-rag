@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict, assert_never, cast
 
 from support_graph.artifacts import eval_report_artifacts
+from support_graph.config.runtime import RuntimeExperimentOverrides
 from support_graph.evaluation.evaluate import (
     build_eval_config,
     evaluate_examples_async,
@@ -179,7 +181,7 @@ def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
         return "Content-only reasoning remains the baseline anchor for comparison."
     if variant_id == "structured-query":
         if positive:
-            return "The compact history-aware query preserved the user’s actual need while reducing transcript noise in retrieval."
+            return "The compact history-aware query preserved the user's actual need while reducing transcript noise in retrieval."
         return "The compact query alone did not move the first-stage retrieval enough to improve the primary metrics."
     if variant_id == "structured-query-rerank":
         if positive:
@@ -220,12 +222,16 @@ async def _run_variant(
     subset_label: str,
     manifest_scope: str,
 ) -> dict:
-    config = with_config_overrides(
-        base_config,
+    config_overrides = dict(variant["config_overrides"])
+    experiment = RuntimeExperimentOverrides(
         ablation_variant=ablation_variant,
         ablation_options=variant["ablation_options"],
-        **variant["config_overrides"],
+        retrieval_rerank=bool(config_overrides.pop("retrieval_rerank")),
+        content_only_reasoning=bool(config_overrides.pop("content_only_reasoning")),
+        neighbor_expansion=bool(config_overrides.pop("neighbor_expansion")),
     )
+    config = replace(base_config, **config_overrides)
+    config = with_config_overrides(config, experiment)
     result = await evaluate_examples_async(
         examples,
         settings=settings,
@@ -344,7 +350,7 @@ def write_ablation_summary(
         limit=limit,
         summary_timestamp=summary_timestamp,
     )
-    artifacts = eval_report_artifacts(settings.project_root, report_id)
+    artifacts = eval_report_artifacts(settings.paths.project_root, report_id)
     recommendation, recommendation_line = _final_recommendation(results)
     control = results[0]
     related_run_ids = [result["run_id"] for result in results if "run_id" in result]
