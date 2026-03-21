@@ -12,3 +12,5 @@ outputs/evals/*
 !outputs/evals/.gitkeep
 outputs/traces/*.jsonl
 !outputs/traces/.gitkeep
+logs/*.log
+!logs/.gitkeep
