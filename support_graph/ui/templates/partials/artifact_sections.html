@@ -12,6 +12,7 @@
               <th>Created</th>
               <th>Subset</th>
               <th>Provider</th>
+              <th>Models</th>
               <th>Doc Recall@3</th>
               <th>ROUGE-L</th>
               <th>Failures</th>
@@ -24,6 +25,10 @@
               <td>{{ item.created_at|datetime_label }}</td>
               <td>{{ item.subset_label }}</td>
               <td>{{ item.provider.type }}</td>
+              <td class="small">
+                <div class="mono wrap-cell">{{ item.provider.chat_model or "n/a" }}</div>
+                <div class="text-secondary mono wrap-cell">{{ item.provider.embedding_model or "n/a" }}</div>
+              </td>
               <td>{{ item.headline_retrieval.doc_recall_at_3|metric }}</td>
               <td>{{ item.headline_generation.rouge_l|metric }}</td>
               <td>
@@ -35,7 +40,7 @@
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="7" class="text-secondary">No eval runs matched the current filters.</td></tr>
+            <tr><td colspan="8" class="text-secondary">No eval runs matched the current filters.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -43,17 +48,25 @@
     </div>
   </div>
 
-  <div class="col-lg-6">
+  <div class="col-12">
     <div class="card h-100">
       <div class="card-header">
         <h3 class="card-title">Standalone Runs</h3>
       </div>
       <div class="table-responsive">
-        <table class="table table-vcenter">
+        <table class="table table-vcenter standalone-runs-table">
+          <colgroup>
+            <col style="width: 11rem;">
+            <col style="width: 8rem;">
+            <col style="width: 18%;">
+            <col style="width: 20%;">
+            <col>
+          </colgroup>
           <thead>
             <tr>
               <th>Run</th>
               <th>Decision</th>
+              <th>Models</th>
               <th>Example</th>
               <th>Query</th>
             </tr>
@@ -61,13 +74,17 @@
           <tbody>
             {% for item in explorer.standalone_runs %}
             <tr>
-              <td class="mono"><a href="/runs/{{ item.run_id }}">{{ item.run_id }}</a></td>
+              <td class="mono wrap-cell"><a href="/runs/{{ item.run_id }}">{{ item.run_id }}</a></td>
               <td><span class="badge {{ item.decision|decision_tone }}">{{ item.decision|slug_label }}</span></td>
-              <td class="mono small">{{ item.example_id }}</td>
-              <td class="mono small">{{ item.final_query }}</td>
+              <td class="small">
+                <div class="mono wrap-cell">{{ item.provider.chat_model or "n/a" }}</div>
+                <div class="text-secondary mono wrap-cell">{{ item.provider.embedding_model or "n/a" }}</div>
+              </td>
+              <td class="mono small wrap-cell">{{ item.example_id }}</td>
+              <td class="mono small wrap-cell">{{ item.final_query }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="4" class="text-secondary">No standalone runs found.</td></tr>
+            <tr><td colspan="5" class="text-secondary">No standalone runs found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -75,7 +92,7 @@
     </div>
   </div>
 
-  <div class="col-lg-6">
+  <div class="col-12">
     <div class="card h-100">
       <div class="card-header">
         <h3 class="card-title">Eval Reports</h3>

@@ -117,7 +117,10 @@
         background: rgba(248, 250, 252, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 0.6rem;
+        color: var(--sg-ink);
+        overflow-wrap: anywhere;
         padding: 0.8rem 0.9rem;
+        word-break: break-word;
       }
 
       .chunk-text,
@@ -130,6 +133,7 @@
         max-height: 18rem;
         overflow: auto;
         font-size: 0.78rem;
+        white-space: pre-wrap;
       }
 
       .trace-stack {
@@ -168,6 +172,7 @@
         background: rgba(248, 250, 252, 0.95);
         border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 0.6rem;
+        color: var(--sg-ink);
         padding: 0.8rem;
         overflow: auto;
       }
@@ -178,6 +183,28 @@
         border-radius: 1rem;
         padding: 1rem;
         box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+      }
+
+      .standalone-runs-table {
+        table-layout: fixed;
+        width: 100%;
+      }
+
+      .standalone-runs-table th,
+      .standalone-runs-table td {
+        vertical-align: top;
+      }
+
+      .standalone-runs-table .wrap-cell {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .wrap-cell {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
     </style>
     <script>

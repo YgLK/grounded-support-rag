@@ -89,6 +89,7 @@ class WorkbenchArtifactLoader:
         domain: str | None = None,
         subset: str | None = None,
         provider: str | None = None,
+        chat_model: str | None = None,
         order: SortOrder = "desc",
     ) -> ArtifactExplorerView:
         return ArtifactExplorerView(
@@ -96,6 +97,7 @@ class WorkbenchArtifactLoader:
                 domain=domain,
                 subset=subset,
                 provider=provider,
+                chat_model=chat_model,
                 order=order,
             ).items,
             standalone_runs=self.list_standalone_runs(order=order).items,
@@ -108,18 +110,23 @@ class WorkbenchArtifactLoader:
         domain: str | None = None,
         subset: str | None = None,
         provider: str | None = None,
+        chat_model: str | None = None,
         order: SortOrder = "desc",
     ) -> EvalRunListView:
         items: list[EvalRunSummary] = []
         for run_dir in self._iter_dirs(self.settings.eval_runs_dir):
-            manifest = self._load_eval_manifest(run_dir)
-            metrics = self._load_model(run_dir / "metrics.json", EvalRunMetrics)
+            try:
+                manifest = self._load_eval_manifest(run_dir)
+                metrics = self._load_model(run_dir / "metrics.json", EvalRunMetrics)
+            except InvalidArtifactError:
+                continue
             summary = self._build_eval_run_summary(manifest, metrics)
             if not self._matches_eval_filters(
                 summary,
                 domain=domain,
                 subset=subset,
                 provider=provider,
+                chat_model=chat_model,
             ):
                 continue
             items.append(summary)
@@ -212,8 +219,11 @@ class WorkbenchArtifactLoader:
     ) -> StandaloneRunListView:
         items: list[StandaloneRunSummary] = []
         for run_dir in self._iter_dirs(self.settings.runs_dir):
-            manifest = self._load_standalone_manifest(run_dir)
-            result = self._load_model(run_dir / "result.json", StandaloneRunResult)
+            try:
+                manifest = self._load_standalone_manifest(run_dir)
+                result = self._load_model(run_dir / "result.json", StandaloneRunResult)
+            except InvalidArtifactError:
+                continue
             items.append(self._build_standalone_run_summary(manifest, result))
         return StandaloneRunListView(items=self._sort_by_created_at(items, order=order))
 
@@ -512,10 +522,13 @@ class WorkbenchArtifactLoader:
         domain: str | None,
         subset: str | None,
         provider: str | None,
+        chat_model: str | None,
     ) -> bool:
         if domain is not None and domain not in item.domains:
             return False
         if provider is not None and item.provider.type != provider:
+            return False
+        if chat_model is not None and item.provider.chat_model != chat_model:
             return False
         if subset is None:
             return True

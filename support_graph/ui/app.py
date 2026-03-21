@@ -80,12 +80,14 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
         domain: str | None = None,
         subset: str | None = None,
         provider: str | None = None,
+        chat_model: str | None = None,
         order: SortOrder = "desc",
     ) -> ArtifactExplorerView:
         return artifact_loader.artifact_explorer(
             domain=domain,
             subset=subset,
             provider=provider,
+            chat_model=chat_model,
             order=order,
         )
 
@@ -94,12 +96,14 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
         domain: str | None = None,
         subset: str | None = None,
         provider: str | None = None,
+        chat_model: str | None = None,
         order: SortOrder = "desc",
     ) -> EvalRunListView:
         return artifact_loader.list_eval_runs(
             domain=domain,
             subset=subset,
             provider=provider,
+            chat_model=chat_model,
             order=order,
         )
 
@@ -148,12 +152,14 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
         domain: str | None = None,
         subset: str | None = None,
         provider: str | None = None,
+        chat_model: str | None = None,
         order: SortOrder = "desc",
     ) -> HTMLResponse:
         explorer = artifact_loader.artifact_explorer(
             domain=domain,
             subset=subset,
             provider=provider,
+            chat_model=chat_model,
             order=order,
         )
         if _is_htmx(request):
@@ -179,6 +185,7 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
                     "domain": domain or "",
                     "subset": subset or "",
                     "provider": provider or "",
+                    "chat_model": chat_model or "",
                     "order": order,
                 },
             ),
@@ -372,6 +379,13 @@ def _artifact_filter_options(items: list[EvalRunSummary]) -> dict[str, list[str]
         "domains": sorted({domain for item in items for domain in item.domains}),
         "subsets": sorted({item.subset_label for item in items}),
         "providers": sorted({item.provider.type for item in items}),
+        "chat_models": sorted(
+            {
+                item.provider.chat_model
+                for item in items
+                if item.provider.chat_model is not None
+            }
+        ),
     }
 
 

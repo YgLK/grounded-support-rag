@@ -80,6 +80,11 @@ class ChunkRecordView(StrictModel):
     subchunk_index: int | None = None
     start_sec: int | None = None
     end_sec: int | None = None
+    original_rank: int | None = None
+    vector_distance: float | None = None
+    text_overlap_count: int | None = None
+    title_overlap_count: int | None = None
+    rerank_score: float | None = None
 
 
 class RankedChunkRecordView(ChunkRecordView):

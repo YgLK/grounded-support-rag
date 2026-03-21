@@ -20,7 +20,7 @@
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Subset</label>
           <select class="form-select" name="subset">
             <option value="">All subsets</option>
@@ -29,12 +29,21 @@
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
           <label class="form-label">Provider</label>
           <select class="form-select" name="provider">
             <option value="">All providers</option>
             {% for item in filter_options.providers %}
             <option value="{{ item }}" {% if current_filters.provider == item %}selected{% endif %}>{{ item }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Chat model</label>
+          <select class="form-select" name="chat_model">
+            <option value="">All chat models</option>
+            {% for item in filter_options.chat_models %}
+            <option value="{{ item }}" {% if current_filters.chat_model == item %}selected{% endif %}>{{ item }}</option>
             {% endfor %}
           </select>
         </div>
@@ -61,7 +70,8 @@
       {{ metric_card("Eval Runs", explorer.eval_runs|length) }}
       {{ metric_card("Standalone Runs", explorer.standalone_runs|length) }}
       {{ metric_card("Reports", explorer.reports|length) }}
-      {{ metric_card("Providers", filter_options.providers|length, "Eval-run filters stay driven by manifest metadata.") }}
+      {{ metric_card("Providers", filter_options.providers|length) }}
+      {{ metric_card("Chat Models", filter_options.chat_models|length, "Eval-run filters stay driven by manifest metadata.") }}
     </div>
   </div>
 

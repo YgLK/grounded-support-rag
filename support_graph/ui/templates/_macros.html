@@ -103,7 +103,7 @@
     <div class="trace-stack">
       {% for event in events %}
       <div class="trace-event">
-        <div class="d-flex justify-content-between gap-3 mb-2">
+        <div class="d-flex flex-wrap justify-content-between gap-3 mb-2">
           <div class="fw-semibold">{{ event.node or "event" }}</div>
           <div class="small text-secondary">{{ event.timestamp or "n/a" }}</div>
         </div>
