@@ -21,7 +21,6 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 class ProviderConfigLike(Protocol):
     provider_type: Provider | None
-    embedding_provider_type: Provider | None
     ollama_base_url: str | None
     openrouter_base_url: str | None
     openrouter_api_key: str | None
@@ -51,16 +50,6 @@ def validate_chat_provider_type(value: str | Provider | None) -> Provider:
         ) from exc
 
 
-def validate_embedding_provider_type(value: str | Provider | None) -> Provider:
-    return validate_chat_provider_type(value)
-
-
-def resolve_embedding_provider_type(config: ProviderConfigLike) -> Provider:
-    return validate_embedding_provider_type(
-        config.embedding_provider_type or config.provider_type
-    )
-
-
 def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
     provider = validate_chat_provider_type(config.provider_type)
     match provider:
@@ -71,7 +60,7 @@ def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
 
 
 def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
-    provider = resolve_embedding_provider_type(config)
+    provider = validate_chat_provider_type(config.provider_type)
     match provider:
         case Provider.OLLAMA:
             return config.ollama_base_url
@@ -130,7 +119,6 @@ def _embedding_provider_kwargs(
 def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:
     return (
         config.provider_type is None
-        and config.embedding_provider_type is None
         and config.ollama_base_url is None
         and config.openrouter_api_key is None
         and config.openrouter_base_url is None
@@ -182,7 +170,7 @@ def build_embeddings(
     if _allow_legacy_embedding_injection(config):
         return embedding_model
 
-    provider = resolve_embedding_provider_type(config)
+    provider = validate_chat_provider_type(config.provider_type)
     if embeddings_cls is not None:
         if provider is not Provider.OLLAMA:
             raise ValueError(
@@ -210,7 +198,5 @@ __all__ = [
     "chat_provider_base_url",
     "embedding_provider_base_url",
     "normalize_provider_type",
-    "resolve_embedding_provider_type",
-    "validate_embedding_provider_type",
     "validate_chat_provider_type",
 ]

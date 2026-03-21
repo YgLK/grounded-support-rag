@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -40,9 +39,7 @@ def _build_log_file_path(log_dir: str | Path, command_name: str | None = None) -
 def _resolved_level(level: str | int | None) -> int:
     if isinstance(level, int):
         return level
-    raw_level = os.environ.get("SUPPORT_GRAPH_LOG_LEVEL", DEFAULT_LOG_LEVEL)
-    if level is not None:
-        raw_level = level
+    raw_level = DEFAULT_LOG_LEVEL if level is None else level
     return LOG_LEVELS.get(str(raw_level).upper(), logging.INFO)
 
 
@@ -63,7 +60,7 @@ def configure_logging(
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    resolved_log_dir = log_dir or os.environ.get("SUPPORT_GRAPH_LOG_DIR")
+    resolved_log_dir = log_dir
     log_path: Path | None = None
     if resolved_log_dir is not None and str(resolved_log_dir).strip():
         log_path = _build_log_file_path(resolved_log_dir, command_name=command_name)

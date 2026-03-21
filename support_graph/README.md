@@ -27,7 +27,7 @@ This package is the application core. The CLI, data pipeline, retrieval stack, r
 ## How The Package Connects End To End
 
 1. `support_graph.app.cli` is the outer shell. It parses user commands and decides which pipeline path to run.
-2. `support_graph.config.settings` loads `.env` values and project paths, then `support_graph.config.runtime` converts them into a `RuntimeConfig`.
+2. `support_graph.config.settings` loads `.env` values, project paths, and the default-domain `RuntimeConfig`, while `support_graph.config.runtime` defines the runtime and experiment override contracts used later on.
 3. `support_graph.data` turns raw MultiDoc2Dial files into deterministic chunk, example, and subset artifacts on disk.
 4. `support_graph.retrieval.index` reads chunk artifacts and pushes them into pgvector. Later, `support_graph.retrieval.retrieve` uses the same collection for query-time search.
 5. `support_graph.runtime.graph` and `support_graph.runtime.nodes` execute the shared `run` or `eval` workflow, using `providers.py` for model clients, `prompts.py` for prompt templates, and `traces.py` for local execution traces.
