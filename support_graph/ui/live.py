@@ -20,6 +20,10 @@ from support_graph.config.settings import Settings
 from support_graph.data.examples import (
     load_example_record as load_example_record_from_paths,
 )
+from support_graph.providers import (
+    chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
+)
 from support_graph.runtime.graph import astream_graph_events
 from support_graph.runtime.schemas import GraphStreamEvent
 
@@ -233,9 +237,9 @@ def _standalone_run_manifest(
         "example_id": example.get("example_id"),
         "domain": str(example.get("domain") or settings.selected_domain()),
         "provider": {
-            "type": runtime.provider_type,
+            "type": str(resolved_chat_provider(runtime)),
             "chat_model": runtime.chat_model,
-            "embedding_type": runtime.provider_type,
+            "embedding_type": str(resolved_embedding_provider(runtime)),
             "embedding_model": runtime.embedding_model,
         },
         "prompt_version": prompt_version,

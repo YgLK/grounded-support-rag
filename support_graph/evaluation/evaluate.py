@@ -35,7 +35,12 @@ from support_graph.data.examples import (
     load_examples_jsonl,
     write_examples_jsonl,
 )
-from support_graph.providers import chat_provider_base_url, embedding_provider_base_url
+from support_graph.providers import (
+    chat_provider as resolved_chat_provider,
+    chat_provider_base_url,
+    embedding_provider as resolved_embedding_provider,
+    embedding_provider_base_url,
+)
 from support_graph.runtime.graph import resolve_runtime_resources_async, run_graph_async
 from support_graph.runtime.traces import (
     load_trace_events,
@@ -972,9 +977,9 @@ async def evaluate_examples_async(
             {example.get("target_mode", "answer") for example in selected_examples}
         ),
         "provider": {
-            "type": settings.runtime.provider_type,
+            "type": str(resolved_chat_provider(settings.runtime)),
             "chat_base_url": chat_provider_base_url(settings.runtime),
-            "embedding_type": settings.runtime.provider_type,
+            "embedding_type": str(resolved_embedding_provider(settings.runtime)),
             "embedding_base_url": embedding_provider_base_url(settings.runtime)
             if settings.runtime.embedding_model
             else None,

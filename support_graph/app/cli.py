@@ -49,6 +49,10 @@ from support_graph.evaluation.benchmark import (
 )
 from support_graph.evaluation.evaluate import evaluate_split_async
 from support_graph.logging_utils import configure_logging, get_logger
+from support_graph.providers import (
+    chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
+)
 from support_graph.retrieval.index import (
     collection_row_count,
     index_documents,
@@ -607,9 +611,9 @@ def _run_example(args: argparse.Namespace) -> int:
             "example_id": example.get("example_id"),
             "domain": str(domain),
             "provider": {
-                "type": settings.runtime.provider_type,
+                "type": str(resolved_chat_provider(settings.runtime)),
                 "chat_model": settings.runtime.chat_model,
-                "embedding_type": settings.runtime.provider_type,
+                "embedding_type": str(resolved_embedding_provider(settings.runtime)),
                 "embedding_model": settings.runtime.embedding_model,
             },
             "prompt_version": run_config.prompt_version,

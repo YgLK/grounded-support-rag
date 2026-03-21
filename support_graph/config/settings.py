@@ -84,7 +84,8 @@ class PathsFileConfig(_FrozenModel):
 
 
 class RuntimeFileConfig(_FrozenModel):
-    provider_type: Provider = Provider.OPENROUTER
+    chat_provider_type: Provider = Provider.OPENROUTER
+    embedding_provider_type: Provider = Provider.OPENROUTER
     ollama_base_url: str = "http://localhost:11434"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     chat_model: str | None = None
@@ -94,6 +95,7 @@ class RuntimeFileConfig(_FrozenModel):
     retrieval_candidate_k: int = 12
     max_retrieval_attempts: int = 2
     llm_max_concurrency: int = 4
+    llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 3
     llm_retry_base_delay_seconds: float = 0.5
     llm_retry_max_delay_seconds: float = 4.0

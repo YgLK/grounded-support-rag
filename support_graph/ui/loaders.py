@@ -74,6 +74,7 @@ class WorkbenchArtifactLoader:
     """Read normalized Workbench views from the on-disk artifact contract."""
 
     def __init__(self, settings: Settings):
+        self.settings = settings
         self.paths = settings.paths
         self.project_root = self.paths.project_root
 

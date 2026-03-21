@@ -13,6 +13,10 @@ from langgraph.graph import END, START, StateGraph
 
 from support_graph.config.runtime import RuntimeConfig
 from support_graph.logging_utils import get_logger
+from support_graph.providers import (
+    chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
+)
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.runtime.nodes import (
     _build_evidence_chunks,
@@ -161,7 +165,10 @@ def _span_attributes(
     attributes: dict[str, Any] = {
         "support_graph.node": node_name,
         "support_graph.run_id": runtime.run_id,
-        "support_graph.provider_type": str(runtime.config.provider_type),
+        "support_graph.provider_type": str(resolved_chat_provider(runtime.config)),
+        "support_graph.embedding_provider_type": str(
+            resolved_embedding_provider(runtime.config)
+        ),
     }
     if state.get("example_id") is not None:
         attributes["support_graph.example_id"] = str(state.get("example_id"))
@@ -588,13 +595,15 @@ async def run_graph_async(
         ),
         tags=[
             "support-graph",
-            f"provider:{config.provider_type}",
+            f"provider:{resolved_chat_provider(config)}",
+            f"embedding_provider:{resolved_embedding_provider(config)}",
             f"domain:{initial_state.get('domain')}",
         ],
         metadata={
             "run_id": runtime.run_id,
             "example_id": initial_state.get("example_id"),
-            "provider_type": config.provider_type,
+            "provider_type": str(resolved_chat_provider(config)),
+            "embedding_provider_type": str(resolved_embedding_provider(config)),
         },
     ):
         with span_context(
@@ -603,7 +612,10 @@ async def run_graph_async(
             attributes={
                 "support_graph.run_id": runtime.run_id,
                 "support_graph.example_id": str(initial_state.get("example_id")),
-                "support_graph.provider_type": str(config.provider_type),
+                "support_graph.provider_type": str(resolved_chat_provider(config)),
+                "support_graph.embedding_provider_type": str(
+                    resolved_embedding_provider(config)
+                ),
                 "support_graph.domain": str(initial_state.get("domain")),
             },
         ):

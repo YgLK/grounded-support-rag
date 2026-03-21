@@ -6,7 +6,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from support_graph.providers import DEFAULT_OPENROUTER_BASE_URL, Provider
+from support_graph.providers import (
+    DEFAULT_OPENROUTER_BASE_URL,
+    Provider,
+    chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
+)
 from support_graph.types import Domain, DomainLike
 
 if TYPE_CHECKING:
@@ -42,7 +47,8 @@ class RuntimeExperimentOverrides:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RuntimeConfig:
     postgres_dsn: str | None = None
-    provider_type: Provider = Provider.OPENROUTER
+    chat_provider_type: Provider = Provider.OPENROUTER
+    embedding_provider_type: Provider = Provider.OPENROUTER
     ollama_base_url: str = "http://localhost:11434"
     openrouter_base_url: str = DEFAULT_OPENROUTER_BASE_URL
     openrouter_api_key: str | None = None
@@ -53,6 +59,7 @@ class RuntimeConfig:
     retrieval_candidate_k: int = 12
     max_retrieval_attempts: int = 2
     llm_max_concurrency: int = 4
+    llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 3
     llm_retry_base_delay_seconds: float = 0.5
     llm_retry_max_delay_seconds: float = 4.0
@@ -99,12 +106,13 @@ class RuntimeConfig:
         return missing
 
     def _provider_missing_fields(self) -> list[str]:
-        match self.provider_type:
-            case None | Provider.OLLAMA:
-                return []
-            case Provider.OPENROUTER:
-                return [] if self.openrouter_api_key else [MISSING_OPENROUTER_API_KEY]
-        raise ValueError(f"Unknown provider_type: {self.provider_type!r}")
+        providers = {
+            resolved_chat_provider(self),
+            resolved_embedding_provider(self),
+        }
+        if Provider.OPENROUTER in providers and not self.openrouter_api_key:
+            return [MISSING_OPENROUTER_API_KEY]
+        return []
 
 
 def apply_runtime_experiment_overrides(

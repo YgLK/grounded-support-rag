@@ -11,7 +11,7 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_exponential_jitter
 
 from support_graph.config.runtime import RuntimeConfig
-from support_graph.providers import chat_provider_base_url
+from support_graph.providers import chat_provider, chat_provider_base_url
 
 
 _T = TypeVar("_T")
@@ -23,6 +23,12 @@ _RETRYABLE_MESSAGE_PATTERN = re.compile(
 _SHARED_SEMAPHORES: dict[SemaphoreKey, asyncio.Semaphore] = {}
 
 
+class LLMCallTimeoutError(TimeoutError):
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+        super().__init__(f"LLM call timed out after {timeout_seconds:.1f}s")
+
+
 def _max_concurrency(config: RuntimeConfig) -> int:
     if config.llm_max_concurrency <= 0:
         raise ValueError("llm_max_concurrency must be positive.")
@@ -32,7 +38,7 @@ def _max_concurrency(config: RuntimeConfig) -> int:
 def _semaphore_key(config: RuntimeConfig) -> SemaphoreKey:
     return (
         id(asyncio.get_running_loop()),
-        config.provider_type,
+        str(chat_provider(config)),
         chat_provider_base_url(config) or "",
         config.chat_model or "",
         _max_concurrency(config),
@@ -60,6 +66,8 @@ def _exception_status_code(exc: BaseException) -> int | None:
 
 
 def is_retryable_exception(exc: BaseException) -> bool:
+    if isinstance(exc, LLMCallTimeoutError):
+        return False
     if isinstance(exc, (TimeoutError, ConnectionError, asyncio.TimeoutError, OSError)):
         return True
 
@@ -88,6 +96,7 @@ async def ainvoke_with_retry(
     operation: Callable[[], Awaitable[_T]],
     *,
     semaphore: asyncio.Semaphore,
+    timeout_seconds: float | None,
     max_attempts: int,
     base_delay_seconds: float,
     max_delay_seconds: float,
@@ -100,6 +109,8 @@ async def ainvoke_with_retry(
         raise ValueError(
             "max_delay_seconds must be greater than or equal to base_delay_seconds."
         )
+    if timeout_seconds is not None and timeout_seconds <= 0.0:
+        raise ValueError("timeout_seconds must be positive when provided.")
     async for attempt in AsyncRetrying(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential_jitter(
@@ -111,11 +122,17 @@ async def ainvoke_with_retry(
     ):
         with attempt:
             async with semaphore:
-                return await operation()
+                if timeout_seconds is None:
+                    return await operation()
+                try:
+                    return await asyncio.wait_for(operation(), timeout=timeout_seconds)
+                except asyncio.TimeoutError as exc:
+                    raise LLMCallTimeoutError(timeout_seconds) from exc
     raise RuntimeError("LLM retry policy exhausted without returning or raising.")
 
 
 __all__ = [
+    "LLMCallTimeoutError",
     "ainvoke_with_retry",
     "is_retryable_exception",
     "shared_llm_semaphore",

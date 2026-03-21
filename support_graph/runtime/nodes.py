@@ -14,12 +14,20 @@ from pydantic import BaseModel
 from support_graph.config.runtime import RuntimeConfig
 from support_graph.logging_utils import get_logger
 from support_graph.providers import build_chat_model as build_provider_chat_model
+from support_graph.providers import (
+    chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
+)
 from support_graph.retrieval.index import load_chunk_records
 from support_graph.retrieval.retrieve import build_legacy_query
 from support_graph.retrieval.retrieve import build_query as build_retrieval_query
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.retrieval.retrieve import get_vectorstore, retrieve_chunks
-from support_graph.runtime.llm_policy import ainvoke_with_retry, shared_llm_semaphore
+from support_graph.runtime.llm_policy import (
+    LLMCallTimeoutError,
+    ainvoke_with_retry,
+    shared_llm_semaphore,
+)
 from support_graph.runtime.observability import build_observability
 from support_graph.runtime.prompts import resolve_prompt_set
 from support_graph.runtime.schemas import (
@@ -279,6 +287,7 @@ async def _ainvoke_structured_prompt(
     result = await ainvoke_with_retry(
         invoke_chain,
         semaphore=runtime.llm_semaphore,
+        timeout_seconds=getattr(runtime.config, "llm_timeout_seconds", None),
         max_attempts=runtime.config.llm_max_retries,
         base_delay_seconds=runtime.config.llm_retry_base_delay_seconds,
         max_delay_seconds=runtime.config.llm_retry_max_delay_seconds,
@@ -716,6 +725,8 @@ async def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
                 "retrieved_chunks": _render_chunks(retrieved_chunks),
             },
         )
+    except LLMCallTimeoutError:
+        raise
     except Exception as exc:
         _log_llm_fallback("grade_evidence", exc)
         return attach_fallback_metadata(
@@ -793,6 +804,8 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
             payload=payload,
         )
         return payload
+    except LLMCallTimeoutError:
+        raise
     except Exception as exc:
         _log_llm_fallback("generate_response", exc)
         payload = attach_fallback_metadata(
@@ -861,6 +874,8 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
             payload=payload,
         )
         return payload
+    except LLMCallTimeoutError:
+        raise
     except Exception as exc:
         _log_llm_fallback("resolve_without_answer", exc)
         payload = attach_fallback_metadata(
@@ -978,7 +993,7 @@ async def build_runtime_async(
         "Preparing runtime %s for domain=%s provider=%s trace_path=%s",
         run_id,
         config.domain,
-        config.provider_type,
+        resolved_chat_provider(config),
         resolved_trace_path,
     )
     resolved_resources = resources
@@ -1019,8 +1034,9 @@ async def resolve_runtime_resources_async(
     resolved_vectorstore = vectorstore
     if resolved_vectorstore is None and config.postgres_dsn and config.embedding_model:
         logger.info(
-            "Connecting vectorstore for collection=%s embedding_model=%s",
+            "Connecting vectorstore for collection=%s embedding_provider=%s embedding_model=%s",
             config.collection_name,
+            resolved_embedding_provider(config),
             config.embedding_model,
         )
         resolved_vectorstore = await asyncio.to_thread(get_vectorstore, config)
@@ -1030,7 +1046,7 @@ async def resolve_runtime_resources_async(
         logger.info(
             "Initializing chat model %s via %s",
             config.chat_model,
-            config.provider_type,
+            resolved_chat_provider(config),
         )
         resolved_chat_model = build_chat_model(config)
 

@@ -20,7 +20,8 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class ProviderConfigLike(Protocol):
-    provider_type: Provider | None
+    chat_provider_type: Provider | None
+    embedding_provider_type: Provider | None
     ollama_base_url: str | None
     openrouter_base_url: str | None
     openrouter_api_key: str | None
@@ -50,8 +51,16 @@ def validate_chat_provider_type(value: str | Provider | None) -> Provider:
         ) from exc
 
 
+def chat_provider(config: ProviderConfigLike) -> Provider:
+    return validate_chat_provider_type(config.chat_provider_type)
+
+
+def embedding_provider(config: ProviderConfigLike) -> Provider:
+    return validate_chat_provider_type(config.embedding_provider_type)
+
+
 def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
-    provider = validate_chat_provider_type(config.provider_type)
+    provider = chat_provider(config)
     match provider:
         case Provider.OLLAMA:
             return config.ollama_base_url
@@ -60,7 +69,7 @@ def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
 
 
 def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
-    provider = validate_chat_provider_type(config.provider_type)
+    provider = embedding_provider(config)
     match provider:
         case Provider.OLLAMA:
             return config.ollama_base_url
@@ -116,15 +125,6 @@ def _embedding_provider_kwargs(
             )
 
 
-def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:
-    return (
-        config.provider_type is None
-        and config.ollama_base_url is None
-        and config.openrouter_api_key is None
-        and config.openrouter_base_url is None
-    )
-
-
 def build_chat_model(
     config: ProviderConfigLike,
     *,
@@ -135,11 +135,11 @@ def build_chat_model(
     if not chat_model:
         raise ValueError("Missing chat_model for provider-backed runtime.")
 
-    provider = validate_chat_provider_type(config.provider_type)
+    provider = chat_provider(config)
     if chat_model_cls is not None:
         if provider is not Provider.OLLAMA:
             raise ValueError(
-                "Legacy chat_model_cls injection is only supported for provider_type='ollama'."
+                "Legacy chat_model_cls injection is only supported for chat_provider_type='ollama'."
             )
         return chat_model_cls(
             model=chat_model,
@@ -167,14 +167,11 @@ def build_embeddings(
     if not embedding_model:
         raise ValueError("Missing embedding_model for provider-backed retrieval.")
 
-    if _allow_legacy_embedding_injection(config):
-        return embedding_model
-
-    provider = validate_chat_provider_type(config.provider_type)
+    provider = embedding_provider(config)
     if embeddings_cls is not None:
         if provider is not Provider.OLLAMA:
             raise ValueError(
-                "Legacy embeddings_cls injection is only supported for provider_type='ollama'."
+                "Legacy embeddings_cls injection is only supported for embedding_provider_type='ollama'."
             )
         return embeddings_cls(
             model=embedding_model,
@@ -195,7 +192,9 @@ __all__ = [
     "ProviderConfigLike",
     "build_chat_model",
     "build_embeddings",
+    "chat_provider",
     "chat_provider_base_url",
+    "embedding_provider",
     "embedding_provider_base_url",
     "normalize_provider_type",
     "validate_chat_provider_type",
