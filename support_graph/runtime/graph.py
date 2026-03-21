@@ -11,7 +11,7 @@ from typing import Any, Literal, cast
 
 from langgraph.graph import END, START, StateGraph
 
-from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.logging_utils import get_logger
 from support_graph.retrieval.retrieve import build_query_context
 from support_graph.runtime.nodes import (
@@ -218,7 +218,7 @@ async def _emit_fallback_event(
 def _initial_state(
     *,
     example: dict,
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     runtime: Runtime,
     max_attempts: int | None,
 ) -> GraphState:
@@ -548,7 +548,7 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
 async def run_graph_async(
     *,
     example: dict,
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     run_id: str,
     trace_path: str | Path,
     max_attempts: int | None = None,
@@ -622,7 +622,7 @@ async def run_graph_async(
 async def astream_graph_events(
     *,
     example: dict,
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     run_id: str,
     trace_path: str | Path,
     max_attempts: int | None = None,

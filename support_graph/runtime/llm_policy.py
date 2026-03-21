@@ -10,7 +10,7 @@ from typing import TypeVar
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_exponential_jitter
 
-from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.providers import chat_provider_base_url
 
 
@@ -23,13 +23,13 @@ _RETRYABLE_MESSAGE_PATTERN = re.compile(
 _SHARED_SEMAPHORES: dict[SemaphoreKey, asyncio.Semaphore] = {}
 
 
-def _max_concurrency(config: RuntimeConfigLike) -> int:
+def _max_concurrency(config: RuntimeConfig) -> int:
     if config.llm_max_concurrency <= 0:
         raise ValueError("llm_max_concurrency must be positive.")
     return config.llm_max_concurrency
 
 
-def _semaphore_key(config: RuntimeConfigLike) -> SemaphoreKey:
+def _semaphore_key(config: RuntimeConfig) -> SemaphoreKey:
     return (
         id(asyncio.get_running_loop()),
         config.provider_type,
@@ -39,7 +39,7 @@ def _semaphore_key(config: RuntimeConfigLike) -> SemaphoreKey:
     )
 
 
-def shared_llm_semaphore(config: RuntimeConfigLike) -> asyncio.Semaphore:
+def shared_llm_semaphore(config: RuntimeConfig) -> asyncio.Semaphore:
     key = _semaphore_key(config)
     semaphore = _SHARED_SEMAPHORES.get(key)
     if semaphore is None:

@@ -11,7 +11,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel
 
-from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.logging_utils import get_logger
 from support_graph.providers import build_chat_model as build_provider_chat_model
 from support_graph.retrieval.index import load_chunk_records
@@ -40,7 +40,7 @@ QueryMode = Literal["legacy_transcript", "latest_user_only", "structured"]
 
 
 def build_chat_model(
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     chat_model_cls: type[Any] | None = None,
 ) -> Any:
     return build_provider_chat_model(
@@ -940,7 +940,7 @@ def _chunk_sort_key(chunk: dict) -> tuple[int, int, str, str]:
     )
 
 
-def _load_chunk_records_by_doc(config: RuntimeConfigLike) -> dict[str, list[dict]]:
+def _load_chunk_records_by_doc(config: RuntimeConfig) -> dict[str, list[dict]]:
     chunk_records = config.chunk_records
     if chunk_records is None:
         chunk_artifact_path = config.chunk_artifact_path
@@ -963,7 +963,7 @@ def _load_chunk_records_by_doc(config: RuntimeConfigLike) -> dict[str, list[dict
 
 
 async def build_runtime_async(
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     *,
     run_id: str,
     trace_path: str | Path,
@@ -1011,7 +1011,7 @@ async def build_runtime_async(
 
 
 async def resolve_runtime_resources_async(
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     *,
     vectorstore: Any = None,
     chat_model: Any = None,

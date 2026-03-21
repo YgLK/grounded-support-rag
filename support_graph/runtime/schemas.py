@@ -10,7 +10,7 @@ from typing import Any, Literal, TypedDict, cast
 
 from pydantic import BaseModel, Field
 
-from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.runtime.observability import Observability
 from support_graph.runtime.prompts import PromptSet
 
@@ -118,7 +118,7 @@ class GraphState(TypedDict, total=False):
 
 @dataclass(slots=True)
 class Runtime:
-    config: RuntimeConfigLike
+    config: RuntimeConfig
     vectorstore: Any
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
