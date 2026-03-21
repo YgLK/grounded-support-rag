@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from support_graph.providers import Provider
+from support_graph.providers import DEFAULT_OPENROUTER_BASE_URL, Provider
 from support_graph.types import Domain, DomainLike, parse_domain
 
 
@@ -15,10 +15,8 @@ class RuntimeSettingsLike(Protocol):
     provider_type: Provider
     embedding_provider_type: Provider | None
     ollama_base_url: str
-    openai_base_url: str | None
-    openai_api_key: str | None
-    anthropic_base_url: str | None
-    anthropic_api_key: str | None
+    openrouter_base_url: str
+    openrouter_api_key: str | None
     chat_model: str | None
     embedding_model: str | None
     prompt_version: str
@@ -55,10 +53,8 @@ class IndexConfigLike(Protocol):
     provider_type: Provider | None
     embedding_provider_type: Provider | None
     ollama_base_url: str | None
-    openai_base_url: str | None
-    openai_api_key: str | None
-    anthropic_base_url: str | None
-    anthropic_api_key: str | None
+    openrouter_base_url: str | None
+    openrouter_api_key: str | None
     embedding_model: str | None
     embedding_client: Any | None
     domain: Domain
@@ -96,13 +92,11 @@ class RuntimeConfigLike(IndexConfigLike, Protocol):
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     postgres_dsn: str | None = None
-    provider_type: Provider = Provider.OLLAMA
+    provider_type: Provider = Provider.OPENROUTER
     embedding_provider_type: Provider | None = None
     ollama_base_url: str | None = None
-    openai_base_url: str | None = None
-    openai_api_key: str | None = None
-    anthropic_base_url: str | None = None
-    anthropic_api_key: str | None = None
+    openrouter_base_url: str | None = DEFAULT_OPENROUTER_BASE_URL
+    openrouter_api_key: str | None = None
     embedding_model: str | None = None
     chat_model: str | None = None
     prompt_version: str = "v1"
@@ -143,10 +137,8 @@ def build_runtime_config(
         provider_type=settings.provider_type,
         embedding_provider_type=settings.embedding_provider_type,
         ollama_base_url=settings.ollama_base_url,
-        openai_base_url=settings.openai_base_url,
-        openai_api_key=settings.openai_api_key,
-        anthropic_base_url=settings.anthropic_base_url,
-        anthropic_api_key=settings.anthropic_api_key,
+        openrouter_base_url=settings.openrouter_base_url,
+        openrouter_api_key=settings.openrouter_api_key,
         embedding_model=settings.embedding_model,
         chat_model=settings.chat_model,
         prompt_version=settings.prompt_version,

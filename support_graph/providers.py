@@ -11,25 +11,20 @@ from support_graph.types import ChoiceStrEnum
 
 
 class Provider(ChoiceStrEnum):
-    ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
-    OPENAI = "openai"
-
-    def supports_embeddings(self) -> bool:
-        return self in {Provider.OLLAMA, Provider.OPENAI}
+    OPENROUTER = "openrouter"
 
 
-DEFAULT_PROVIDER_TYPE = Provider.OLLAMA
+DEFAULT_PROVIDER_TYPE = Provider.OPENROUTER
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class ProviderConfigLike(Protocol):
     provider_type: Provider | None
     embedding_provider_type: Provider | None
     ollama_base_url: str | None
-    openai_base_url: str | None
-    openai_api_key: str | None
-    anthropic_base_url: str | None
-    anthropic_api_key: str | None
+    openrouter_base_url: str | None
+    openrouter_api_key: str | None
     chat_model: str | None
     embedding_model: str | None
     embedding_client: Any | None
@@ -57,30 +52,13 @@ def validate_chat_provider_type(value: str | Provider | None) -> Provider:
 
 
 def validate_embedding_provider_type(value: str | Provider | None) -> Provider:
-    provider = validate_chat_provider_type(value)
-    if provider.supports_embeddings():
-        return provider
-    supported = ", ".join(
-        sorted(
-            candidate.value for candidate in Provider if candidate.supports_embeddings()
-        )
-    )
-    raise ValueError(
-        "Unsupported embedding provider_type "
-        f"'{provider}'. Supported providers: {supported}."
-    )
+    return validate_chat_provider_type(value)
 
 
 def resolve_embedding_provider_type(config: ProviderConfigLike) -> Provider:
-    provider = normalize_provider_type(
+    return validate_embedding_provider_type(
         config.embedding_provider_type or config.provider_type
     )
-    if not provider.supports_embeddings():
-        raise ValueError(
-            "Anthropic chat models do not provide embeddings through LangChain. "
-            "Set SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE to 'openai' or 'ollama'."
-        )
-    return provider
 
 
 def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
@@ -88,10 +66,8 @@ def chat_provider_base_url(config: ProviderConfigLike) -> str | None:
     match provider:
         case Provider.OLLAMA:
             return config.ollama_base_url
-        case Provider.OPENAI:
-            return config.openai_base_url
-        case Provider.ANTHROPIC:
-            return config.anthropic_base_url
+        case Provider.OPENROUTER:
+            return config.openrouter_base_url
 
 
 def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
@@ -99,10 +75,14 @@ def embedding_provider_base_url(config: ProviderConfigLike) -> str | None:
     match provider:
         case Provider.OLLAMA:
             return config.ollama_base_url
-        case Provider.OPENAI:
-            return config.openai_base_url
-        case Provider.ANTHROPIC:
-            raise AssertionError(provider)
+        case Provider.OPENROUTER:
+            return config.openrouter_base_url
+
+
+def _langchain_provider_name(provider: Provider) -> str:
+    if provider is Provider.OPENROUTER:
+        return "openai"
+    return str(provider)
 
 
 def _without_none(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -121,20 +101,12 @@ def _chat_provider_kwargs(
                     "base_url": config.ollama_base_url,
                 }
             )
-        case Provider.OPENAI:
+        case Provider.OPENROUTER:
             return _without_none(
                 {
                     "temperature": 0,
-                    "api_key": config.openai_api_key,
-                    "base_url": config.openai_base_url,
-                }
-            )
-        case Provider.ANTHROPIC:
-            return _without_none(
-                {
-                    "temperature": 0,
-                    "api_key": config.anthropic_api_key,
-                    "base_url": config.anthropic_base_url,
+                    "api_key": config.openrouter_api_key,
+                    "base_url": config.openrouter_base_url,
                 }
             )
 
@@ -146,15 +118,13 @@ def _embedding_provider_kwargs(
     match provider:
         case Provider.OLLAMA:
             return _without_none({"base_url": config.ollama_base_url})
-        case Provider.OPENAI:
+        case Provider.OPENROUTER:
             return _without_none(
                 {
-                    "api_key": config.openai_api_key,
-                    "base_url": config.openai_base_url,
+                    "api_key": config.openrouter_api_key,
+                    "base_url": config.openrouter_base_url,
                 }
             )
-        case Provider.ANTHROPIC:
-            raise AssertionError(provider)
 
 
 def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:
@@ -162,8 +132,8 @@ def _allow_legacy_embedding_injection(config: ProviderConfigLike) -> bool:
         config.provider_type is None
         and config.embedding_provider_type is None
         and config.ollama_base_url is None
-        and config.openai_api_key is None
-        and config.openai_base_url is None
+        and config.openrouter_api_key is None
+        and config.openrouter_base_url is None
     )
 
 
@@ -191,7 +161,7 @@ def build_chat_model(
 
     return init_chat_model_fn(
         chat_model,
-        model_provider=provider,
+        model_provider=_langchain_provider_name(provider),
         **_chat_provider_kwargs(config, provider),
     )
 
@@ -225,13 +195,14 @@ def build_embeddings(
 
     return init_embeddings_fn(
         embedding_model,
-        provider=provider,
+        provider=_langchain_provider_name(provider),
         **_embedding_provider_kwargs(config, provider),
     )
 
 
 __all__ = [
     "DEFAULT_PROVIDER_TYPE",
+    "DEFAULT_OPENROUTER_BASE_URL",
     "Provider",
     "ProviderConfigLike",
     "build_chat_model",

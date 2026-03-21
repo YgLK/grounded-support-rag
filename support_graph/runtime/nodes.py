@@ -383,7 +383,6 @@ def _heuristic_non_answer_response(state: GraphState) -> dict:
 def _query_example_from_state(state: GraphState) -> dict:
     return {
         "domain": state.get("domain"),
-        "domain_hint": state.get("domain"),
         "conversation": state.get("conversation", []),
         "latest_user_turn_id": state.get("latest_user_turn_id"),
         "latest_user_utterance": state.get("latest_user_utterance"),
@@ -643,6 +642,11 @@ def _build_evidence_chunks(
 
 
 def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
+    """Build the retrieval query string and context from conversation state.
+
+    Returns a tuple of (query_string, query_context) based on the configured
+    query mode in ablation_options.
+    """
     del runtime
     query_example = _query_example_from_state(state)
     query_context = build_query_context(query_example)

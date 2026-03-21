@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from support_graph.providers import (
+    DEFAULT_OPENROUTER_BASE_URL,
     Provider,
     validate_chat_provider_type,
     validate_embedding_provider_type,
@@ -141,10 +142,8 @@ class Settings:
     provider_type: Provider
     embedding_provider_type: Provider | None
     ollama_base_url: str
-    openai_base_url: str | None
-    openai_api_key: str | None
-    anthropic_base_url: str | None
-    anthropic_api_key: str | None
+    openrouter_base_url: str
+    openrouter_api_key: str | None
     chat_model: str | None
     embedding_model: str | None
     prompt_version: str
@@ -236,17 +235,16 @@ class Settings:
             ollama_base_url=env.get(
                 "SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"
             ),
-            openai_base_url=_env_value(
-                env, "SUPPORT_GRAPH_OPENAI_BASE_URL", "OPENAI_BASE_URL"
-            ),
-            openai_api_key=_env_value(
-                env, "SUPPORT_GRAPH_OPENAI_API_KEY", "OPENAI_API_KEY"
-            ),
-            anthropic_base_url=_env_value(
-                env, "SUPPORT_GRAPH_ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"
-            ),
-            anthropic_api_key=_env_value(
-                env, "SUPPORT_GRAPH_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"
+            openrouter_base_url=_env_value(
+                env,
+                "SUPPORT_GRAPH_OPENROUTER_BASE_URL",
+                "OPENROUTER_BASE_URL",
+            )
+            or DEFAULT_OPENROUTER_BASE_URL,
+            openrouter_api_key=_env_value(
+                env,
+                "SUPPORT_GRAPH_OPENROUTER_API_KEY",
+                "OPENROUTER_API_KEY",
             ),
             chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
             embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
@@ -345,28 +343,25 @@ class Settings:
         match self.provider_type:
             case Provider.OLLAMA:
                 return []
-            case Provider.OPENAI:
-                return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
-            case Provider.ANTHROPIC:
+            case Provider.OPENROUTER:
                 return (
                     []
-                    if self.anthropic_api_key
-                    else ["SUPPORT_GRAPH_ANTHROPIC_API_KEY"]
+                    if self.openrouter_api_key
+                    else ["SUPPORT_GRAPH_OPENROUTER_API_KEY"]
                 )
         raise ValueError(f"Unknown provider_type: {self.provider_type!r}")
 
     def _embedding_provider_missing_fields(self) -> list[str]:
         if not self.embedding_model:
             return []
-        if (
-            self.embedding_provider_type is None
-            and self.provider_type == Provider.ANTHROPIC
-        ):
-            return ["SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE"]
         provider = self.embedding_provider_type or self.provider_type
         match provider:
             case Provider.OLLAMA:
                 return []
-            case Provider.OPENAI:
-                return [] if self.openai_api_key else ["SUPPORT_GRAPH_OPENAI_API_KEY"]
+            case Provider.OPENROUTER:
+                return (
+                    []
+                    if self.openrouter_api_key
+                    else ["SUPPORT_GRAPH_OPENROUTER_API_KEY"]
+                )
         raise ValueError(f"Unknown embedding provider_type: {provider}")

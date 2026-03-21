@@ -9,7 +9,7 @@ This package is the application core. The CLI, data pipeline, retrieval stack, r
 | `__init__.py` | Exposes the package version. | Used by packaging and any version-aware tooling. |
 | `__main__.py` | Makes `python -m support_graph` behave like the CLI entrypoint. | Delegates directly to `support_graph.app.cli.main`. |
 | `types.py` | Defines shared enums, literals, and parser helpers for domains, dataset splits, eval subsets, and turn roles. | Imported by `config/`, `data/`, `app/`, and `evaluation/` so the whole app speaks the same vocabulary. |
-| `providers.py` | Centralizes provider validation and model or embedding construction for Ollama, OpenAI, and Anthropic. | Used by `config/settings.py`, `retrieval/index.py`, `runtime/nodes.py`, and `evaluation/benchmark.py`. |
+| `providers.py` | Centralizes provider validation and model or embedding construction for Ollama and OpenRouter. | Used by `config/settings.py`, `retrieval/index.py`, `runtime/nodes.py`, and `evaluation/benchmark.py`. |
 | `logging_utils.py` | Configures project logging and per-command log files. | Used by the CLI and by runtime or evaluation modules that emit structured logs. |
 
 ## Subpackages

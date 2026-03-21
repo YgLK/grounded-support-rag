@@ -90,7 +90,7 @@ def _latest_user_utterance(example: dict, conversation: list[dict]) -> str:
 
 
 def _domain_from_example(example: dict) -> str:
-    return str(example.get("domain_hint") or example.get("domain") or "").strip()
+    return str(example.get("domain") or "").strip()
 
 
 def _normalize_tokens(
