@@ -6,8 +6,9 @@ import re
 from typing import Any, Protocol, TypedDict
 
 from langchain_postgres import PGVector
+from stop_words import get_stop_words
 
-from support_graph.config.runtime import RuntimeConfigLike
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.retrieval.index import (
     build_collection_name,
     build_embeddings,
@@ -15,21 +16,7 @@ from support_graph.retrieval.index import (
     validate_index_config,
 )
 
-
-QUERY_TOKEN_STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "what",
-    "when",
-    "how",
-    "from",
-    "have",
-    "this",
-    "that",
-    "your",
-}
+QUERY_TOKEN_STOPWORDS = frozenset(get_stop_words("en"))
 
 
 class QueryContextTurn(TypedDict):
@@ -402,7 +389,7 @@ def rerank_retrieval_hits(
 
 
 def get_vectorstore(
-    config: RuntimeConfigLike,
+    config: RuntimeConfig,
     *,
     vectorstore_cls: type[PGVector] = PGVector,
     embeddings: Any = None,
@@ -426,7 +413,7 @@ def retrieve_chunks(
     *,
     example: dict,
     vectorstore: VectorStoreLike | None = None,
-    config: RuntimeConfigLike | None = None,
+    config: RuntimeConfig | None = None,
     top_k: int = 5,
     candidate_k: int | None = None,
     query: str | None = None,

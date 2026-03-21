@@ -10,13 +10,24 @@ import psycopg
 from langchain_core.documents import Document
 from langchain_postgres import PGVector
 
-from support_graph.config.runtime import IndexConfigLike
-from support_graph.providers import build_embeddings as build_provider_embeddings
+from support_graph.providers import (
+    ProviderConfigLike,
+    build_embeddings as build_provider_embeddings,
+)
 from support_graph.types import DomainLike, parse_domain
 
 
 class VectorStoreWithAddDocuments(Protocol):
     def add_documents(self, documents: list[Document], *, ids: list[str]) -> Any: ...
+
+
+class IndexConfigLike(ProviderConfigLike, Protocol):
+    postgres_dsn: str | None
+    embedding_model: str | None
+    embedding_client: Any | None
+    domain: str
+    collection_name: str
+    chunk_artifact_path: Path | None
 
 
 def build_collection_name(domain: DomainLike) -> str:
