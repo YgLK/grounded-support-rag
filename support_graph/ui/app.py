@@ -11,10 +11,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from support_graph.config.settings import Settings
 from support_graph.ui.live import (
     LiveRunConfigurationError,
     LiveRunExampleNotFoundError,
-    LiveRunSettings,
     iter_live_run_stream,
     prepare_live_run_session,
 )
@@ -47,7 +47,7 @@ TARGET_MODE_OPTIONS: tuple[TargetMode, ...] = ("answer", "follow_up")
 
 def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
     artifact_loader = loader or build_loader()
-    ui_settings = cast(LiveRunSettings, artifact_loader.settings)
+    ui_settings = cast(Settings, artifact_loader.settings)
     templates = _build_templates()
     app = FastAPI(title="SupportGraph Workbench")
 

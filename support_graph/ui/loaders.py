@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import TypeVar
 
 import markdown as markdown_lib
 from pydantic import BaseModel, ValidationError
@@ -54,13 +54,6 @@ from support_graph.ui.models import (
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
-class ArtifactSettings(Protocol):
-    project_root: Path
-    eval_runs_dir: Path
-    eval_reports_dir: Path
-    runs_dir: Path
-
-
 @dataclass(frozen=True, slots=True)
 class ArtifactNotFoundError(Exception):
     detail: str
@@ -80,8 +73,9 @@ class InvalidArtifactError(Exception):
 class WorkbenchArtifactLoader:
     """Read normalized Workbench views from the on-disk artifact contract."""
 
-    def __init__(self, settings: ArtifactSettings):
-        self.settings = settings
+    def __init__(self, settings: Settings):
+        self.paths = settings.paths
+        self.project_root = self.paths.project_root
 
     def artifact_explorer(
         self,
@@ -114,7 +108,7 @@ class WorkbenchArtifactLoader:
         order: SortOrder = "desc",
     ) -> EvalRunListView:
         items: list[EvalRunSummary] = []
-        for run_dir in self._iter_dirs(self.settings.eval_runs_dir):
+        for run_dir in self._iter_dirs(self.paths.eval_runs_dir):
             try:
                 manifest = self._load_eval_manifest(run_dir)
                 metrics = self._load_model(run_dir / "metrics.json", EvalRunMetrics)
@@ -133,7 +127,7 @@ class WorkbenchArtifactLoader:
         return EvalRunListView(items=self._sort_by_created_at(items, order=order))
 
     def load_eval_run(self, run_id: str) -> EvalRunDetailView:
-        artifacts = eval_run_artifacts(self.settings.project_root, run_id)
+        artifacts = eval_run_artifacts(self.project_root, run_id)
         self._require_eval_run_dir(artifacts.output_dir)
         manifest = self._load_model(artifacts.manifest, EvalRunManifest)
         metrics = self._load_model(artifacts.metrics, EvalRunMetrics)
@@ -176,7 +170,7 @@ class WorkbenchArtifactLoader:
         )
 
     def load_eval_example(self, run_id: str, example_id: str) -> ExampleDetailView:
-        artifacts = eval_run_artifacts(self.settings.project_root, run_id)
+        artifacts = eval_run_artifacts(self.project_root, run_id)
         self._require_eval_run_dir(artifacts.output_dir)
         manifest = self._load_model(artifacts.manifest, EvalRunManifest)
         metrics = self._load_model(artifacts.metrics, EvalRunMetrics)
@@ -191,13 +185,12 @@ class WorkbenchArtifactLoader:
         trace_path = artifacts.trace_path(trace_index_entry.trace_file)
         if not trace_path.exists():
             raise InvalidArtifactError(
-                f"Trace file not found for {example_id}: "
-                f"{project_relative_path(trace_path, self.settings.project_root)}."
+                f"Trace file not found for {example_id}: {self._relative_path(trace_path)}."
             )
         trace_events = load_trace_events(trace_path)
         trace_summary = self._build_trace_event_summary(
             trace_events,
-            trace_path=project_relative_path(trace_path, self.settings.project_root),
+            trace_path=self._relative_path(trace_path),
         )
         return ExampleDetailView(
             run=self._build_eval_run_summary(manifest, metrics),
@@ -208,7 +201,7 @@ class WorkbenchArtifactLoader:
             trace_events=self._build_trace_event_views(trace_events),
             artifact_paths={
                 **self._eval_run_paths(run_id),
-                "trace": project_relative_path(trace_path, self.settings.project_root),
+                "trace": self._relative_path(trace_path),
             },
         )
 
@@ -218,7 +211,7 @@ class WorkbenchArtifactLoader:
         order: SortOrder = "desc",
     ) -> StandaloneRunListView:
         items: list[StandaloneRunSummary] = []
-        for run_dir in self._iter_dirs(self.settings.runs_dir):
+        for run_dir in self._iter_dirs(self.paths.runs_dir):
             try:
                 manifest = self._load_standalone_manifest(run_dir)
                 result = self._load_model(run_dir / "result.json", StandaloneRunResult)
@@ -228,14 +221,13 @@ class WorkbenchArtifactLoader:
         return StandaloneRunListView(items=self._sort_by_created_at(items, order=order))
 
     def load_standalone_run(self, run_id: str) -> StandaloneRunDetailView:
-        artifacts = standalone_run_artifacts(self.settings.project_root, run_id)
+        artifacts = standalone_run_artifacts(self.project_root, run_id)
         self._require_standalone_run_dir(artifacts.output_dir)
         manifest = self._load_model(artifacts.manifest, StandaloneRunManifest)
         result = self._load_model(artifacts.result, StandaloneRunResult)
         if not artifacts.trace.exists():
             raise InvalidArtifactError(
-                f"Trace file not found for standalone run {run_id}: "
-                f"{project_relative_path(artifacts.trace, self.settings.project_root)}."
+                f"Trace file not found for standalone run {run_id}: {self._relative_path(artifacts.trace)}."
             )
         trace_events = load_trace_events(artifacts.trace)
         return StandaloneRunDetailView(
@@ -244,10 +236,7 @@ class WorkbenchArtifactLoader:
             result=result,
             trace_summary=self._build_trace_event_summary(
                 trace_events,
-                trace_path=project_relative_path(
-                    artifacts.trace,
-                    self.settings.project_root,
-                ),
+                trace_path=self._relative_path(artifacts.trace),
             ),
             trace_events=self._build_trace_event_views(trace_events),
             artifact_paths=self._standalone_run_paths(run_id),
@@ -259,13 +248,13 @@ class WorkbenchArtifactLoader:
         order: SortOrder = "desc",
     ) -> EvalReportListView:
         items: list[EvalReportSummary] = []
-        for report_dir in self._iter_dirs(self.settings.eval_reports_dir):
+        for report_dir in self._iter_dirs(self.paths.eval_reports_dir):
             manifest = self._load_eval_report_manifest(report_dir)
             items.append(self._build_eval_report_summary(manifest))
         return EvalReportListView(items=self._sort_by_created_at(items, order=order))
 
     def load_eval_report(self, report_id: str) -> EvalReportDetailView:
-        artifacts = eval_report_artifacts(self.settings.project_root, report_id)
+        artifacts = eval_report_artifacts(self.project_root, report_id)
         self._require_eval_report_dir(artifacts.output_dir)
         manifest = self._load_model(artifacts.manifest, EvalReportManifest)
         report_markdown = self._read_text(artifacts.report)
@@ -294,8 +283,7 @@ class WorkbenchArtifactLoader:
         raw_entries = payload.get("entries")
         if not isinstance(raw_entries, list):
             raise InvalidArtifactError(
-                f"Trace index is malformed at "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Trace index is malformed at {self._relative_path(path)}."
             )
         entries: list[TraceIndexEntry] = []
         for raw_entry in raw_entries:
@@ -312,8 +300,7 @@ class WorkbenchArtifactLoader:
             if entry.example_id == example_id:
                 return entry
         raise ArtifactNotFoundError(
-            f"Example {example_id} not found in "
-            f"{project_relative_path(path, self.settings.project_root)}."
+            f"Example {example_id} not found in {self._relative_path(path)}."
         )
 
     def _load_failure_views(self, path: Path) -> list[FailureRecordView]:
@@ -433,86 +420,35 @@ class WorkbenchArtifactLoader:
         )
 
     def _eval_run_paths(self, run_id: str) -> dict[str, str]:
-        artifacts = eval_run_artifacts(self.settings.project_root, run_id)
+        artifacts = eval_run_artifacts(self.project_root, run_id)
         return {
-            "directory": project_relative_path(
-                artifacts.output_dir,
-                self.settings.project_root,
-            ),
-            "manifest": project_relative_path(
-                artifacts.manifest,
-                self.settings.project_root,
-            ),
-            "metrics": project_relative_path(
-                artifacts.metrics,
-                self.settings.project_root,
-            ),
-            "predictions": project_relative_path(
-                artifacts.predictions,
-                self.settings.project_root,
-            ),
-            "failures": project_relative_path(
-                artifacts.failures,
-                self.settings.project_root,
-            ),
-            "manual_review": project_relative_path(
-                artifacts.manual_review,
-                self.settings.project_root,
-            ),
-            "retrieval_examples": project_relative_path(
-                artifacts.retrieval_examples,
-                self.settings.project_root,
-            ),
-            "trace_index": project_relative_path(
-                artifacts.trace_index,
-                self.settings.project_root,
-            ),
-            "summary": project_relative_path(
-                artifacts.summary,
-                self.settings.project_root,
-            ),
-            "traces_dir": project_relative_path(
-                artifacts.traces_dir,
-                self.settings.project_root,
-            ),
+            "directory": self._relative_path(artifacts.output_dir),
+            "manifest": self._relative_path(artifacts.manifest),
+            "metrics": self._relative_path(artifacts.metrics),
+            "predictions": self._relative_path(artifacts.predictions),
+            "failures": self._relative_path(artifacts.failures),
+            "manual_review": self._relative_path(artifacts.manual_review),
+            "retrieval_examples": self._relative_path(artifacts.retrieval_examples),
+            "trace_index": self._relative_path(artifacts.trace_index),
+            "summary": self._relative_path(artifacts.summary),
+            "traces_dir": self._relative_path(artifacts.traces_dir),
         }
 
     def _standalone_run_paths(self, run_id: str) -> dict[str, str]:
-        artifacts = standalone_run_artifacts(self.settings.project_root, run_id)
+        artifacts = standalone_run_artifacts(self.project_root, run_id)
         return {
-            "directory": project_relative_path(
-                artifacts.output_dir,
-                self.settings.project_root,
-            ),
-            "manifest": project_relative_path(
-                artifacts.manifest,
-                self.settings.project_root,
-            ),
-            "result": project_relative_path(
-                artifacts.result,
-                self.settings.project_root,
-            ),
-            "trace": project_relative_path(
-                artifacts.trace,
-                self.settings.project_root,
-            ),
+            "directory": self._relative_path(artifacts.output_dir),
+            "manifest": self._relative_path(artifacts.manifest),
+            "result": self._relative_path(artifacts.result),
+            "trace": self._relative_path(artifacts.trace),
         }
 
     def _eval_report_paths(self, report_id: str) -> dict[str, str]:
-        artifacts = eval_report_artifacts(self.settings.project_root, report_id)
+        artifacts = eval_report_artifacts(self.project_root, report_id)
         return {
-            "directory": project_relative_path(
-                artifacts.output_dir,
-                self.settings.project_root,
-            ),
-            "manifest": project_relative_path(
-                artifacts.manifest,
-                self.settings.project_root,
-            ),
-            "report": project_relative_path(
-                artifacts.report,
-                self.settings.project_root,
-            ),
+            "directory": self._relative_path(artifacts.output_dir),
+            "manifest": self._relative_path(artifacts.manifest),
+            "report": self._relative_path(artifacts.report),
         }
 
     def _matches_eval_filters(
@@ -568,20 +504,18 @@ class WorkbenchArtifactLoader:
     ) -> None:
         if not path.exists():
             raise ArtifactNotFoundError(
-                f"{artifact_label} not found at "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"{artifact_label} not found at {self._relative_path(path)}."
             )
         if not path.is_dir():
             raise InvalidArtifactError(
-                f"{artifact_label} path is not a directory: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"{artifact_label} path is not a directory: {self._relative_path(path)}."
             )
         missing = [name for name in required_files if not (path / name).exists()]
         if missing:
             missing_text = ", ".join(sorted(missing))
             raise InvalidArtifactError(
                 f"{artifact_label} is incomplete under "
-                f"{project_relative_path(path, self.settings.project_root)}; "
+                f"{self._relative_path(path)}; "
                 f"missing {missing_text}."
             )
 
@@ -592,8 +526,7 @@ class WorkbenchArtifactLoader:
     def _load_jsonl_models(self, path: Path, model_type: type[ModelT]) -> list[ModelT]:
         if not path.exists():
             raise InvalidArtifactError(
-                f"Artifact file not found: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file not found: {self._relative_path(path)}."
             )
         items: list[ModelT] = []
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -604,8 +537,7 @@ class WorkbenchArtifactLoader:
                 items.append(model_type.model_validate_json(raw_line))
             except ValidationError as exc:
                 raise InvalidArtifactError(
-                    f"Artifact file is malformed: "
-                    f"{project_relative_path(path, self.settings.project_root)}."
+                    f"Artifact file is malformed: {self._relative_path(path)}."
                 ) from exc
         return items
 
@@ -614,8 +546,7 @@ class WorkbenchArtifactLoader:
             if item.example_id == example_id:
                 return item
         raise ArtifactNotFoundError(
-            f"Example {example_id} not found in "
-            f"{project_relative_path(path, self.settings.project_root)}."
+            f"Example {example_id} not found in {self._relative_path(path)}."
         )
 
     def _load_retrieval_example(
@@ -631,20 +562,17 @@ class WorkbenchArtifactLoader:
     def _load_json(self, path: Path) -> dict[str, object]:
         if not path.exists():
             raise InvalidArtifactError(
-                f"Artifact file not found: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file not found: {self._relative_path(path)}."
             )
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise InvalidArtifactError(
-                f"Artifact file is malformed: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file is malformed: {self._relative_path(path)}."
             ) from exc
         if not isinstance(payload, dict):
             raise InvalidArtifactError(
-                f"Artifact file must contain a JSON object: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file must contain a JSON object: {self._relative_path(path)}."
             )
         return payload
 
@@ -658,15 +586,13 @@ class WorkbenchArtifactLoader:
             return model_type.model_validate(payload)
         except ValidationError as exc:
             raise InvalidArtifactError(
-                f"Artifact file does not match the expected schema: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file does not match the expected schema: {self._relative_path(path)}."
             ) from exc
 
     def _read_text(self, path: Path) -> str:
         if not path.exists():
             raise InvalidArtifactError(
-                f"Artifact file not found: "
-                f"{project_relative_path(path, self.settings.project_root)}."
+                f"Artifact file not found: {self._relative_path(path)}."
             )
         return path.read_text(encoding="utf-8")
 
@@ -703,7 +629,10 @@ class WorkbenchArtifactLoader:
             return None
         return str(value)
 
+    def _relative_path(self, path: Path) -> str:
+        return project_relative_path(path, self.project_root)
 
-def build_loader(settings: ArtifactSettings | None = None) -> WorkbenchArtifactLoader:
-    resolved_settings = settings or Settings.from_env()
+
+def build_loader(settings: Settings | None = None) -> WorkbenchArtifactLoader:
+    resolved_settings = settings or Settings.load()
     return WorkbenchArtifactLoader(resolved_settings)
