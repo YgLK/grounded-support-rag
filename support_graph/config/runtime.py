@@ -1,112 +1,56 @@
-"""Shared runtime configuration contracts and builders."""
+"""Concrete runtime config and experiment overrides."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from support_graph.providers import DEFAULT_OPENROUTER_BASE_URL, Provider
-from support_graph.types import Domain, DomainLike, parse_domain
+from support_graph.types import Domain, DomainLike
+
+if TYPE_CHECKING:
+    from support_graph.config.settings import Settings
+
+DEFAULT_RETRIEVAL_RERANK = True
+DEFAULT_CONTENT_ONLY_REASONING = True
+DEFAULT_NEIGHBOR_EXPANSION = True
+MISSING_POSTGRES_DSN = ".env: SUPPORT_GRAPH_POSTGRES_DSN"
+MISSING_CHAT_MODEL = "support_graph.toml: runtime.chat_model"
+MISSING_EMBEDDING_MODEL = "support_graph.toml: runtime.embedding_model"
+MISSING_OPENROUTER_API_KEY = ".env: SUPPORT_GRAPH_OPENROUTER_API_KEY"
 
 
-class RuntimeSettingsLike(Protocol):
-    postgres_dsn: str | None
-    provider_type: Provider
-    embedding_provider_type: Provider | None
-    ollama_base_url: str
-    openrouter_base_url: str
-    openrouter_api_key: str | None
-    chat_model: str | None
-    embedding_model: str | None
-    prompt_version: str
-    retrieval_top_k: int
-    retrieval_candidate_k: int
-    max_retrieval_attempts: int
-    llm_max_concurrency: int
-    llm_max_retries: int
-    llm_retry_base_delay_seconds: float
-    llm_retry_max_delay_seconds: float
-    langsmith_tracing_enabled: bool
-    langsmith_project: str | None
-    langsmith_api_key: str | None
-    langsmith_endpoint: str | None
-    otel_enabled: bool
-    otel_service_name: str
-    otel_exporter: str | None
-    otel_endpoint: str | None
-    otel_headers: str | None
-
-    def collection_name(self, explicit_domain: DomainLike | None = None) -> str: ...
-
-    def chunk_artifact_path(
-        self, explicit_domain: DomainLike | None = None
-    ) -> Path: ...
+class ConfigValidationError(ValueError):
+    def __init__(self, *, scope: str, missing_fields: list[str]) -> None:
+        unique_fields = tuple(dict.fromkeys(missing_fields))
+        self.scope = scope
+        self.missing_fields = unique_fields
+        joined = ", ".join(unique_fields)
+        super().__init__(f"Missing {scope} config: {joined}")
 
 
-class EmbeddingBenchmarkConfigLike(Protocol):
-    embedding_model: str | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RuntimeExperimentOverrides:
+    retrieval_rerank: bool = DEFAULT_RETRIEVAL_RERANK
+    content_only_reasoning: bool = DEFAULT_CONTENT_ONLY_REASONING
+    neighbor_expansion: bool = DEFAULT_NEIGHBOR_EXPANSION
+    ablation_variant: str | None = None
+    ablation_options: dict[str, Any] = field(default_factory=dict)
 
 
-class IndexConfigLike(Protocol):
-    postgres_dsn: str | None
-    provider_type: Provider | None
-    embedding_provider_type: Provider | None
-    ollama_base_url: str | None
-    openrouter_base_url: str | None
-    openrouter_api_key: str | None
-    embedding_model: str | None
-    embedding_client: Any | None
-    domain: Domain
-    collection_name: str
-    chunk_artifact_path: Path | None
-
-
-class RuntimeConfigLike(IndexConfigLike, Protocol):
-    chat_model: str | None
-    prompt_version: str
-    retrieval_top_k: int
-    retrieval_candidate_k: int
-    retrieval_rerank: bool
-    content_only_reasoning: bool
-    neighbor_expansion: bool
-    max_retrieval_attempts: int
-    llm_max_concurrency: int
-    llm_max_retries: int
-    llm_retry_base_delay_seconds: float
-    llm_retry_max_delay_seconds: float
-    langsmith_tracing_enabled: bool
-    langsmith_project: str | None
-    langsmith_api_key: str | None
-    langsmith_endpoint: str | None
-    otel_enabled: bool
-    otel_service_name: str
-    otel_exporter: str | None
-    otel_endpoint: str | None
-    otel_headers: str | None
-    chunk_records: list[dict[str, Any]] | None
-    ablation_variant: str | None
-    ablation_options: dict[str, Any]
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RuntimeConfig:
     postgres_dsn: str | None = None
     provider_type: Provider = Provider.OPENROUTER
-    embedding_provider_type: Provider | None = None
-    ollama_base_url: str | None = None
-    openrouter_base_url: str | None = DEFAULT_OPENROUTER_BASE_URL
+    ollama_base_url: str = "http://localhost:11434"
+    openrouter_base_url: str = DEFAULT_OPENROUTER_BASE_URL
     openrouter_api_key: str | None = None
-    embedding_model: str | None = None
     chat_model: str | None = None
+    embedding_model: str | None = None
     prompt_version: str = "v1"
-    domain: Domain = Domain.DMV
-    collection_name: str = "support_graph_dmv"
     retrieval_top_k: int = 5
     retrieval_candidate_k: int = 12
-    retrieval_rerank: bool = True
-    content_only_reasoning: bool = True
-    neighbor_expansion: bool = True
     max_retrieval_attempts: int = 2
     llm_max_concurrency: int = 4
     llm_max_retries: int = 3
@@ -121,64 +65,75 @@ class RuntimeConfig:
     otel_exporter: str | None = None
     otel_endpoint: str | None = None
     otel_headers: str | None = None
+    domain: Domain = Domain.DMV
+    collection_name: str = "support_graph_dmv"
+    retrieval_rerank: bool = DEFAULT_RETRIEVAL_RERANK
+    content_only_reasoning: bool = DEFAULT_CONTENT_ONLY_REASONING
+    neighbor_expansion: bool = DEFAULT_NEIGHBOR_EXPANSION
     chunk_artifact_path: Path | None = None
     chunk_records: list[dict[str, Any]] | None = None
     ablation_variant: str | None = None
     ablation_options: dict[str, Any] = field(default_factory=dict)
     embedding_client: Any | None = None
 
+    def validate_for_index(self) -> None:
+        self._validate(scope="index", needs_chat_model=False)
 
-def build_runtime_config(
-    settings: RuntimeSettingsLike, domain: DomainLike
+    def validate_for_run(self) -> None:
+        self._validate(scope="runtime", needs_chat_model=True)
+
+    def _validate(self, *, scope: str, needs_chat_model: bool) -> None:
+        missing = self._missing_fields(needs_chat_model=needs_chat_model)
+        if missing:
+            raise ConfigValidationError(scope=scope, missing_fields=missing)
+
+    def _missing_fields(self, *, needs_chat_model: bool) -> list[str]:
+        missing: list[str] = []
+        if not self.postgres_dsn:
+            missing.append(MISSING_POSTGRES_DSN)
+        if needs_chat_model and not self.chat_model:
+            missing.append(MISSING_CHAT_MODEL)
+        if not self.embedding_model:
+            missing.append(MISSING_EMBEDDING_MODEL)
+        missing.extend(self._provider_missing_fields())
+        return missing
+
+    def _provider_missing_fields(self) -> list[str]:
+        match self.provider_type:
+            case None | Provider.OLLAMA:
+                return []
+            case Provider.OPENROUTER:
+                return [] if self.openrouter_api_key else [MISSING_OPENROUTER_API_KEY]
+        raise ValueError(f"Unknown provider_type: {self.provider_type!r}")
+
+
+def apply_runtime_experiment_overrides(
+    config: RuntimeConfig,
+    experiment: RuntimeExperimentOverrides | None = None,
 ) -> RuntimeConfig:
-    resolved_domain = parse_domain(domain)
-    return RuntimeConfig(
-        postgres_dsn=settings.postgres_dsn,
-        provider_type=settings.provider_type,
-        embedding_provider_type=settings.embedding_provider_type,
-        ollama_base_url=settings.ollama_base_url,
-        openrouter_base_url=settings.openrouter_base_url,
-        openrouter_api_key=settings.openrouter_api_key,
-        embedding_model=settings.embedding_model,
-        chat_model=settings.chat_model,
-        prompt_version=settings.prompt_version,
-        domain=resolved_domain,
-        collection_name=settings.collection_name(resolved_domain),
-        retrieval_top_k=settings.retrieval_top_k,
-        retrieval_candidate_k=settings.retrieval_candidate_k,
-        retrieval_rerank=True,
-        content_only_reasoning=True,
-        neighbor_expansion=True,
-        max_retrieval_attempts=settings.max_retrieval_attempts,
-        llm_max_concurrency=settings.llm_max_concurrency,
-        llm_max_retries=settings.llm_max_retries,
-        llm_retry_base_delay_seconds=settings.llm_retry_base_delay_seconds,
-        llm_retry_max_delay_seconds=settings.llm_retry_max_delay_seconds,
-        langsmith_tracing_enabled=settings.langsmith_tracing_enabled,
-        langsmith_project=settings.langsmith_project,
-        langsmith_api_key=settings.langsmith_api_key,
-        langsmith_endpoint=settings.langsmith_endpoint,
-        otel_enabled=settings.otel_enabled,
-        otel_service_name=settings.otel_service_name,
-        otel_exporter=settings.otel_exporter,
-        otel_endpoint=settings.otel_endpoint,
-        otel_headers=settings.otel_headers,
-        chunk_artifact_path=settings.chunk_artifact_path(resolved_domain),
+    if experiment is None:
+        return config
+    return replace(
+        config,
+        retrieval_rerank=experiment.retrieval_rerank,
+        content_only_reasoning=experiment.content_only_reasoning,
+        neighbor_expansion=experiment.neighbor_expansion,
+        ablation_variant=experiment.ablation_variant,
+        ablation_options=dict(experiment.ablation_options),
     )
 
 
-def with_runtime_config_overrides(
-    config: RuntimeConfig, **overrides: Any
-) -> RuntimeConfig:
-    return replace(config, **overrides)
+def build_runtime_config(settings: Settings, domain: DomainLike) -> RuntimeConfig:
+    return settings.runtime_for(domain)
 
 
 __all__ = [
-    "EmbeddingBenchmarkConfigLike",
-    "IndexConfigLike",
+    "ConfigValidationError",
     "RuntimeConfig",
-    "RuntimeConfigLike",
-    "RuntimeSettingsLike",
+    "RuntimeExperimentOverrides",
+    "apply_runtime_experiment_overrides",
     "build_runtime_config",
-    "with_runtime_config_overrides",
+    "DEFAULT_CONTENT_ONLY_REASONING",
+    "DEFAULT_NEIGHBOR_EXPANSION",
+    "DEFAULT_RETRIEVAL_RERANK",
 ]

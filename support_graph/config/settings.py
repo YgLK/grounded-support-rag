@@ -1,18 +1,25 @@
-"""Environment-backed settings for the SupportGraph MVP."""
+"""File-backed settings for the SupportGraph MVP."""
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
+import tomllib
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
-from support_graph.providers import (
-    DEFAULT_OPENROUTER_BASE_URL,
-    Provider,
-    validate_chat_provider_type,
-    validate_embedding_provider_type,
+from dotenv import dotenv_values
+from pydantic import BaseModel, ConfigDict, Field
+
+from support_graph.config.runtime import (
+    RuntimeConfig,
+    RuntimeExperimentOverrides,
+    apply_runtime_experiment_overrides,
 )
+from support_graph.providers import Provider
 from support_graph.types import Domain, DomainLike, parse_domain, parse_domains
+
+DEFAULT_SETTINGS_FILE_NAME = "support_graph.toml"
+DEFAULT_SECRETS_FILE_NAME = ".env"
 
 
 def _repo_root() -> Path:
@@ -33,335 +40,245 @@ def _resolve_path(
     return path
 
 
-def _env_value(env: dict[str, str], *keys: str) -> str | None:
-    for key in keys:
-        value = env.get(key)
-        if value is not None and value != "":
-            return value
-    return None
-
-
-def _find_closing_quote(value: str, quote: str) -> int | None:
-    escaped = False
-    for index, char in enumerate(value):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\":
-            escaped = True
-            continue
-        if char == quote:
-            return index
-    return None
-
-
-def _parse_dotenv_value(
-    lines: list[str],
-    *,
-    line_index: int,
-    raw_value: str,
-) -> tuple[str, int]:
-    value = raw_value.strip()
-    if not value or value[0] not in {'"', "'"}:
-        return value, line_index
-
-    quote = value[0]
-    parts = [value[1:]]
-    next_index = line_index
-    while True:
-        closing_index = _find_closing_quote(parts[-1], quote)
-        if closing_index is not None:
-            parts[-1] = parts[-1][:closing_index]
-            break
-        if next_index >= len(lines):
-            break
-        parts.append(lines[next_index])
-        next_index += 1
-    return "\n".join(parts), next_index
-
-
-def _read_dotenv(path: Path) -> dict[str, str]:
+def read_dotenv(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
-    values: dict[str, str] = {}
-    lines = path.read_text(encoding="utf-8").splitlines()
-    line_index = 0
-    while line_index < len(lines):
-        raw_line = lines[line_index]
-        line_index += 1
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        normalized_key = key.strip()
-        if not normalized_key:
-            continue
-        parsed_value, line_index = _parse_dotenv_value(
-            lines,
-            line_index=line_index,
-            raw_value=value,
-        )
-        values[normalized_key] = parsed_value
-    return values
+    return {
+        key: value for key, value in dotenv_values(path).items() if value is not None
+    }
 
 
-def _csv_to_domains(
-    value: str | None, default: tuple[Domain, ...]
-) -> tuple[Domain, ...]:
-    if not value:
-        return default
-    items = [part.strip() for part in value.split(",") if part.strip()]
-    resolved = parse_domains(items)
-    return resolved or default
+def read_settings_toml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Settings file not found: {path}")
+    with path.open("rb") as handle:
+        payload = tomllib.load(handle)
+    if not isinstance(payload, dict):
+        raise TypeError(f"Settings file must decode to a table: {path}")
+    return payload
 
 
-def _int_value(value: str | None, default: int) -> int:
-    if value is None or value == "":
-        return default
-    return int(value)
+def _optional_secret(secrets: dict[str, str], key: str) -> str | None:
+    value = secrets.get(key)
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
-def _float_value(value: str | None, default: float) -> float:
-    if value is None or value == "":
-        return default
-    return float(value)
+class _FrozenModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def _bool_value(value: str | None, default: bool = False) -> bool:
-    if value is None or value == "":
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+class DatasetFileConfig(_FrozenModel):
+    root: str = "multidoc2dial"
+    enabled_domains: list[str] = Field(default_factory=lambda: [Domain.DMV.value])
 
 
-@dataclass(frozen=True)
-class Settings:
-    project_root: Path
-    dataset_root: Path
+class PathsFileConfig(_FrozenModel):
+    eval_runs_dir: str = "outputs/evals/runs"
+    eval_reports_dir: str = "outputs/evals/reports"
+    runs_dir: str = "outputs/runs"
+    log_dir: str = "logs"
+    log_level: str = "INFO"
+
+
+class RuntimeFileConfig(_FrozenModel):
+    provider_type: Provider = Provider.OPENROUTER
+    ollama_base_url: str = "http://localhost:11434"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    chat_model: str | None = None
+    embedding_model: str | None = None
+    prompt_version: str = "v1"
+    retrieval_top_k: int = 5
+    retrieval_candidate_k: int = 12
+    max_retrieval_attempts: int = 2
+    llm_max_concurrency: int = 4
+    llm_max_retries: int = 3
+    llm_retry_base_delay_seconds: float = 0.5
+    llm_retry_max_delay_seconds: float = 4.0
+
+
+class LangSmithFileConfig(_FrozenModel):
+    tracing_enabled: bool = False
+    project: str | None = "support-graph"
+    endpoint: str | None = None
+
+
+class OtelFileConfig(_FrozenModel):
+    enabled: bool = False
+    service_name: str = "support-graph"
+    exporter: str | None = "otlp"
+    endpoint: str | None = None
+
+
+class ObservabilityFileConfig(_FrozenModel):
+    langsmith: LangSmithFileConfig = Field(default_factory=LangSmithFileConfig)
+    otel: OtelFileConfig = Field(default_factory=OtelFileConfig)
+
+
+class SettingsFile(_FrozenModel):
+    dataset: DatasetFileConfig = Field(default_factory=DatasetFileConfig)
+    paths: PathsFileConfig = Field(default_factory=PathsFileConfig)
+    runtime: RuntimeFileConfig = Field(default_factory=RuntimeFileConfig)
+    observability: ObservabilityFileConfig = Field(
+        default_factory=ObservabilityFileConfig
+    )
+
+    @classmethod
+    def from_toml(cls, path: str | Path) -> "SettingsFile":
+        return cls.model_validate(read_settings_toml(Path(path)))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DatasetSettings:
+    root: Path
     enabled_domains: tuple[Domain, ...]
-    postgres_dsn: str | None
-    provider_type: Provider
-    embedding_provider_type: Provider | None
-    ollama_base_url: str
-    openrouter_base_url: str
-    openrouter_api_key: str | None
-    chat_model: str | None
-    embedding_model: str | None
-    prompt_version: str
-    retrieval_top_k: int
-    retrieval_candidate_k: int
-    max_retrieval_attempts: int
-    llm_max_concurrency: int
-    llm_max_retries: int
-    llm_retry_base_delay_seconds: float
-    llm_retry_max_delay_seconds: float
-    langsmith_tracing_enabled: bool
-    langsmith_project: str | None
-    langsmith_api_key: str | None
-    langsmith_endpoint: str | None
-    otel_enabled: bool
-    otel_service_name: str
-    otel_exporter: str | None
-    otel_endpoint: str | None
-    otel_headers: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PathSettings:
+    project_root: Path
+    config_path: Path
+    secrets_path: Path
     eval_runs_dir: Path
     eval_reports_dir: Path
     runs_dir: Path
     log_dir: Path
+    log_level: str
     derived_dir: Path
     chunks_dir: Path
     examples_dir: Path
-    dotenv_path: Path
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Settings:
+    dataset: DatasetSettings
+    paths: PathSettings
+    runtime: RuntimeConfig
 
     @classmethod
-    def from_env(cls, dotenv_path: str | Path | None = None) -> "Settings":
+    def load(
+        cls,
+        config_path: str | Path | None = None,
+        secrets_path: str | Path | None = None,
+    ) -> "Settings":
         project_root = _repo_root()
-        resolved_dotenv = _resolve_path(
-            dotenv_path,
+        resolved_config_path = _resolve_path(
+            config_path,
             project_root=project_root,
-            default=project_root / ".env",
+            default=project_root / DEFAULT_SETTINGS_FILE_NAME,
         )
-        file_values = _read_dotenv(resolved_dotenv)
-        env = {**file_values, **os.environ}
-        provider_type = validate_chat_provider_type(
-            _env_value(env, "SUPPORT_GRAPH_PROVIDER_TYPE")
-        )
-        embedding_provider_raw = _env_value(
-            env, "SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE"
-        )
-        embedding_provider_type = (
-            validate_embedding_provider_type(embedding_provider_raw)
-            if embedding_provider_raw is not None
-            else None
+        resolved_secrets_path = _resolve_path(
+            secrets_path,
+            project_root=project_root,
+            default=project_root / DEFAULT_SECRETS_FILE_NAME,
         )
 
-        dataset_root = _resolve_path(
-            env.get("SUPPORT_GRAPH_DATASET_ROOT"),
-            project_root=project_root,
-            default=project_root / "multidoc2dial",
-        )
-        eval_runs_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_EVAL_RUNS_DIR"),
-            project_root=project_root,
-            default=project_root / "outputs/evals/runs",
-        )
-        eval_reports_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_EVAL_REPORTS_DIR"),
-            project_root=project_root,
-            default=project_root / "outputs/evals/reports",
-        )
-        runs_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_RUNS_DIR"),
-            project_root=project_root,
-            default=project_root / "outputs/runs",
-        )
-        log_dir = _resolve_path(
-            env.get("SUPPORT_GRAPH_LOG_DIR"),
-            project_root=project_root,
-            default=project_root / "logs",
-        )
+        file_config = SettingsFile.from_toml(resolved_config_path)
+        secrets = read_dotenv(resolved_secrets_path)
+
         derived_dir = project_root / "data/derived"
-        chunks_dir = derived_dir / "chunks"
-        examples_dir = derived_dir / "examples"
+        enabled_domains = parse_domains(file_config.dataset.enabled_domains) or (
+            Domain.DMV,
+        )
+        selected_domain = enabled_domains[0]
+        runtime_kwargs = file_config.runtime.model_dump(mode="python")
 
         return cls(
-            project_root=project_root,
-            dataset_root=dataset_root,
-            enabled_domains=_csv_to_domains(
-                env.get("SUPPORT_GRAPH_ENABLED_DOMAINS"), (Domain.DMV,)
-            ),
-            postgres_dsn=env.get("SUPPORT_GRAPH_POSTGRES_DSN") or None,
-            provider_type=provider_type,
-            embedding_provider_type=embedding_provider_type,
-            ollama_base_url=env.get(
-                "SUPPORT_GRAPH_OLLAMA_BASE_URL", "http://localhost:11434"
-            ),
-            openrouter_base_url=_env_value(
-                env,
-                "SUPPORT_GRAPH_OPENROUTER_BASE_URL",
-                "OPENROUTER_BASE_URL",
-            )
-            or DEFAULT_OPENROUTER_BASE_URL,
-            openrouter_api_key=_env_value(
-                env,
-                "SUPPORT_GRAPH_OPENROUTER_API_KEY",
-                "OPENROUTER_API_KEY",
-            ),
-            chat_model=env.get("SUPPORT_GRAPH_CHAT_MODEL") or None,
-            embedding_model=env.get("SUPPORT_GRAPH_EMBEDDING_MODEL") or None,
-            prompt_version=env.get("SUPPORT_GRAPH_PROMPT_VERSION", "v1"),
-            retrieval_top_k=_int_value(env.get("SUPPORT_GRAPH_RETRIEVAL_TOP_K"), 5),
-            retrieval_candidate_k=_int_value(
-                env.get("SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K"), 12
-            ),
-            max_retrieval_attempts=_int_value(
-                env.get("SUPPORT_GRAPH_MAX_RETRIEVAL_ATTEMPTS"), 2
-            ),
-            llm_max_concurrency=_int_value(
-                env.get("SUPPORT_GRAPH_LLM_MAX_CONCURRENCY"), 4
-            ),
-            llm_max_retries=_int_value(env.get("SUPPORT_GRAPH_LLM_MAX_RETRIES"), 3),
-            llm_retry_base_delay_seconds=_float_value(
-                env.get("SUPPORT_GRAPH_LLM_RETRY_BASE_DELAY_SECONDS"), 0.5
-            ),
-            llm_retry_max_delay_seconds=_float_value(
-                env.get("SUPPORT_GRAPH_LLM_RETRY_MAX_DELAY_SECONDS"), 4.0
-            ),
-            langsmith_tracing_enabled=_bool_value(
-                _env_value(
-                    env,
-                    "SUPPORT_GRAPH_LANGSMITH_TRACING_ENABLED",
-                    "LANGSMITH_TRACING",
-                    "LANGCHAIN_TRACING_V2",
+            dataset=DatasetSettings(
+                root=_resolve_path(
+                    file_config.dataset.root,
+                    project_root=project_root,
+                    default=project_root / "multidoc2dial",
                 ),
-                False,
+                enabled_domains=enabled_domains,
             ),
-            langsmith_project=_env_value(
-                env, "SUPPORT_GRAPH_LANGSMITH_PROJECT", "LANGSMITH_PROJECT"
+            paths=PathSettings(
+                project_root=project_root,
+                config_path=resolved_config_path,
+                secrets_path=resolved_secrets_path,
+                eval_runs_dir=_resolve_path(
+                    file_config.paths.eval_runs_dir,
+                    project_root=project_root,
+                    default=project_root / "outputs/evals/runs",
+                ),
+                eval_reports_dir=_resolve_path(
+                    file_config.paths.eval_reports_dir,
+                    project_root=project_root,
+                    default=project_root / "outputs/evals/reports",
+                ),
+                runs_dir=_resolve_path(
+                    file_config.paths.runs_dir,
+                    project_root=project_root,
+                    default=project_root / "outputs/runs",
+                ),
+                log_dir=_resolve_path(
+                    file_config.paths.log_dir,
+                    project_root=project_root,
+                    default=project_root / "logs",
+                ),
+                log_level=file_config.paths.log_level,
+                derived_dir=derived_dir,
+                chunks_dir=derived_dir / "chunks",
+                examples_dir=derived_dir / "examples",
             ),
-            langsmith_api_key=_env_value(
-                env, "SUPPORT_GRAPH_LANGSMITH_API_KEY", "LANGSMITH_API_KEY"
+            runtime=RuntimeConfig(
+                langsmith_tracing_enabled=file_config.observability.langsmith.tracing_enabled,
+                langsmith_project=file_config.observability.langsmith.project,
+                langsmith_endpoint=file_config.observability.langsmith.endpoint,
+                otel_enabled=file_config.observability.otel.enabled,
+                otel_service_name=file_config.observability.otel.service_name,
+                otel_exporter=file_config.observability.otel.exporter,
+                otel_endpoint=file_config.observability.otel.endpoint,
+                postgres_dsn=_optional_secret(secrets, "SUPPORT_GRAPH_POSTGRES_DSN"),
+                openrouter_api_key=_optional_secret(
+                    secrets, "SUPPORT_GRAPH_OPENROUTER_API_KEY"
+                ),
+                langsmith_api_key=_optional_secret(
+                    secrets, "SUPPORT_GRAPH_LANGSMITH_API_KEY"
+                ),
+                otel_headers=_optional_secret(secrets, "SUPPORT_GRAPH_OTEL_HEADERS"),
+                domain=selected_domain,
+                collection_name=f"support_graph_{selected_domain}",
+                chunk_artifact_path=derived_dir / "chunks" / f"{selected_domain}.jsonl",
+                **runtime_kwargs,
             ),
-            langsmith_endpoint=_env_value(
-                env, "SUPPORT_GRAPH_LANGSMITH_ENDPOINT", "LANGSMITH_ENDPOINT"
-            ),
-            otel_enabled=_bool_value(env.get("SUPPORT_GRAPH_OTEL_ENABLED"), False),
-            otel_service_name=env.get(
-                "SUPPORT_GRAPH_OTEL_SERVICE_NAME", "support-graph"
-            ),
-            otel_exporter=env.get("SUPPORT_GRAPH_OTEL_EXPORTER") or None,
-            otel_endpoint=_env_value(
-                env, "SUPPORT_GRAPH_OTEL_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"
-            ),
-            otel_headers=_env_value(
-                env, "SUPPORT_GRAPH_OTEL_HEADERS", "OTEL_EXPORTER_OTLP_HEADERS"
-            ),
-            eval_runs_dir=eval_runs_dir,
-            eval_reports_dir=eval_reports_dir,
-            runs_dir=runs_dir,
-            log_dir=log_dir,
-            derived_dir=derived_dir,
-            chunks_dir=chunks_dir,
-            examples_dir=examples_dir,
-            dotenv_path=resolved_dotenv,
         )
 
     def selected_domain(self, explicit_domain: DomainLike | None = None) -> Domain:
         if explicit_domain:
             return parse_domain(explicit_domain)
-        if not self.enabled_domains:
+        if not self.dataset.enabled_domains:
             raise ValueError("enabled_domains must contain at least one domain.")
-        return self.enabled_domains[0]
+        return self.dataset.enabled_domains[0]
 
     def chunk_artifact_path(self, explicit_domain: DomainLike | None = None) -> Path:
-        return self.chunks_dir / f"{self.selected_domain(explicit_domain)}.jsonl"
+        return self.paths.chunks_dir / f"{self.selected_domain(explicit_domain)}.jsonl"
 
     def collection_name(self, explicit_domain: DomainLike | None = None) -> str:
         return f"support_graph_{self.selected_domain(explicit_domain)}"
 
-    def index_missing_fields(self) -> list[str]:
-        missing: list[str] = []
-        if not self.postgres_dsn:
-            missing.append("SUPPORT_GRAPH_POSTGRES_DSN")
-        if not self.embedding_model:
-            missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        missing.extend(self._embedding_provider_missing_fields())
-        return list(dict.fromkeys(missing))
+    def runtime_for(
+        self,
+        explicit_domain: DomainLike | None = None,
+        experiment: RuntimeExperimentOverrides | None = None,
+    ) -> RuntimeConfig:
+        resolved_domain = self.selected_domain(explicit_domain)
+        config = replace(
+            self.runtime,
+            domain=resolved_domain,
+            collection_name=self.collection_name(resolved_domain),
+            chunk_artifact_path=self.chunk_artifact_path(resolved_domain),
+        )
+        return apply_runtime_experiment_overrides(config, experiment)
 
-    def runtime_missing_fields(self) -> list[str]:
-        missing: list[str] = []
-        if not self.postgres_dsn:
-            missing.append("SUPPORT_GRAPH_POSTGRES_DSN")
-        if not self.chat_model:
-            missing.append("SUPPORT_GRAPH_CHAT_MODEL")
-        if not self.embedding_model:
-            missing.append("SUPPORT_GRAPH_EMBEDDING_MODEL")
-        missing.extend(self._chat_provider_missing_fields())
-        missing.extend(self._embedding_provider_missing_fields())
-        return list(dict.fromkeys(missing))
 
-    def _chat_provider_missing_fields(self) -> list[str]:
-        match self.provider_type:
-            case Provider.OLLAMA:
-                return []
-            case Provider.OPENROUTER:
-                return (
-                    []
-                    if self.openrouter_api_key
-                    else ["SUPPORT_GRAPH_OPENROUTER_API_KEY"]
-                )
-        raise ValueError(f"Unknown provider_type: {self.provider_type!r}")
-
-    def _embedding_provider_missing_fields(self) -> list[str]:
-        if not self.embedding_model:
-            return []
-        provider = self.embedding_provider_type or self.provider_type
-        match provider:
-            case Provider.OLLAMA:
-                return []
-            case Provider.OPENROUTER:
-                return (
-                    []
-                    if self.openrouter_api_key
-                    else ["SUPPORT_GRAPH_OPENROUTER_API_KEY"]
-                )
-        raise ValueError(f"Unknown embedding provider_type: {provider}")
+__all__ = [
+    "DatasetSettings",
+    "PathSettings",
+    "Settings",
+    "SettingsFile",
+    "read_dotenv",
+    "read_settings_toml",
+]
