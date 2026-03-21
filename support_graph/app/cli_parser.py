@@ -14,6 +14,7 @@ from support_graph.app.cli_shared import (
 from support_graph.types import DatasetSplit, EvalSubset
 
 CommandHandler = Callable[[argparse.Namespace], int]
+Subparsers = argparse._SubParsersAction
 
 
 @dataclass(frozen=True)
@@ -31,8 +32,7 @@ class CliHandlers:
     serve_ui: CommandHandler
 
 
-def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="support-graph")
+def _add_global_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config-file",
         default=None,
@@ -43,8 +43,9 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
         default=None,
         help="Optional path to a .env secrets file.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
 
+
+def _register_build_chunks(subparsers: Subparsers, handlers: CliHandlers) -> None:
     build_chunks_parser = subparsers.add_parser(
         "build-chunks", help="Build section-aware chunks."
     )
@@ -60,6 +61,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     build_chunks_parser.set_defaults(func=handlers.build_chunks)
 
+
+def _register_build_examples(subparsers: Subparsers, handlers: CliHandlers) -> None:
     build_examples_parser = subparsers.add_parser(
         "build-examples", help="Build turn-level examples."
     )
@@ -77,6 +80,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     build_examples_parser.set_defaults(func=handlers.build_examples)
 
+
+def _register_build_subsets(subparsers: Subparsers, handlers: CliHandlers) -> None:
     build_subsets_parser = subparsers.add_parser(
         "build-subsets", help="Build deterministic eval subsets."
     )
@@ -96,6 +101,10 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     build_subsets_parser.set_defaults(func=handlers.build_subsets)
 
+
+def _register_benchmark_embeddings(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
     benchmark_embeddings_parser = subparsers.add_parser(
         "benchmark-embeddings", help="Benchmark local embedding throughput."
     )
@@ -122,6 +131,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     benchmark_embeddings_parser.set_defaults(func=handlers.benchmark_embeddings)
 
+
+def _register_index_docs(subparsers: Subparsers, handlers: CliHandlers) -> None:
     index_docs_parser = subparsers.add_parser(
         "index-docs", help="Index section-aware chunks into pgvector."
     )
@@ -148,6 +159,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     index_docs_parser.set_defaults(func=handlers.index_docs)
 
+
+def _register_run(subparsers: Subparsers, handlers: CliHandlers) -> None:
     run_parser = subparsers.add_parser(
         "run", help="Run the retrieval-backed graph for one example."
     )
@@ -159,6 +172,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     run_parser.set_defaults(func=handlers.run_example)
 
+
+def _register_eval(subparsers: Subparsers, handlers: CliHandlers) -> None:
     eval_parser = subparsers.add_parser(
         "eval", help="Run the Phase 4 evaluation harness."
     )
@@ -186,6 +201,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     eval_parser.set_defaults(func=handlers.eval_split)
 
+
+def _register_ablation(subparsers: Subparsers, handlers: CliHandlers) -> None:
     ablation_parser = subparsers.add_parser(
         "ablate-smoke10",
         help="Run the DMV Smoke-10 ablation variants and write a comparison note.",
@@ -202,6 +219,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     ablation_parser.set_defaults(func=handlers.ablate_smoke10)
 
+
+def _register_review_failures(subparsers: Subparsers, handlers: CliHandlers) -> None:
     review_failures_parser = subparsers.add_parser(
         "review-failures",
         help="Inspect failure examples and review artifacts for one eval run.",
@@ -221,6 +240,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     )
     review_failures_parser.set_defaults(func=handlers.review_failures)
 
+
+def _register_trace_show(subparsers: Subparsers, handlers: CliHandlers) -> None:
     trace_show_parser = subparsers.add_parser(
         "trace-show",
         help="Inspect the raw trace for one evaluated example.",
@@ -229,6 +250,8 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     trace_show_parser.add_argument("--example-id", required=True)
     trace_show_parser.set_defaults(func=handlers.trace_show)
 
+
+def _register_ui(subparsers: Subparsers, handlers: CliHandlers) -> None:
     ui_parser = subparsers.add_parser(
         "ui",
         help="Serve the local SupportGraph Workbench UI.",
@@ -236,5 +259,30 @@ def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
     ui_parser.add_argument("--host", default="127.0.0.1")
     ui_parser.add_argument("--port", type=int, default=8008)
     ui_parser.set_defaults(func=handlers.serve_ui)
+
+
+def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    command_registrars: tuple[Callable[[Subparsers, CliHandlers], None], ...] = (
+        _register_build_chunks,
+        _register_build_examples,
+        _register_build_subsets,
+        _register_benchmark_embeddings,
+        _register_index_docs,
+        _register_run,
+        _register_eval,
+        _register_ablation,
+        _register_review_failures,
+        _register_trace_show,
+        _register_ui,
+    )
+    for register_command in command_registrars:
+        register_command(subparsers, handlers)
+
+
+def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="support-graph")
+    _add_global_options(parser)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    register_subcommands(subparsers, handlers)
 
     return parser
