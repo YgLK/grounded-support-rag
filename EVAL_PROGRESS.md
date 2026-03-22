@@ -41,6 +41,57 @@ max_retrieval_attempts = 1
 | Clean chat check | `ollama` `qwen3:8b-q4_K_M` | `ollama` `qwen3-embedding:4b-q4_K_M` | 1 |
 | Clean chat check | `openrouter` `openai/gpt-oss-120b:nitro` | `ollama` `qwen3-embedding:4b-q4_K_M` | 1 |
 
+## Evaluation Methodology & Metric Validity
+
+The evaluation harness in `support_graph/evaluation/evaluate.py` tracks three primary dimensions of performance:
+
+### 1. Retrieval (Recall & MRR)
+- **Doc Recall@K:** Binary "found it" metric. Returns 1.0 if any gold document ID is in the top K.
+- **Span Recall@5:** Measures the fraction of specific "gold grounding sentences" found. This is the most rigorous retrieval metric for MultiDoc2Dial.
+- **MRR@5:** Rewards the system for placing the correct document at the top of the results.
+
+### 2. Generation (ROUGE-L, F1, BLEU)
+- **ROUGE-L & Token F1:** Measure sequence and bag-of-words overlap. 
+- **Exact Match (EM):** Strict string comparison. Rarely hit in conversational tasks but useful for short factual lookups.
+- **SacreBLEU:** Standardized n-gram precision for translation-like quality.
+
+### 3. Grounding & E2E Success
+- **Citation Coverage:** Fraction of gold spans actually cited in the response.
+- **Citations Valid:** Critical safety check ensuring the LLM only cites chunks that were actually retrieved (detects hallucinated citations).
+- **End-to-End (E2E) Success:** A composite "Pass/Fail" requiring:
+    - Decision to `answer`.
+    - Successful retrieval (Doc Recall@3 > 0).
+    - Valid citations.
+    - Text similarity (ROUGE-L or F1) >= 0.35.
+
+### 4. The RAG Triad (Reference-Free Evaluation)
+Used for production monitoring or when "gold" answers are unavailable. These metrics are evaluated by an LLM:
+- **Faithfulness (Groundedness):** Measures if the answer is derived *only* from the provided context. It penalizes "hallucinations" even if they are factually correct in general knowledge.
+- **Answer Relevance:** Measures how well the response addresses the user's specific question, regardless of whether it used the context correctly.
+- **Context Relevance:** Measures the quality of the retrieval—whether the retrieved snippets actually contain the information required to answer the query.
+
+### Assessment
+The metrics are highly appropriate for the MultiDoc2Dial dataset. The **0.35 E2E threshold** is a heuristic for "good enough" semantic similarity; while it may flag some technically correct but stylistically different answers as failures, the use of **Failure Labels** (e.g., `wrong_doc`, `weak_citations`) provides the necessary granularity for manual debugging.
+
+**Potential Gaps:**
+- The current metrics do not include an "LLM-as-a-judge" (e.g., G-Eval) to check for semantic correctness when ROUGE/F1 is low.
+- "Found" documents are based on `doc_id` overlap; more granular paragraph-level `chunk_id` recall could be tracked to further refine retrieval tuning.
+
+## LLM-as-a-Judge (Reference-Free) Insights
+
+As of March 22, 2026, we have integrated a **RAG Triad** evaluation (Faithfulness, Answer Relevance, Context Relevance) to supplement deterministic metrics.
+
+### Key Findings (Run `20260321-235515-dmv-smoke`)
+A smoke test of 5 examples using the generation model as the judge revealed:
+
+1.  **Retrieval is robust:** `Context Relevance` scores were high (0.80 - 1.00), confirming that the Ollama embeddings are finding the correct factual snippets.
+2.  **The "Helpful Hallucination" Problem:** Several examples received a `Faithfulness` score of **0.00** despite being factually correct in the real world. The model (GPT-OSS-120B) frequently adds details from its pre-training (e.g., "you can also renew by mail") that are not present in the specific retrieved context.
+3.  **Semantic vs. String Matching:** One example had a very low ROUGE-L (0.03) but a perfect `Answer Relevance` (1.00), proving that deterministic metrics are under-counting successful support interactions.
+
+### Actionable Strategy
+- **Prompt Engineering:** Tighten the system prompt to explicitly forbid adding information not found in the context (even if the model "knows" it to be true).
+- **Abstention Logic:** Review "abstain" decisions; current results show the model sometimes abstains even when the judge finds the context 95% relevant.
+
 ## Source Artifacts
 
 - [20260321-235515 manifest](/Users/yglk/coding/support-graph/outputs/evals/runs/20260321-235515-dmv-smoke/manifest.json)
