@@ -9,6 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 
 DEFAULT_PROMPT_VERSION = "v1"
+V2_PROMPT_VERSION = "v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +122,96 @@ def _v1_prompt_set() -> PromptSet:
     )
 
 
-PROMPT_REGISTRY = PromptRegistry({DEFAULT_PROMPT_VERSION: _v1_prompt_set()})
+def _v2_prompt_set() -> PromptSet:
+    return PromptSet(
+        version=V2_PROMPT_VERSION,
+        evidence_grade=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are an expert documentation grader. Your task is to determine if the retrieved context is sufficient to answer a user's question SAFELY and ACCURATELY.\n\n"
+                    "Verdicts:\n"
+                    "- sufficient: The context contains the direct answer or a clear conditional next step.\n"
+                    "- partial: The context is highly relevant but is missing ONE specific detail to be certain.\n"
+                    "- insufficient: The context is irrelevant or lacks any substantive facts to help the user.\n\n"
+                    "Strict Rule: Do not use your own knowledge. Only grade based on the provided <context> tags.",
+                ),
+                (
+                    "human",
+                    "Conversation History:\n{conversation}\n\n"
+                    "Current User Need: {latest_user_utterance}\n\n"
+                    "Retrieved Context:\n<context>\n{retrieved_chunks}\n</context>",
+                ),
+            ]
+        ),
+        answer=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are SupportGraph, a strictly grounded technical support assistant.\n\n"
+                    "CRITICAL RULES:\n"
+                    "1. ONLY use information from the provided <context> tags.\n"
+                    "2. If the context does not contain the answer, you MUST abstain or clarify.\n"
+                    "3. NEVER use your internal knowledge about the world (e.g., general DMV rules) if they are not in the context.\n"
+                    "4. If the context is 'sufficient', provide a direct, helpful answer.\n"
+                    "5. If the context is 'partial', ask for the specific missing piece of information.\n\n"
+                    "Output Requirements:\n"
+                    "- Do not use inline citations like [1] or [Chunk ID].\n"
+                    "- Populate 'citation_chunk_ids' with the specific IDs of chunks you used.\n"
+                    "- Keep the tone professional and concise.",
+                ),
+                (
+                    "human",
+                    "Conversation History:\n{conversation}\n\n"
+                    "Current User Need: {latest_user_utterance}\n\n"
+                    "Context Evidence:\n<context>\n{retrieved_chunks}\n</context>\n\n"
+                    "Evidence Grade: {evidence_grade}",
+                ),
+            ]
+        ),
+        non_answer=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are SupportGraph. You cannot answer the user's question because the documentation is insufficient.\n\n"
+                    "Your goal is to either:\n"
+                    "1. CLARIFY: Ask for exactly one missing detail if the context was 'partial'.\n"
+                    "2. ABSTAIN: Politely explain that you do not have information on this topic in the manuals if the context was 'insufficient'.\n\n"
+                    "Never hallucinate or guess.",
+                ),
+                (
+                    "human",
+                    "Conversation History:\n{conversation}\n\n"
+                    "Current User Need: {latest_user_utterance}\n\n"
+                    "Context Evidence:\n<context>\n{retrieved_chunks}\n</context>\n\n"
+                    "Evidence Grade: {evidence_grade}",
+                ),
+            ]
+        ),
+        streaming_answer=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are SupportGraph. Respond ONLY using the provided <context>.\n"
+                    "Produce only the final user-facing text. No JSON, no labels.",
+                ),
+                (
+                    "human",
+                    "Conversation History:\n{conversation}\n\n"
+                    "Current User Need: {latest_user_utterance}\n\n"
+                    "Context Evidence:\n<context>\n{retrieved_chunks}\n</context>",
+                ),
+            ]
+        ),
+    )
+
+
+PROMPT_REGISTRY = PromptRegistry(
+    {
+        DEFAULT_PROMPT_VERSION: _v1_prompt_set(),
+        V2_PROMPT_VERSION: _v2_prompt_set(),
+    }
+)
 
 
 def resolve_prompt_set(version: str | None = None) -> PromptSet:

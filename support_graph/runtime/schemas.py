@@ -16,6 +16,7 @@ from support_graph.runtime.prompts import PromptSet
 
 
 Decision = Literal["answer", "clarify", "abstain"]
+Intent = Literal["chitchat", "document_query"]
 EvidenceVerdict = Literal["sufficient", "partial", "insufficient"]
 ResponseConfidence = Literal["high", "medium", "low"]
 FallbackConfidence = Literal["medium", "low"]
@@ -38,6 +39,11 @@ class EvidenceGradeModel(BaseModel):
     verdict: EvidenceVerdict
     reason: str
     missing_information: list[str] = Field(default_factory=list)
+
+
+class RouteModel(BaseModel):
+    intent: Intent
+    reason: str
 
 
 class ResponseModel(BaseModel):

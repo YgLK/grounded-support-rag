@@ -240,16 +240,11 @@ def _render_chunks(chunks: list[dict], limit: int = 8) -> str:
     parts = []
     for chunk in chunks[:limit]:
         parts.append(
-            "\n".join(
-                [
-                    f"Chunk ID: {chunk.get('chunk_id')}",
-                    f"Doc ID: {chunk.get('doc_id')}",
-                    f"Spans: {', '.join(chunk.get('span_ids', []))}",
-                    f"Text: {chunk.get('text', '')}",
-                ]
-            )
+            f'<chunk id="{chunk.get("chunk_id")}" doc="{chunk.get("doc_id")}">\n'
+            f"Text: {chunk.get('text', '')}\n"
+            "</chunk>"
         )
-    return "\n\n".join(parts)
+    return "\n".join(parts)
 
 
 def _as_payload(value: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
