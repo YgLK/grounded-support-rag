@@ -33,6 +33,7 @@ from support_graph.runtime.nodes import (
     resolve_runtime_resources_async,
     resolve_without_answer,
     retrieve_docs,
+    route_query,
 )
 from support_graph.runtime.observability import graph_run_context, span_context
 from support_graph.runtime.schemas import (
@@ -177,6 +178,13 @@ def _span_attributes(
     return attributes
 
 
+def _route_after_intent(state: GraphState) -> Literal["prepare_query", "resolve_without_answer"]:
+    intent = state.get("intent", "document_query")
+    if intent == "chitchat":
+        return "resolve_without_answer"
+    return "prepare_query"
+
+
 def _route_after_grade(state: GraphState) -> GraphRoute:
     grade = state.get("evidence_grade", {})
     attempts = state.get("retrieval_attempts", 0)
@@ -250,6 +258,27 @@ def _initial_state(
 
 def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
     graph_builder = StateGraph(GraphState)
+
+    async def route_query_node(state: GraphState) -> GraphState:
+        with span_context(
+            runtime.observability,
+            "support_graph.route_query",
+            attributes=_span_attributes(runtime, state, "route_query"),
+        ):
+            started = time.perf_counter()
+            routing = await _maybe_await(route_query(state=state, runtime=runtime))
+            intent = routing.get("intent", "document_query")
+            path = _graph_path(state, "route_query")
+            await _trace(
+                runtime,
+                "route_query",
+                {
+                    "intent": intent,
+                    "reason": routing.get("reason"),
+                    "latency_ms": _latency_ms(started),
+                },
+            )
+            return {"intent": intent, "graph_path": path}
 
     async def prepare_query_node(state: GraphState) -> GraphState:
         with span_context(
@@ -525,6 +554,7 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
             )
             return {"final_output": finalized}
 
+    graph_builder.add_node("route_query", route_query_node)
     graph_builder.add_node("prepare_query", prepare_query_node)
     graph_builder.add_node("retrieve_docs", retrieve_docs_node)
     graph_builder.add_node("grade_evidence", grade_evidence_node)
@@ -533,7 +563,15 @@ def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
     graph_builder.add_node("resolve_without_answer", resolve_without_answer_node)
     graph_builder.add_node("finalize", finalize_node)
 
-    graph_builder.add_edge(START, "prepare_query")
+    graph_builder.add_edge(START, "route_query")
+    graph_builder.add_conditional_edges(
+        "route_query",
+        _route_after_intent,
+        {
+            "prepare_query": "prepare_query",
+            "resolve_without_answer": "resolve_without_answer",
+        },
+    )
     graph_builder.add_edge("prepare_query", "retrieve_docs")
     graph_builder.add_edge("retrieve_docs", "grade_evidence")
     graph_builder.add_conditional_edges(

@@ -645,6 +645,26 @@ def _build_evidence_chunks(
     return evidence_chunks[:8]
 
 
+async def route_query(*, state: GraphState, runtime: Runtime) -> dict:
+    """Classify the user intent into chitchat or document_query."""
+    if not _llm_available(runtime):
+        return {"intent": "document_query", "reason": "No LLM available for routing."}
+
+    try:
+        return await _ainvoke_structured_prompt(
+            runtime=runtime,
+            prompt=runtime.prompts.route_query,
+            schema=RouteModel,
+            payload={
+                "conversation": _render_conversation(state.get("conversation", [])),
+                "latest_user_utterance": state.get("latest_user_utterance") or "",
+            },
+        )
+    except Exception as exc:
+        _log_llm_fallback("route_query", exc)
+        return {"intent": "document_query", "reason": f"Routing failed: {exc}"}
+
+
 def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     """Build the retrieval query string and context from conversation state.
 
@@ -1075,4 +1095,5 @@ __all__ = [
     "resolve_runtime_resources_async",
     "resolve_without_answer",
     "retrieve_docs",
+    "route_query",
 ]

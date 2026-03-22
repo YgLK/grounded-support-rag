@@ -8,13 +8,15 @@ from typing import Mapping
 from langchain_core.prompts import ChatPromptTemplate
 
 
-DEFAULT_PROMPT_VERSION = "v1"
+V1_PROMPT_VERSION = "v1"
 V2_PROMPT_VERSION = "v2"
+DEFAULT_PROMPT_VERSION = "v2"
 
 
 @dataclass(frozen=True, slots=True)
 class PromptSet:
     version: str
+    route_query: ChatPromptTemplate
     evidence_grade: ChatPromptTemplate
     answer: ChatPromptTemplate
     non_answer: ChatPromptTemplate
@@ -38,7 +40,19 @@ class PromptRegistry:
 
 def _v1_prompt_set() -> PromptSet:
     return PromptSet(
-        version=DEFAULT_PROMPT_VERSION,
+        version=V1_PROMPT_VERSION,
+        route_query=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "Classify if the user query is 'chitchat' or a 'document_query'.",
+                ),
+                (
+                    "human",
+                    "Query: {latest_user_utterance}",
+                ),
+            ]
+        ),
         evidence_grade=ChatPromptTemplate.from_messages(
             [
                 (
@@ -125,6 +139,22 @@ def _v1_prompt_set() -> PromptSet:
 def _v2_prompt_set() -> PromptSet:
     return PromptSet(
         version=V2_PROMPT_VERSION,
+        route_query=ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are a router. Classify user intent:\n"
+                    "- document_query: Factual questions about DMV, licenses, rules, or fees.\n"
+                    "- chitchat: Greetings, thanks, generic feedback, or non-factual statements.\n\n"
+                    "Reason before you decide.",
+                ),
+                (
+                    "human",
+                    "Conversation History:\n{conversation}\n\n"
+                    "Current User Need: {latest_user_utterance}",
+                ),
+            ]
+        ),
         evidence_grade=ChatPromptTemplate.from_messages(
             [
                 (
@@ -208,7 +238,7 @@ def _v2_prompt_set() -> PromptSet:
 
 PROMPT_REGISTRY = PromptRegistry(
     {
-        DEFAULT_PROMPT_VERSION: _v1_prompt_set(),
+        V1_PROMPT_VERSION: _v1_prompt_set(),
         V2_PROMPT_VERSION: _v2_prompt_set(),
     }
 )

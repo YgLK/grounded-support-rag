@@ -116,6 +116,7 @@ class GraphState(TypedDict, total=False):
     final_query: str
     run_id: str
     max_attempts: int
+    intent: Intent
     response_payload: dict
     final_output: dict
     ablation_options: dict
@@ -180,6 +181,7 @@ def strip_internal_fields(payload: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "Decision",
+    "Intent",
     "EvidenceGradeModel",
     "EvidenceVerdict",
     "FallbackResponseModel",
@@ -191,6 +193,7 @@ __all__ = [
     "FallbackConfidence",
     "ResponseConfidence",
     "ResponseModel",
+    "RouteModel",
     "Runtime",
     "RuntimeResources",
     "attach_fallback_metadata",
