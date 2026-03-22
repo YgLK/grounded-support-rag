@@ -6,8 +6,8 @@ SupportGraph is a CLI-first modular monolith for grounded support assistance ove
 
 - Architecture: modular monolith
 - Required domain: `dmv`
-- Config/provider: LangChain provider abstraction with `ollama`, `openai`, and `anthropic` chat support; embeddings support `ollama` and `openai`
-- Local traces: JSON or JSONL under `outputs/traces/`
+- Config/provider: LangChain provider abstraction with `openrouter` and `ollama` support for both chat and embeddings
+- Generated artifacts: standalone runs under `outputs/runs/`, eval runs under `outputs/evals/runs/`, and eval reports under `outputs/evals/reports/`
 - Hosted observability: optional LangSmith and OpenTelemetry alongside the local trace files
 - Headline eval split: `validation`
 
@@ -16,9 +16,10 @@ SupportGraph is a CLI-first modular monolith for grounded support assistance ove
 ```bash
 uv sync --dev
 cp .env.example .env
+cp support_graph.toml.example support_graph.toml
 ```
 
-The data-prep commands do not require Postgres or a model endpoint. `index-docs`, `run`, and `eval` require Postgres plus whichever provider config you choose below. The default documented path is still local Postgres + Ollama.
+The data-prep commands do not require Postgres or a model endpoint. `index-docs`, `run`, and `eval` require Postgres plus whichever provider config you choose below. The default documented path is local Postgres + OpenRouter.
 
 ## Walkthrough Examples
 
@@ -36,6 +37,7 @@ uv run support-graph eval --split validation --domain dmv
 uv run support-graph ablate-smoke10 --domain dmv --limit 10
 uv run support-graph review-failures --run-id 20260318-143000-dmv-smoke
 uv run support-graph trace-show --run-id 20260318-143000-dmv-smoke --example-id 'dmv::1409501a35697e0ce68561e29577b90a::turn_2'
+uv run support-graph ui --host 127.0.0.1 --port 8008
 ```
 
 Artifacts are written to:
@@ -44,10 +46,11 @@ Artifacts are written to:
 - `data/derived/examples/`
 - `data/eval_subsets/`
 - `logs/`
-- `outputs/traces/`
-- `outputs/evals/`
+- `outputs/runs/`
+- `outputs/evals/runs/`
+- `outputs/evals/reports/`
 
-Eval run directories under `outputs/evals/<run_id>/` currently include:
+Eval run directories under `outputs/evals/runs/<run_id>/` include:
 
 - `manifest.json`
 - `metrics.json`
@@ -57,6 +60,9 @@ Eval run directories under `outputs/evals/<run_id>/` currently include:
 - `retrieval_examples.jsonl`
 - `trace_index.json`
 - `summary.md`
+- `traces/<trace_file>.jsonl`
+
+Recent smoke-run comparisons are tracked in [EVAL_PROGRESS.md](/Users/yglk/coding/support-graph/EVAL_PROGRESS.md).
 
 ## Current Package Layout
 
@@ -69,8 +75,17 @@ The code is organized by concern:
 - `support_graph/evaluation/`: offline metrics, eval runs, Smoke-10 ablations, embedding benchmark in [support_graph/evaluation/README.md](support_graph/evaluation/README.md)
 - `support_graph/config/`: environment loading and runtime config assembly in [support_graph/config/README.md](support_graph/config/README.md)
 - `support_graph/app/`: CLI entrypoints and terminal output formatting in [support_graph/app/README.md](support_graph/app/README.md)
+- `support_graph/ui/`: Workbench pages, HTMX partials, live SSE execution, and artifact-backed view loaders in [support_graph/ui/README.md](support_graph/ui/README.md)
 
 The runtime graph itself lives in `support_graph/runtime/graph.py`.
+
+## Workbench UI
+
+The Workbench is a local operator surface layered on top of the same run, eval, report, and trace artifacts used by the CLI.
+
+- Serve it with `uv run support-graph ui --host 127.0.0.1 --port 8008`
+- The HTML layer is FastAPI + Jinja2, with HTMX, Alpine.js, and Tabler loaded from CDN
+- The live screen streams `astream_graph_events(...)` over Server-Sent Events and persists completed runs under `outputs/runs/`
 
 ## Sequential Flow
 
@@ -120,16 +135,16 @@ sequenceDiagram
     participant Runtime as support_graph.runtime.graph
     participant Retrieval as support_graph.retrieval
     participant PG as Postgres + pgvector
-    participant Traces as outputs/traces
+    participant Artifacts as outputs/runs
 
     User->>CLI: run --example-id ...
-    CLI->>Settings: build RuntimeConfig
+    CLI->>Settings: resolve RuntimeConfig for domain
     CLI->>Runtime: run_graph_async(example, config)
     Runtime->>Retrieval: build query and retrieve ranked chunks
     Retrieval->>PG: similarity search with metadata filters
     PG-->>Runtime: candidate chunks
     Runtime->>Runtime: grade evidence, refine if needed, generate or abstain
-    Runtime->>Traces: append node events to JSONL trace
+    Runtime->>Artifacts: write trace.jsonl in place
     Runtime-->>CLI: final response payload
     CLI-->>User: concise terminal output
 ```
@@ -143,11 +158,11 @@ sequenceDiagram
     participant Settings as support_graph.config.settings
     participant Eval as support_graph.evaluation.evaluate
     participant Runtime as support_graph.runtime.graph
-    participant Traces as outputs/traces
-    participant Artifacts as outputs/evals
+    participant Traces as outputs/evals/runs/<run_id>/traces
+    participant Artifacts as outputs/evals/runs
 
     User->>CLI: eval --subset ...
-    CLI->>Settings: build RuntimeConfig
+    CLI->>Settings: resolve RuntimeConfig for domain
     CLI->>Eval: evaluate_split_async(...)
     Eval->>Runtime: run shared graph for each example
     Runtime->>Traces: write per-example traces
@@ -181,8 +196,9 @@ flowchart LR
         Derived["data/derived/*.jsonl"]
         EvalSubsets["data/eval_subsets/*.jsonl"]
         PG["Postgres + pgvector"]
-        TraceFiles["outputs/traces/*.jsonl"]
-        EvalFiles["outputs/evals/run_id/"]
+        StandaloneFiles["outputs/runs/<run_id>/"]
+        EvalFiles["outputs/evals/runs/<run_id>/"]
+        ReportFiles["outputs/evals/reports/<report_id>/"]
     end
 
     subgraph Retrieval["Retrieval"]
@@ -262,12 +278,12 @@ flowchart TD
     H --> L["support_graph.evaluation.evaluate<br/>evaluate_examples"]
     G --> L
     J --> L
-    K --> M["outputs/traces/run-*.jsonl"]
-    L --> N["outputs/evals/<run_id>/manifest.json"]
-    L --> O["outputs/evals/<run_id>/metrics.json"]
-    L --> P["outputs/evals/<run_id>/predictions.jsonl"]
-    L --> Q["outputs/evals/<run_id>/failures.jsonl"]
-    L --> R["outputs/evals/<run_id>/summary.md"]
+    K --> M["outputs/runs/<run_id>/trace.jsonl"]
+    L --> N["outputs/evals/runs/<run_id>/manifest.json"]
+    L --> O["outputs/evals/runs/<run_id>/metrics.json"]
+    L --> P["outputs/evals/runs/<run_id>/predictions.jsonl"]
+    L --> Q["outputs/evals/runs/<run_id>/failures.jsonl"]
+    L --> R["outputs/evals/runs/<run_id>/summary.md"]
 ```
 
 ## Runtime Graph
@@ -304,10 +320,10 @@ There are two model surfaces, and they are used for different jobs.
 
 ```mermaid
 flowchart LR
-    A["Embedding model<br/>SUPPORT_GRAPH_EMBEDDING_MODEL"] --> B["index-docs"]
+    A["Embedding model<br/>support_graph.toml: runtime.embedding_model"] --> B["index-docs"]
     B --> C["pgvector embeddings for chunk text"]
     C --> D["similarity_search_with_score"]
-    E["Chat model<br/>SUPPORT_GRAPH_CHAT_MODEL"] --> F["grade_evidence"]
+    E["Chat model<br/>support_graph.toml: runtime.chat_model"] --> F["grade_evidence"]
     E --> G["generate_response"]
     E --> H["resolve_without_answer"]
     I["No model call"] --> J["build_chunks / build_examples / build_subsets"]
@@ -396,7 +412,7 @@ Two chunk lists matter:
 
 ### Eval Output
 
-`eval` writes one run directory under `outputs/evals/<run_id>/`:
+`eval` writes one run directory under `outputs/evals/runs/<run_id>/`:
 
 - `manifest.json`: config and run metadata
 - `metrics.json`: aggregate retrieval, generation, decision, and latency metrics
@@ -404,7 +420,7 @@ Two chunk lists matter:
 - `failures.jsonl`: the subset with non-null failure labels
 - `manual_review.csv`: review sheet for follow-up predictions and answer failures
 - `retrieval_examples.jsonl`: retrieval-centric per-example records
-- `trace_index.json`: per-example trace summary pointing at raw trace JSONL files
+- `trace_index.json`: per-example trace summary pointing at run-local `traces/<trace_file>.jsonl` files
 - `summary.md`: short human-readable run summary
 
 ## What The Tests Actually Cover
@@ -443,25 +459,28 @@ uv run support-graph eval --domain dmv --subset smoke
 
 ## Phase 2 Runtime Prerequisites
 
-`index-docs` now uses Postgres + `pgvector` plus LangChain-managed embeddings. The default documented path is still local-first with Ollama:
+`index-docs` now uses Postgres + `pgvector` plus LangChain-managed embeddings. The default documented path is local Postgres plus OpenRouter:
 
 ```bash
 docker compose up -d postgres
-ollama pull qwen3:8b-q4_K_M
-ollama pull qwen3-embedding:4b-q4_K_M
 ```
 
-Then set `.env` values for:
+Then configure the repo in two places:
 
-- `SUPPORT_GRAPH_POSTGRES_DSN`
-- `SUPPORT_GRAPH_PROVIDER_TYPE`
-- `SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE` when chat and embedding providers differ
-- `SUPPORT_GRAPH_OLLAMA_BASE_URL`
-- `SUPPORT_GRAPH_OPENAI_API_KEY` for OpenAI-backed chat or embeddings
-- `SUPPORT_GRAPH_ANTHROPIC_API_KEY` for Anthropic-backed chat
-- `SUPPORT_GRAPH_EMBEDDING_MODEL`
-- `SUPPORT_GRAPH_CHAT_MODEL`
-- `SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K`
+1. Copy `support_graph.toml.example` to `support_graph.toml`, then edit `support_graph.toml` for non-secret settings such as:
+   `runtime.chat_provider_type`
+   `runtime.embedding_provider_type`
+   `runtime.chat_model`
+   `runtime.embedding_model`
+   `runtime.retrieval_candidate_k`
+   `runtime.openrouter_base_url`
+   `runtime.ollama_base_url`
+2. Copy `.env.example` to `.env` and fill only the secrets:
+   `SUPPORT_GRAPH_POSTGRES_DSN`
+   `SUPPORT_GRAPH_OPENROUTER_API_KEY`
+   `SUPPORT_GRAPH_LANGSMITH_API_KEY`
+   `SUPPORT_GRAPH_OTEL_HEADERS`
+Chat and embedding providers can be configured independently.
 
 The included `compose.yml` starts a local `pgvector/pgvector:pg16` Postgres with:
 
@@ -470,68 +489,81 @@ The included `compose.yml` starts a local `pgvector/pgvector:pg16` Postgres with
 - password: `postgres`
 - port: `5432`
 
-Recommended DSN:
+Recommended `.env` entry:
 
 ```dotenv
 SUPPORT_GRAPH_POSTGRES_DSN=postgresql+psycopg://postgres:postgres@localhost:5432/support_graph
 ```
 
-Recommended local Ollama config:
+Recommended `support_graph.toml` runtime block for OpenRouter:
 
-```dotenv
-# Provider
-SUPPORT_GRAPH_PROVIDER_TYPE=ollama
-SUPPORT_GRAPH_OLLAMA_BASE_URL=http://localhost:11434
-
-# Models
-SUPPORT_GRAPH_CHAT_MODEL=qwen3:8b-q4_K_M
-SUPPORT_GRAPH_EMBEDDING_MODEL=qwen3-embedding:4b-q4_K_M
-
-# Retrieval
-SUPPORT_GRAPH_RETRIEVAL_TOP_K=5
-SUPPORT_GRAPH_RETRIEVAL_CANDIDATE_K=12
-SUPPORT_GRAPH_MAX_RETRIEVAL_ATTEMPTS=2
+```toml
+[runtime]
+chat_provider_type = "openrouter"
+embedding_provider_type = "openrouter"
+chat_model = "openai/gpt-4.1-mini"
+embedding_model = "openai/text-embedding-3-small"
+retrieval_top_k = 5
+retrieval_candidate_k = 12
+max_retrieval_attempts = 2
 ```
 
-OpenAI chat + embeddings:
+Recommended `.env` secret for OpenRouter:
 
 ```dotenv
-SUPPORT_GRAPH_PROVIDER_TYPE=openai
-SUPPORT_GRAPH_OPENAI_API_KEY=sk-...
-SUPPORT_GRAPH_CHAT_MODEL=gpt-4o-mini
-SUPPORT_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
+SUPPORT_GRAPH_OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Anthropic chat + OpenAI embeddings:
+Quick provider verification without indexing:
 
-```dotenv
-SUPPORT_GRAPH_PROVIDER_TYPE=anthropic
-SUPPORT_GRAPH_ANTHROPIC_API_KEY=sk-ant-...
-SUPPORT_GRAPH_CHAT_MODEL=claude-3-5-haiku-latest
-SUPPORT_GRAPH_EMBEDDING_PROVIDER_TYPE=openai
-SUPPORT_GRAPH_OPENAI_API_KEY=sk-...
-SUPPORT_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
+```bash
+uv run python scripts/check_openrouter.py
 ```
 
-Use exact Ollama model tags from `ollama list`. If you change `SUPPORT_GRAPH_EMBEDDING_MODEL`, re-run `index-docs` because the pgvector index depends on the embedding space. Changing only `SUPPORT_GRAPH_CHAT_MODEL` does not require re-indexing.
+OpenRouter uses an OpenAI-compatible API. The default base URL is `https://openrouter.ai/api/v1`, so you only need to edit `runtime.openrouter_base_url` in `support_graph.toml` when overriding it.
+
+Ollama chat + embeddings in `support_graph.toml`:
+
+```toml
+[runtime]
+chat_provider_type = "ollama"
+embedding_provider_type = "ollama"
+ollama_base_url = "http://localhost:11434"
+chat_model = "qwen3:8b-q4_K_M"
+embedding_model = "qwen3-embedding:4b-q4_K_M"
+```
+
+Mixed-provider example in `support_graph.toml`:
+
+```toml
+[runtime]
+chat_provider_type = "ollama"
+embedding_provider_type = "openrouter"
+ollama_base_url = "http://localhost:11434"
+openrouter_base_url = "https://openrouter.ai/api/v1"
+chat_model = "qwen3:8b-q4_K_M"
+embedding_model = "qwen/qwen3-embedding-8b"
+```
+
+If you change `runtime.embedding_model`, re-run `index-docs` because the pgvector index depends on the embedding space. Changing only `runtime.chat_model` does not require re-indexing.
 
 ## Observability
 
 Local JSONL traces remain the default and still power `trace-show`, eval artifacts, and failure review. Two hosted backends are now optional:
 
-- LangSmith: set `SUPPORT_GRAPH_LANGSMITH_TRACING_ENABLED=true` plus `SUPPORT_GRAPH_LANGSMITH_API_KEY`, and optionally `SUPPORT_GRAPH_LANGSMITH_PROJECT`
-- OpenTelemetry: set `SUPPORT_GRAPH_OTEL_ENABLED=true`; use `SUPPORT_GRAPH_OTEL_EXPORTER=otlp` with `SUPPORT_GRAPH_OTEL_ENDPOINT` for a collector, or omit the endpoint for local console spans
+- LangSmith: set `observability.langsmith.tracing_enabled = true` in `support_graph.toml` and put `SUPPORT_GRAPH_LANGSMITH_API_KEY` in `.env`
+- OpenTelemetry: set `observability.otel.enabled = true` in `support_graph.toml`; use `observability.otel.exporter = "otlp"` with `observability.otel.endpoint` for a collector, and put auth material in `SUPPORT_GRAPH_OTEL_HEADERS` when needed
 
 When enabled, the runtime keeps writing local traces and also emits standard tracing context for each graph run and node.
 
-CLI commands also write timestamped execution logs under `logs/` by default. Override the location with `SUPPORT_GRAPH_LOG_DIR`, and adjust verbosity with `SUPPORT_GRAPH_LOG_LEVEL`.
+CLI commands also write timestamped execution logs under `logs/` by default. Override the location with `paths.log_dir`, and adjust verbosity with `paths.log_level` in `support_graph.toml`.
 
 ## Eval Notes
 
 - `eval` defaults to the committed `smoke` subset so the default command stays practical on a local machine.
 - Use `--subset frozen_ablation` for a fairer ablation pass.
 - Use `--subset full_validation` once the DMV benchmark is stable and you want the full validation run.
-- `ablate-smoke10` runs the control plus three targeted variants on the first 10 committed smoke examples and writes a cross-run markdown note under `outputs/evals/`.
+- `ablate-smoke10` runs the control plus three targeted variants on the first 10 committed smoke examples and writes a structured report under `outputs/evals/reports/`.
 - `review-failures` inspects one eval run’s failure list and review artifacts from the terminal.
 - `trace-show` resolves an evaluated example through `trace_index.json` and prints the raw graph trace summary.
 
