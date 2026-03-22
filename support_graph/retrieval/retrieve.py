@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol, TypedDict
 
+from langchain_community.retrievers import BM25Retriever
 from langchain_postgres import PGVector
 from stop_words import get_stop_words
 
@@ -189,20 +190,33 @@ def _render_query_context(
     context: QueryContext,
     *,
     include_history: bool = True,
+    include_labels: bool = True,
 ) -> str:
     parts: list[str] = []
     if context.get("domain"):
-        parts.append(f"Domain: {context['domain']}")
+        parts.append(
+            f"Domain: {context['domain']}" if include_labels else str(context["domain"])
+        )
     if context.get("latest_user_need"):
-        parts.append(f"Latest user need: {context['latest_user_need']}")
+        parts.append(
+            f"Latest user need: {context['latest_user_need']}"
+            if include_labels
+            else str(context["latest_user_need"])
+        )
     if include_history and context.get("last_agent_question"):
-        parts.append(f"Last agent question: {context['last_agent_question']}")
+        parts.append(
+            f"Last agent question: {context['last_agent_question']}"
+            if include_labels
+            else str(context["last_agent_question"])
+        )
     carry_forward = list(context["carry_forward_context"]) if include_history else []
     if carry_forward:
-        parts.append("Carry-forward context:")
+        if include_labels:
+            parts.append("Carry-forward context:")
         for turn in carry_forward:
             role = turn["role"].strip().title() or "Unknown"
-            parts.append(f"- {role}: {turn['utterance'].strip()}")
+            utterance = turn["utterance"].strip()
+            parts.append(f"- {role}: {utterance}" if include_labels else utterance)
     return "\n".join(parts).strip()
 
 
@@ -211,6 +225,7 @@ def build_query(
     history_turn_limit: int = 4,
     *,
     include_history: bool = True,
+    include_labels: bool = True,
 ) -> str:
     del history_turn_limit
     context = build_query_context(example)
@@ -220,7 +235,9 @@ def build_query(
             "last_agent_question": "",
             "carry_forward_context": [],
         }
-    return _render_query_context(context, include_history=include_history)
+    return _render_query_context(
+        context, include_history=include_history, include_labels=include_labels
+    )
 
 
 def build_legacy_query(
@@ -409,10 +426,58 @@ def get_vectorstore(
     )
 
 
+def build_keyword_retriever(
+    config: RuntimeConfig,
+    chunk_records: list[dict] | None = None,
+) -> BM25Retriever | None:
+    if not chunk_records:
+        return None
+
+    from langchain_core.documents import Document
+
+    documents = [
+        Document(
+            page_content=record.get("text", ""),
+            metadata={key: value for key, value in record.items() if key != "text"},
+        )
+        for record in chunk_records
+    ]
+    retriever = BM25Retriever.from_documents(documents)
+    retriever.k = config.retrieval_candidate_k
+    return retriever
+
+
+def _normalized_bm25_hits(
+    *,
+    retriever: BM25Retriever | None,
+    query: str,
+    domain: str,
+    doc_id: str | None,
+    doc_ids: list[str] | None,
+) -> list[NormalizedRetrievalHit]:
+    if retriever is None:
+        return []
+
+    allowed_doc_ids = {value for value in (doc_ids or []) if value}
+    if doc_id:
+        allowed_doc_ids.add(doc_id)
+
+    hits: list[Any] = []
+    for hit in retriever.invoke(query):
+        metadata = hit.metadata
+        if domain and metadata.get("domain") != domain:
+            continue
+        if allowed_doc_ids and metadata.get("doc_id") not in allowed_doc_ids:
+            continue
+        hits.append(hit)
+    return normalize_retrieval_hits(hits)
+
+
 def retrieve_chunks(
     *,
     example: dict,
     vectorstore: VectorStoreLike | None = None,
+    keyword_retriever: BM25Retriever | None = None,
     config: RuntimeConfig | None = None,
     top_k: int = 5,
     candidate_k: int | None = None,
@@ -424,8 +489,15 @@ def retrieve_chunks(
     rerank: bool = True,
 ) -> list[dict]:
     resolved_query_context = query_context or build_query_context(example)
-    resolved_query = query or build_query(example)
+    resolved_query = query or build_query(example, include_labels=False)
     resolved_domain = domain or _domain_from_example(example)
+    resolved_top_k = max(1, int(top_k))
+    resolved_candidate_k = candidate_k
+    if resolved_candidate_k is None:
+        resolved_candidate_k = (
+            config.retrieval_candidate_k if config is not None else resolved_top_k
+        )
+    resolved_candidate_k = max(resolved_top_k, int(resolved_candidate_k))
     metadata_filter = build_metadata_filter(
         domain=resolved_domain,
         doc_id=doc_id,
@@ -437,19 +509,27 @@ def retrieve_chunks(
             raise ValueError("retrieve_chunks requires either vectorstore or config.")
         vectorstore = get_vectorstore(config)
 
-    resolved_top_k = max(1, int(top_k))
-    resolved_candidate_k = candidate_k
-    if resolved_candidate_k is None:
-        resolved_candidate_k = (
-            config.retrieval_candidate_k if config is not None else resolved_top_k
-        )
-    resolved_candidate_k = max(resolved_top_k, int(resolved_candidate_k))
     hits = vectorstore.similarity_search_with_score(
         resolved_query,
         k=resolved_candidate_k,
         filter=metadata_filter,
     )
     normalized_hits = normalize_retrieval_hits(hits)
+
+    bm25_hits = _normalized_bm25_hits(
+        retriever=keyword_retriever,
+        query=resolved_query,
+        domain=resolved_domain,
+        doc_id=doc_id,
+        doc_ids=doc_ids,
+    )
+    if bm25_hits:
+        seen_chunk_ids = {hit["chunk_id"] for hit in normalized_hits}
+        for hit in bm25_hits:
+            if hit["chunk_id"] not in seen_chunk_ids:
+                normalized_hits.append(hit)
+                seen_chunk_ids.add(hit["chunk_id"])
+
     if not rerank:
         return normalized_hits[:resolved_top_k]
     reranked_hits = rerank_retrieval_hits(

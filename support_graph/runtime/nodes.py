@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from langchain_community.retrievers import BM25Retriever
 from pydantic import BaseModel
 
 from support_graph.config.runtime import RuntimeConfig
@@ -21,8 +22,12 @@ from support_graph.providers import (
 from support_graph.retrieval.index import load_chunk_records
 from support_graph.retrieval.retrieve import build_legacy_query
 from support_graph.retrieval.retrieve import build_query as build_retrieval_query
-from support_graph.retrieval.retrieve import build_query_context
-from support_graph.retrieval.retrieve import get_vectorstore, retrieve_chunks
+from support_graph.retrieval.retrieve import (
+    build_keyword_retriever,
+    build_query_context,
+    get_vectorstore,
+    retrieve_chunks,
+)
 from support_graph.runtime.llm_policy import (
     LLMCallTimeoutError,
     ainvoke_with_retry,
@@ -36,6 +41,7 @@ from support_graph.runtime.schemas import (
     GraphState,
     GraphStreamEvent,
     ResponseModel,
+    RouteModel,
     Runtime,
     RuntimeResources,
     attach_fallback_metadata,
@@ -239,8 +245,11 @@ def _render_conversation(conversation: list[dict], max_turns: int = 8) -> str:
 def _render_chunks(chunks: list[dict], limit: int = 8) -> str:
     parts = []
     for chunk in chunks[:limit]:
+        title = str(chunk.get("section_title") or "").strip()
+        title_line = f"Title: {title}\n" if title else ""
         parts.append(
             f'<chunk id="{chunk.get("chunk_id")}" doc="{chunk.get("doc_id")}">\n'
+            f"{title_line}"
             f"Text: {chunk.get('text', '')}\n"
             "</chunk>"
         )
@@ -472,6 +481,7 @@ def expand_neighbor_sections(
     *,
     limit: int = 8,
 ) -> list[dict]:
+    """Expand direct hits with adjacent numeric sections from the same document."""
     if not chunks:
         return []
     if not chunk_records_by_doc:
@@ -704,6 +714,7 @@ async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
         retrieve_chunks,
         example=_query_example_from_state(state),
         vectorstore=runtime.vectorstore,
+        keyword_retriever=runtime.keyword_retriever,
         config=runtime.config,
         top_k=runtime.config.retrieval_top_k,
         candidate_k=int(
@@ -998,6 +1009,7 @@ async def build_runtime_async(
     run_id: str,
     trace_path: str | Path,
     vectorstore: Any = None,
+    keyword_retriever: BM25Retriever | None = None,
     chat_model: Any = None,
     resources: RuntimeResources | None = None,
     event_sink: Any = None,
@@ -1016,6 +1028,7 @@ async def build_runtime_async(
         resolved_resources = await resolve_runtime_resources_async(
             config,
             vectorstore=vectorstore,
+            keyword_retriever=keyword_retriever,
             chat_model=chat_model,
         )
     logger.info(
@@ -1028,6 +1041,7 @@ async def build_runtime_async(
     return Runtime(
         config=config,
         vectorstore=resolved_resources.vectorstore,
+        keyword_retriever=resolved_resources.keyword_retriever,
         chat_model=resolved_resources.chat_model,
         chunk_records_by_doc=resolved_resources.chunk_records_by_doc,
         prompts=resolved_resources.prompts,
@@ -1044,6 +1058,7 @@ async def resolve_runtime_resources_async(
     config: RuntimeConfig,
     *,
     vectorstore: Any = None,
+    keyword_retriever: BM25Retriever | None = None,
     chat_model: Any = None,
 ) -> RuntimeResources:
     resolved_vectorstore = vectorstore
@@ -1055,6 +1070,20 @@ async def resolve_runtime_resources_async(
             config.embedding_model,
         )
         resolved_vectorstore = await asyncio.to_thread(get_vectorstore, config)
+
+    resolved_keyword_retriever = keyword_retriever
+    if resolved_keyword_retriever is None and resolved_vectorstore is not None:
+        logger.info("Initializing keyword retriever")
+        chunk_records = None
+        if config.chunk_artifact_path and config.chunk_artifact_path.exists():
+            chunk_records = await asyncio.to_thread(
+                load_chunk_records, config.chunk_artifact_path
+            )
+
+        resolved_keyword_retriever = build_keyword_retriever(
+            config,
+            chunk_records=chunk_records,
+        )
 
     resolved_chat_model = chat_model
     if resolved_chat_model is None and config.chat_model:
@@ -1073,6 +1102,7 @@ async def resolve_runtime_resources_async(
     )
     return RuntimeResources(
         vectorstore=resolved_vectorstore,
+        keyword_retriever=resolved_keyword_retriever,
         chat_model=resolved_chat_model,
         chunk_records_by_doc=chunk_records_by_doc,
         prompts=resolve_prompt_set(config.prompt_version),

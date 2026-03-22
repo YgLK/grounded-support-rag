@@ -54,7 +54,7 @@ class RuntimeConfig:
     openrouter_api_key: str | None = None
     chat_model: str | None = None
     embedding_model: str | None = None
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
     retrieval_top_k: int = 5
     retrieval_candidate_k: int = 12
     max_retrieval_attempts: int = 2

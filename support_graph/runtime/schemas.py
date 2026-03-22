@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict, cast
 
+from langchain_community.retrievers import BM25Retriever
 from pydantic import BaseModel, Field
 
 from support_graph.config.runtime import RuntimeConfig
@@ -127,6 +128,7 @@ class GraphState(TypedDict, total=False):
 class Runtime:
     config: RuntimeConfig
     vectorstore: Any
+    keyword_retriever: BM25Retriever | None
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
     prompts: PromptSet
@@ -141,6 +143,7 @@ class Runtime:
 @dataclass(slots=True)
 class RuntimeResources:
     vectorstore: Any
+    keyword_retriever: BM25Retriever | None
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
     prompts: PromptSet

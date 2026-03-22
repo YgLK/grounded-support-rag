@@ -178,7 +178,9 @@ def _span_attributes(
     return attributes
 
 
-def _route_after_intent(state: GraphState) -> Literal["prepare_query", "resolve_without_answer"]:
+def _route_after_intent(
+    state: GraphState,
+) -> Literal["prepare_query", "resolve_without_answer"]:
     intent = state.get("intent", "document_query")
     if intent == "chitchat":
         return "resolve_without_answer"
