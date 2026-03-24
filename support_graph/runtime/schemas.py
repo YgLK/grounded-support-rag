@@ -132,7 +132,6 @@ class Runtime:
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
     prompts: PromptSet
-    llm_semaphore: asyncio.Semaphore
     trace_path: Path
     run_id: str
     event_sink: GraphEventSink | None = None
@@ -147,7 +146,6 @@ class RuntimeResources:
     chat_model: Any
     chunk_records_by_doc: dict[str, list[dict]]
     prompts: PromptSet
-    llm_semaphore: asyncio.Semaphore
 
 
 def attach_fallback_metadata(

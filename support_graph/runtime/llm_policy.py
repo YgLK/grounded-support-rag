@@ -15,45 +15,16 @@ from support_graph.providers import chat_provider, chat_provider_base_url
 
 
 _T = TypeVar("_T")
-SemaphoreKey = tuple[int, str, str, str, int]
 _RETRYABLE_MESSAGE_PATTERN = re.compile(
     r"(429|rate limit|timeout|temporar|try again|connection|unavailable|bad gateway|service unavailable|internal server error)",
     re.IGNORECASE,
 )
-_SHARED_SEMAPHORES: dict[SemaphoreKey, asyncio.Semaphore] = {}
 
 
 class LLMCallTimeoutError(TimeoutError):
     def __init__(self, timeout_seconds: float) -> None:
         self.timeout_seconds = timeout_seconds
         super().__init__(f"LLM call timed out after {timeout_seconds:.1f}s")
-
-
-def _max_concurrency(config: RuntimeConfig) -> int:
-    if config.llm_max_concurrency <= 0:
-        raise ValueError("llm_max_concurrency must be positive.")
-    return config.llm_max_concurrency
-
-
-def _semaphore_key(config: RuntimeConfig) -> SemaphoreKey:
-    return (
-        id(asyncio.get_running_loop()),
-        str(chat_provider(config)),
-        chat_provider_base_url(config) or "",
-        config.chat_model or "",
-        _max_concurrency(config),
-    )
-
-
-def shared_llm_semaphore(config: RuntimeConfig) -> asyncio.Semaphore:
-    key = _semaphore_key(config)
-    semaphore = _SHARED_SEMAPHORES.get(key)
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(key[-1])
-        _SHARED_SEMAPHORES[key] = semaphore
-    return semaphore
-
-
 def _exception_status_code(exc: BaseException) -> int | None:
     direct_status = getattr(exc, "status_code", None)
     if isinstance(direct_status, int):
@@ -95,7 +66,6 @@ def is_retryable_exception(exc: BaseException) -> bool:
 async def ainvoke_with_retry(
     operation: Callable[[], Awaitable[_T]],
     *,
-    semaphore: asyncio.Semaphore,
     timeout_seconds: float | None,
     max_attempts: int,
     base_delay_seconds: float,
@@ -121,13 +91,12 @@ async def ainvoke_with_retry(
         reraise=True,
     ):
         with attempt:
-            async with semaphore:
-                if timeout_seconds is None:
-                    return await operation()
-                try:
-                    return await asyncio.wait_for(operation(), timeout=timeout_seconds)
-                except asyncio.TimeoutError as exc:
-                    raise LLMCallTimeoutError(timeout_seconds) from exc
+            if timeout_seconds is None:
+                return await operation()
+            try:
+                return await asyncio.wait_for(operation(), timeout=timeout_seconds)
+            except asyncio.TimeoutError as exc:
+                raise LLMCallTimeoutError(timeout_seconds) from exc
     raise RuntimeError("LLM retry policy exhausted without returning or raising.")
 
 
@@ -135,5 +104,4 @@ __all__ = [
     "LLMCallTimeoutError",
     "ainvoke_with_retry",
     "is_retryable_exception",
-    "shared_llm_semaphore",
 ]

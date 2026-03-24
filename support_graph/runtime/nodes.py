@@ -31,7 +31,6 @@ from support_graph.retrieval.retrieve import (
 from support_graph.runtime.llm_policy import (
     LLMCallTimeoutError,
     ainvoke_with_retry,
-    shared_llm_semaphore,
 )
 from support_graph.runtime.observability import build_observability
 from support_graph.runtime.prompts import resolve_prompt_set
@@ -203,22 +202,21 @@ async def _emit_streaming_answer_preview(
     )
     deltas: list[str] = []
     try:
-        async with runtime.llm_semaphore:
-            async for chunk in astream(messages):
-                delta = _stream_chunk_text(chunk)
-                if not delta:
-                    continue
-                deltas.append(delta)
-                await _emit_graph_event(
-                    runtime,
-                    {
-                        "kind": "response_delta",
-                        "node": node_name,
-                        "run_id": runtime.run_id,
-                        "example_id": state.get("example_id"),
-                        "delta": delta,
-                    },
-                )
+        async for chunk in astream(messages):
+            delta = _stream_chunk_text(chunk)
+            if not delta:
+                continue
+            deltas.append(delta)
+            await _emit_graph_event(
+                runtime,
+                {
+                    "kind": "response_delta",
+                    "node": node_name,
+                    "run_id": runtime.run_id,
+                    "example_id": state.get("example_id"),
+                    "delta": delta,
+                },
+            )
     except Exception as exc:
         logger.warning(
             "%s preview streaming fell back to buffered output: %s",
@@ -290,7 +288,6 @@ async def _ainvoke_structured_prompt(
 
     result = await ainvoke_with_retry(
         invoke_chain,
-        semaphore=runtime.llm_semaphore,
         timeout_seconds=getattr(runtime.config, "llm_timeout_seconds", None),
         max_attempts=runtime.config.llm_max_retries,
         base_delay_seconds=runtime.config.llm_retry_base_delay_seconds,
@@ -1106,7 +1103,6 @@ async def resolve_runtime_resources_async(
         chat_model=resolved_chat_model,
         chunk_records_by_doc=chunk_records_by_doc,
         prompts=resolve_prompt_set(config.prompt_version),
-        llm_semaphore=shared_llm_semaphore(config),
     )
 
 
