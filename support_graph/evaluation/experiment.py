@@ -1,4 +1,4 @@
-"""Targeted ablation runner for DMV Smoke-10."""
+"""Targeted experiment runner for DMV Smoke-10."""
 
 from __future__ import annotations
 
@@ -29,16 +29,16 @@ VariantId = Literal[
 VariantStatus = Literal["control", "worked", "didn't work"]
 
 
-class AblationVariant(TypedDict):
+class ExperimentVariant(TypedDict):
     id: VariantId
     title: str
     summary: str
     notes: str
-    ablation_options: dict[str, Any]
+    experiment_options: dict[str, Any]
     config_overrides: dict[str, Any]
 
 
-class AblationSettingsLike(Protocol):
+class ExperimentSettingsLike(Protocol):
     project_root: Path
 
 
@@ -52,13 +52,13 @@ DOC_RECALL_FLOOR = 0.45
 LATENCY_LIMIT_MS = 39_400.0
 
 
-VARIANTS: tuple[AblationVariant, ...] = (
+VARIANTS: tuple[ExperimentVariant, ...] = (
     {
         "id": "control",
         "title": "Control",
         "summary": "Content-only reasoning baseline with the legacy transcript query and direct top-5 retrieval.",
         "notes": "Control: content-only reasoning promoted, but keep the legacy transcript query and no candidate-pool reranking or neighbor expansion.",
-        "ablation_options": {
+        "experiment_options": {
             "query_mode": "legacy_transcript",
             "content_only_reasoning": True,
             "retrieval_rerank": False,
@@ -77,7 +77,7 @@ VARIANTS: tuple[AblationVariant, ...] = (
         "title": "Structured Query",
         "summary": "Swap the transcript dump for a compact history-aware query builder while keeping direct top-5 retrieval.",
         "notes": "Variant: compact deterministic query context with content-only reasoning, but still no candidate-pool reranking or neighbor expansion.",
-        "ablation_options": {
+        "experiment_options": {
             "query_mode": "structured",
             "content_only_reasoning": True,
             "retrieval_rerank": False,
@@ -96,7 +96,7 @@ VARIANTS: tuple[AblationVariant, ...] = (
         "title": "Structured Query + Rerank",
         "summary": "Increase the candidate pool and apply deterministic reranking before keeping the best five chunks.",
         "notes": "Variant: compact query builder plus candidate-k retrieval and deterministic reranking, without neighbor expansion.",
-        "ablation_options": {
+        "experiment_options": {
             "query_mode": "structured",
             "content_only_reasoning": True,
             "retrieval_rerank": True,
@@ -114,7 +114,7 @@ VARIANTS: tuple[AblationVariant, ...] = (
         "title": "Structured Query + Rerank + Neighbors",
         "summary": "Add same-doc one-hop neighboring-section expansion on top of the reranked evidence set.",
         "notes": "Variant: compact query builder, candidate-k retrieval, deterministic reranking, and same-doc neighboring-section expansion.",
-        "ablation_options": {
+        "experiment_options": {
             "query_mode": "structured",
             "content_only_reasoning": True,
             "retrieval_rerank": True,
@@ -194,9 +194,9 @@ def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
     assert_never(variant_id)
 
 
-def _variant_manifest(variant: AblationVariant, *, scope: str) -> dict:
+def _variant_manifest(variant: ExperimentVariant, *, scope: str) -> dict:
     return {
-        "ablation": {
+        "experiment": {
             "variant_id": variant["id"],
             "variant_name": variant["title"],
             "variant_summary": variant["summary"],
@@ -214,9 +214,9 @@ async def _run_variant(
     subset_name: str,
     started_at: datetime,
     base_config: Any,
-    variant: AblationVariant,
+    variant: ExperimentVariant,
     run_graph_func: Any,
-    ablation_variant: str,
+    experiment_variant: str,
     notes: str,
     run_id_slug: str,
     subset_label: str,
@@ -224,8 +224,8 @@ async def _run_variant(
 ) -> dict:
     config_overrides = dict(variant["config_overrides"])
     experiment = RuntimeExperimentOverrides(
-        ablation_variant=ablation_variant,
-        ablation_options=variant["ablation_options"],
+        experiment_variant=experiment_variant,
+        experiment_options=variant["experiment_options"],
         retrieval_rerank=bool(config_overrides.pop("retrieval_rerank")),
         content_only_reasoning=bool(config_overrides.pop("content_only_reasoning")),
         neighbor_expansion=bool(config_overrides.pop("neighbor_expansion")),
@@ -323,19 +323,19 @@ def _summary_table_rows(results: list[dict]) -> list[str]:
     return lines
 
 
-def _ablation_report_id(
+def _experiment_report_id(
     *,
     domain: DomainLike,
     limit: int,
     summary_timestamp: datetime,
 ) -> str:
     timestamp_slug = summary_timestamp.strftime("%Y%m%d-%H%M%S")
-    return f"{timestamp_slug}-{domain}-smoke{limit}-ablation-summary"
+    return f"{timestamp_slug}-{domain}-smoke{limit}-experiment-summary"
 
 
-def write_ablation_summary(
+def write_experiment_summary(
     *,
-    settings: AblationSettingsLike,
+    settings: ExperimentSettingsLike,
     domain: DomainLike,
     split: DatasetSplitLike,
     limit: int,
@@ -345,7 +345,7 @@ def write_ablation_summary(
 ) -> dict[str, Any]:
     if not results:
         raise ValueError("results must not be empty.")
-    report_id = _ablation_report_id(
+    report_id = _experiment_report_id(
         domain=domain,
         limit=limit,
         summary_timestamp=summary_timestamp,
@@ -358,7 +358,7 @@ def write_ablation_summary(
         related_run_ids.append(frozen_result["run_id"])
 
     lines = [
-        f"# DMV Smoke-{limit} Ablation Summary",
+        f"# DMV Smoke-{limit} Experiment Summary",
         "",
         "Scope",
         f"- Domain: {domain}",
@@ -425,8 +425,8 @@ def write_ablation_summary(
     manifest = {
         "report_id": report_id,
         "created_at": summary_timestamp.isoformat(),
-        "report_type": "ablation_summary",
-        "title": f"{str(domain).upper()} Smoke-{limit} Ablation Summary",
+        "report_type": "experiment_summary",
+        "title": f"{str(domain).upper()} Smoke-{limit} Experiment Summary",
         "related_run_ids": related_run_ids,
         "domain": str(domain),
         "split": str(split),
@@ -448,7 +448,7 @@ def write_ablation_summary(
     }
 
 
-async def run_smoke10_ablation_async(
+async def run_smoke10_experiment_async(
     *,
     settings: Any,
     domain: DomainLike = Domain.DMV,
@@ -475,7 +475,7 @@ async def run_smoke10_ablation_async(
             base_config=base_config,
             variant=variant,
             run_graph_func=graph_runner,
-            ablation_variant=variant["id"],
+            experiment_variant=variant["id"],
             notes=variant["notes"],
             run_id_slug=variant["id"],
             subset_label=f"{domain} {split} / smoke first {limit} / {variant['title']}",
@@ -493,9 +493,9 @@ async def run_smoke10_ablation_async(
     best = best_smoke_step(results)
     if smoke_step_clears_frozen_gate(best):
         frozen_examples, frozen_subset = load_eval_examples(
-            settings, domain, split, "frozen_ablation"
+            settings, domain, split, "frozen_experiment"
         )
-        variant = cast(AblationVariant, best["variant"])
+        variant = cast(ExperimentVariant, best["variant"])
         frozen_result = await _run_variant(
             settings=settings,
             examples=frozen_examples,
@@ -506,14 +506,14 @@ async def run_smoke10_ablation_async(
             base_config=base_config,
             variant=variant,
             run_graph_func=graph_runner,
-            ablation_variant=f"{variant['id']}-frozen",
+            experiment_variant=f"{variant['id']}-frozen",
             notes=f"Frozen-200 follow-through for {variant['title']}.",
             run_id_slug=f"{variant['id']}-frozen200",
             subset_label=f"{domain} {split} / frozen 200 / {variant['title']}",
             manifest_scope="Frozen-200 follow-through after Smoke-10 gate",
         )
 
-    report = write_ablation_summary(
+    report = write_experiment_summary(
         settings=settings,
         domain=domain,
         split=split,

@@ -148,9 +148,9 @@ def format_eval_output(result: dict, settings: Settings) -> list[str]:
     return lines
 
 
-def format_ablation_output(result: dict, settings: Settings) -> list[str]:
+def format_experiment_output(result: dict, settings: Settings) -> list[str]:
     lines = [
-        "SupportGraph Ablation",
+        "SupportGraph Experiment",
         f"Scope: {result.get('domain')} smoke / first {result.get('limit')}",
         "",
         "Variants",

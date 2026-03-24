@@ -44,7 +44,7 @@ class DatasetSplit(ChoiceStrEnum):
 
 class EvalSubset(ChoiceStrEnum):
     SMOKE = "smoke"
-    FROZEN_ABLATION = "frozen_ablation"
+    FROZEN_EXPERIMENT = "frozen_experiment"
     FULL_VALIDATION = "full_validation"
 
 

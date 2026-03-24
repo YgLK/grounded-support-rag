@@ -10,9 +10,6 @@ from typing import TypeVar
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_exponential_jitter
 
-from support_graph.config.runtime import RuntimeConfig
-from support_graph.providers import chat_provider, chat_provider_base_url
-
 
 _T = TypeVar("_T")
 _RETRYABLE_MESSAGE_PATTERN = re.compile(
@@ -25,6 +22,8 @@ class LLMCallTimeoutError(TimeoutError):
     def __init__(self, timeout_seconds: float) -> None:
         self.timeout_seconds = timeout_seconds
         super().__init__(f"LLM call timed out after {timeout_seconds:.1f}s")
+
+
 def _exception_status_code(exc: BaseException) -> int | None:
     direct_status = getattr(exc, "status_code", None)
     if isinstance(direct_status, int):

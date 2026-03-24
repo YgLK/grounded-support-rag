@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from support_graph.app.cli_output import (
-    format_ablation_output,
+    format_experiment_output,
     format_eval_output,
     format_review_failures_output,
     format_run_output,
@@ -42,7 +42,7 @@ from support_graph.data.examples import build_turn_examples, write_examples_json
 from support_graph.data.examples import (
     load_example_record as load_example_record_from_paths,
 )
-from support_graph.evaluation.ablation import run_smoke10_ablation_async
+from support_graph.evaluation.experiment import run_smoke10_experiment_async
 from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
     load_benchmark_chunk_records,
@@ -408,7 +408,7 @@ def _build_subsets(args: argparse.Namespace) -> int:
         examples,
         size=args.frozen_size,
         target_mode="answer",
-        salt="frozen_ablation",
+        salt="frozen_experiment",
     )
     output_dir = (
         Path(args.output_dir)
@@ -416,9 +416,9 @@ def _build_subsets(args: argparse.Namespace) -> int:
         else settings.paths.project_root / "data/eval_subsets"
     )
     smoke_path = output_dir / "smoke.jsonl"
-    frozen_path = output_dir / "frozen_ablation.jsonl"
+    frozen_path = output_dir / "frozen_experiment.jsonl"
     logger.info(
-        "Writing subset artifacts to %s (smoke=%s, frozen_ablation=%s)",
+        "Writing subset artifacts to %s (smoke=%s, frozen_experiment=%s)",
         output_dir,
         len(smoke_examples),
         len(frozen_examples),
@@ -432,7 +432,7 @@ def _build_subsets(args: argparse.Namespace) -> int:
             f"Split: {args.split}",
             f"Answer Examples: {_answer_example_count(examples)}",
             f"Smoke: {len(smoke_examples)} -> {smoke_path}",
-            f"Frozen Ablation: {len(frozen_examples)} -> {frozen_path}",
+            f"Frozen Experiment: {len(frozen_examples)} -> {frozen_path}",
         ]
     )
     return 0
@@ -687,13 +687,13 @@ def _eval_split(args: argparse.Namespace) -> int:
     return 0
 
 
-def _ablate_smoke10(args: argparse.Namespace) -> int:
+def _experiment_smoke10(args: argparse.Namespace) -> int:
     settings = _load_settings(args)
     try:
         settings.runtime.validate_for_run()
     except ConfigValidationError as exc:
         return _print_config_validation_error(
-            title="SupportGraph Ablation",
+            title="SupportGraph Experiment",
             settings=settings,
             error=exc,
         )
@@ -701,9 +701,9 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
     domain = settings.selected_domain(args.domain)
     postgres_dsn = settings.runtime.postgres_dsn
     if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for ablation.")
+        raise ValueError("Missing postgres_dsn for experiment.")
     if not _ensure_index_ready(
-        title="SupportGraph Ablation",
+        title="SupportGraph Experiment",
         postgres_dsn=postgres_dsn,
         collection_name=settings.collection_name(domain),
         domain=domain,
@@ -713,7 +713,7 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
     result = cast(
         dict,
         run_async_boundary(
-            run_smoke10_ablation_async(
+            run_smoke10_experiment_async(
                 settings=settings,
                 domain=domain,
                 split=args.split,
@@ -721,7 +721,7 @@ def _ablate_smoke10(args: argparse.Namespace) -> int:
             )
         ),
     )
-    print_lines(format_ablation_output(result, settings))
+    print_lines(format_experiment_output(result, settings))
     return 0
 
 
@@ -841,7 +841,7 @@ def build_parser() -> argparse.ArgumentParser:
             index_docs=_index_docs,
             run_example=_run_example,
             eval_split=_eval_split,
-            ablate_smoke10=_ablate_smoke10,
+            experiment_smoke10=_experiment_smoke10,
             review_failures=_review_failures,
             trace_show=_trace_show,
             serve_ui=_serve_ui,

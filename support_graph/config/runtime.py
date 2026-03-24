@@ -40,8 +40,8 @@ class RuntimeExperimentOverrides:
     retrieval_rerank: bool = DEFAULT_RETRIEVAL_RERANK
     content_only_reasoning: bool = DEFAULT_CONTENT_ONLY_REASONING
     neighbor_expansion: bool = DEFAULT_NEIGHBOR_EXPANSION
-    ablation_variant: str | None = None
-    ablation_options: dict[str, Any] = field(default_factory=dict)
+    experiment_variant: str | None = None
+    experiment_options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -73,8 +73,8 @@ class RuntimeConfig:
     neighbor_expansion: bool = DEFAULT_NEIGHBOR_EXPANSION
     chunk_artifact_path: Path | None = None
     chunk_records: list[dict[str, Any]] | None = None
-    ablation_variant: str | None = None
-    ablation_options: dict[str, Any] = field(default_factory=dict)
+    experiment_variant: str | None = None
+    experiment_options: dict[str, Any] = field(default_factory=dict)
     embedding_client: Any | None = None
 
     def validate_for_index(self) -> None:
@@ -120,8 +120,8 @@ def apply_runtime_experiment_overrides(
         retrieval_rerank=experiment.retrieval_rerank,
         content_only_reasoning=experiment.content_only_reasoning,
         neighbor_expansion=experiment.neighbor_expansion,
-        ablation_variant=experiment.ablation_variant,
-        ablation_options=dict(experiment.ablation_options),
+        experiment_variant=experiment.experiment_variant,
+        experiment_options=dict(experiment.experiment_options),
     )
 
 

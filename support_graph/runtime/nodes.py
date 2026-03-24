@@ -407,15 +407,15 @@ def _llm_available(runtime: Runtime) -> bool:
     return runtime.chat_model is not None
 
 
-def _ablation_bool(state: GraphState, key: str, default: bool) -> bool:
-    ablation_options = state.get("ablation_options", {})
-    if key in ablation_options:
-        return bool(ablation_options[key])
+def _experiment_bool(state: GraphState, key: str, default: bool) -> bool:
+    experiment_options = state.get("experiment_options", {})
+    if key in experiment_options:
+        return bool(experiment_options[key])
     return default
 
 
 def _query_mode(state: GraphState) -> QueryMode:
-    mode = state.get("ablation_options", {}).get("query_mode", "structured")
+    mode = state.get("experiment_options", {}).get("query_mode", "structured")
     match mode:
         case "legacy_transcript" | "latest_user_only" | "structured":
             return cast(QueryMode, mode)
@@ -427,7 +427,7 @@ def _is_title_chunk(chunk: dict) -> bool:
 
 
 def _content_only_reasoning_enabled(*, state: GraphState, runtime: Runtime) -> bool:
-    return _ablation_bool(
+    return _experiment_bool(
         state,
         "content_only_reasoning",
         bool(runtime.config.content_only_reasoning),
@@ -435,7 +435,7 @@ def _content_only_reasoning_enabled(*, state: GraphState, runtime: Runtime) -> b
 
 
 def _neighbor_expansion_enabled(*, state: GraphState, runtime: Runtime) -> bool:
-    return _ablation_bool(
+    return _experiment_bool(
         state,
         "neighbor_expansion",
         bool(runtime.config.neighbor_expansion),
@@ -676,7 +676,7 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     """Build the retrieval query string and context from conversation state.
 
     Returns a tuple of (query_string, query_context) based on the configured
-    query mode in ablation_options.
+    query mode in experiment_options.
     """
     del runtime
     query_example = _query_example_from_state(state)
@@ -703,7 +703,7 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
 
 
 async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
-    ablation_options = state.get("ablation_options", {})
+    experiment_options = state.get("experiment_options", {})
     query = state.get("refined_query") or state.get("query")
     if query is None:
         raise ValueError("Missing retrieval query.")
@@ -715,14 +715,14 @@ async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
         config=runtime.config,
         top_k=runtime.config.retrieval_top_k,
         candidate_k=int(
-            ablation_options.get(
+            experiment_options.get(
                 "retrieval_candidate_k",
                 runtime.config.retrieval_candidate_k,
             )
         ),
         query=query,
         query_context=state.get("query_context"),
-        rerank=_ablation_bool(
+        rerank=_experiment_bool(
             state,
             "retrieval_rerank",
             bool(runtime.config.retrieval_rerank),
@@ -763,8 +763,8 @@ def refine_query(*, state: GraphState, runtime: Runtime) -> str:
     del runtime
     current_query = state.get("query") or ""
     grade = state.get("evidence_grade", {})
-    ablation_options = state.get("ablation_options", {})
-    if ablation_options.get("query_mode") == "latest_user_only":
+    experiment_options = state.get("experiment_options", {})
+    if experiment_options.get("query_mode") == "latest_user_only":
         return current_query.strip()
     missing = "; ".join(grade.get("missing_information", []))
     retrieved_chunks = _reasoning_chunks(state)
@@ -848,9 +848,9 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
 async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict:
     retrieved_chunks = _reasoning_chunks(state)
     grade = state.get("evidence_grade", {})
-    ablation_options = state.get("ablation_options", {})
+    experiment_options = state.get("experiment_options", {})
     if (
-        ablation_options.get("answer_forward_grounding")
+        experiment_options.get("answer_forward_grounding")
         and grade.get("verdict") == "partial"
     ):
         best_chunk = _best_chunk_for_answer(state)
@@ -929,7 +929,7 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
     citations = _normalize_citations(payload, chunk_map)
     verdict = state.get("evidence_grade", {}).get("verdict")
     decision = payload.get("decision")
-    ablation_options = state.get("ablation_options", {})
+    experiment_options = state.get("experiment_options", {})
 
     match verdict:
         case "sufficient":
@@ -942,7 +942,7 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
         case "partial":
             if decision == "answer":
                 grounded_answer_allowed = bool(
-                    ablation_options.get("answer_forward_grounding")
+                    experiment_options.get("answer_forward_grounding")
                     and payload.get("response_text")
                     and (citations or best_chunk is not None)
                 )

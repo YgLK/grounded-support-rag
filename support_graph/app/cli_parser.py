@@ -26,7 +26,7 @@ class CliHandlers:
     index_docs: CommandHandler
     run_example: CommandHandler
     eval_split: CommandHandler
-    ablate_smoke10: CommandHandler
+    experiment_smoke10: CommandHandler
     review_failures: CommandHandler
     trace_show: CommandHandler
     serve_ui: CommandHandler
@@ -202,22 +202,22 @@ def _register_eval(subparsers: Subparsers, handlers: CliHandlers) -> None:
     eval_parser.set_defaults(func=handlers.eval_split)
 
 
-def _register_ablation(subparsers: Subparsers, handlers: CliHandlers) -> None:
-    ablation_parser = subparsers.add_parser(
-        "ablate-smoke10",
-        help="Run the DMV Smoke-10 ablation variants and write a comparison note.",
+def _register_experiment(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    experiment_parser = subparsers.add_parser(
+        "experiment-smoke10",
+        help="Run the DMV Smoke-10 experiment variants and write a comparison note.",
     )
-    ablation_parser.add_argument(
+    experiment_parser.add_argument(
         "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
     )
-    ablation_parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
-    ablation_parser.add_argument(
+    experiment_parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
+    experiment_parser.add_argument(
         "--limit",
         type=int,
         default=10,
         help="Number of leading smoke examples to compare. Default 10.",
     )
-    ablation_parser.set_defaults(func=handlers.ablate_smoke10)
+    experiment_parser.set_defaults(func=handlers.experiment_smoke10)
 
 
 def _register_review_failures(subparsers: Subparsers, handlers: CliHandlers) -> None:
@@ -270,7 +270,7 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
         _register_index_docs,
         _register_run,
         _register_eval,
-        _register_ablation,
+        _register_experiment,
         _register_review_failures,
         _register_trace_show,
         _register_ui,
