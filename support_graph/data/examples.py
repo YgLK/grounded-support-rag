@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from support_graph.data._utils import normalize_turn
-from support_graph.types import TargetMode
+from support_graph.types import Dialogue, Example, TargetMode
 
 
 def _target_mode(turn: dict) -> TargetMode:
@@ -25,10 +25,10 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return deduped
 
 
-def build_turn_examples(dialogues: list[dict]) -> list[dict]:
+def build_turn_examples(dialogues: list[Dialogue]) -> list[Example]:
     """Build one example per agent turn."""
 
-    examples: list[dict] = []
+    examples: list[Example] = []
     for dialogue in dialogues:
         domain = str(dialogue["domain"])
         dial_id = str(dialogue["dial_id"])
@@ -75,7 +75,7 @@ def build_turn_examples(dialogues: list[dict]) -> list[dict]:
     return examples
 
 
-def write_examples_jsonl(examples: list[dict], path: str | Path) -> None:
+def write_examples_jsonl(examples: list[Example], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -84,21 +84,29 @@ def write_examples_jsonl(examples: list[dict], path: str | Path) -> None:
             handle.write("\n")
 
 
-def load_examples_jsonl(path: str | Path) -> list[dict]:
+def load_examples_jsonl(path: str | Path) -> list[Example]:
     example_path = Path(path)
     if not example_path.exists():
         raise FileNotFoundError(f"Example artifact not found: {example_path}")
 
-    records: list[dict] = []
+    records: list[Example] = []
     for line in example_path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             records.append(json.loads(line))
     return records
 
 
-def load_example_record(example_id: str, paths: list[str | Path]) -> dict:
+def load_example_record(example_id: str, paths: list[str | Path]) -> Example:
     for path in paths:
         for record in load_examples_jsonl(path):
             if record["example_id"] == example_id:
                 return record
     raise FileNotFoundError(f"Example not found: {example_id}")
+
+
+__all__ = [
+    "build_turn_examples",
+    "write_examples_jsonl",
+    "load_examples_jsonl",
+    "load_example_record",
+]

@@ -9,6 +9,7 @@ import json
 import re
 from collections import Counter
 from datetime import datetime
+from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -21,13 +22,13 @@ from support_graph.artifacts import (
     project_relative_path,
     resolve_project_path,
 )
-from support_graph.logging_utils import get_logger
 from support_graph.config.runtime import (
     RuntimeConfig,
     RuntimeExperimentOverrides,
     apply_runtime_experiment_overrides,
 )
 from support_graph.config.settings import Settings
+from support_graph.logging_utils import get_logger
 from support_graph.data.dataset import load_dialogues
 from support_graph.data.eval_subsets import load_subset_jsonl
 from support_graph.data.examples import (
@@ -48,11 +49,14 @@ from support_graph.runtime.traces import (
     write_trace_event,
 )
 from support_graph.types import (
+    Citation,
     DatasetSplit,
     DatasetSplitLike,
     DomainLike,
     EvalSubset,
     EvalSubsetLike,
+    Example,
+    NormalizedRetrievalHit,
     parse_dataset_split,
     parse_domain,
     parse_eval_subset,
@@ -150,7 +154,7 @@ def sacrebleu_score(prediction: str, reference: str) -> float:
 
 
 def doc_recall_at_k(
-    gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 3
+    gold_doc_ids: list[str], retrieved_chunks: list[NormalizedRetrievalHit], k: int = 3
 ) -> float | None:
     gold = {doc_id for doc_id in gold_doc_ids if doc_id}
     if not gold:
@@ -162,7 +166,7 @@ def doc_recall_at_k(
 
 
 def span_recall_at_k(
-    gold_span_ids: list[str], retrieved_chunks: list[dict], k: int = 5
+    gold_span_ids: list[str], retrieved_chunks: list[NormalizedRetrievalHit], k: int = 5
 ) -> float | None:
     gold = {span_id for span_id in gold_span_ids if span_id}
     if not gold:
@@ -174,7 +178,7 @@ def span_recall_at_k(
 
 
 def mrr_at_k(
-    gold_doc_ids: list[str], retrieved_chunks: list[dict], k: int = 5
+    gold_doc_ids: list[str], retrieved_chunks: list[NormalizedRetrievalHit], k: int = 5
 ) -> float | None:
     gold = {doc_id for doc_id in gold_doc_ids if doc_id}
     if not gold:
@@ -185,7 +189,9 @@ def mrr_at_k(
     return 0.0
 
 
-def citation_coverage(gold_span_ids: list[str], citations: list[dict]) -> float | None:
+def citation_coverage(
+    gold_span_ids: list[str], citations: list[Citation]
+) -> float | None:
     gold = {span_id for span_id in gold_span_ids if span_id}
     if not gold:
         return None
@@ -196,8 +202,8 @@ def citation_coverage(gold_span_ids: list[str], citations: list[dict]) -> float 
 
 
 def citations_map_to_retrieved(
-    citations: list[dict], retrieved_chunks: list[dict]
-) -> bool:
+    citations: list[Citation], retrieved_chunks: list[NormalizedRetrievalHit]
+) -> float:
     retrieved_chunk_ids = {
         chunk.get("chunk_id") for chunk in retrieved_chunks if chunk.get("chunk_id")
     }
@@ -252,7 +258,7 @@ def _load_or_build_examples(
     settings: Any,
     domain: DomainLike,
     split: DatasetSplitLike,
-) -> list[dict]:
+) -> list[Example]:
     resolved_domain = parse_domain(domain)
     resolved_split = parse_dataset_split(split)
     path = settings.paths.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
@@ -273,7 +279,7 @@ def load_eval_examples(
     domain: DomainLike,
     split: DatasetSplitLike,
     subset: EvalSubsetLike,
-) -> tuple[list[dict], str]:
+) -> tuple[list[Example], str]:
     resolved_subset = parse_eval_subset(subset)
     if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_ABLATION}:
         path = (
@@ -684,67 +690,38 @@ def _summary_lines(
 ) -> list[str]:
     retrieval = metrics["retrieval"]["answer"]
     generation = metrics["generation"]["answer"]
-    lines = [
-        "# SupportGraph Eval",
-        "",
-        f"Run: {run_id}",
-        f"Subset: {subset_label}",
-        "",
-        "## What Changed",
-        f"- {notes or 'Phase 4 MVP eval harness run.'}",
-        "",
-        "## Headline Metrics",
-        f"- Doc Recall@3: {_metric_display(retrieval.get('doc_recall_at_3'), retrieval_top_k=retrieval_top_k, metric_k=3)}",
-        f"- Span Recall@5: {_metric_display(retrieval.get('span_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
-        f"- MRR@5: {_metric_display(retrieval.get('mrr_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
-        f"- ROUGE-L: {_metric_display(generation.get('rouge_l'))}",
-        f"- F1: {_metric_display(generation.get('token_f1'))}",
-        f"- Citation coverage: {_metric_display(generation.get('citation_coverage'))}",
-        "",
-        "## Paper-Reference Metrics",
-        f"- Recall@1: {_metric_display(retrieval.get('doc_recall_at_1'), retrieval_top_k=retrieval_top_k, metric_k=1)}",
-        f"- Recall@5: {_metric_display(retrieval.get('doc_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5)}",
-        f"- Recall@10: {_metric_display(retrieval.get('doc_recall_at_10'), retrieval_top_k=retrieval_top_k, metric_k=10)}",
-        f"- Exact Match: {_metric_display(generation.get('exact_match'))}",
-        f"- SacreBLEU: {_metric_display(generation.get('sacrebleu'))}",
-        "",
-        "## Biggest Wins",
-        f"- Retrieval is working over {metrics['counts']['examples']} evaluated examples.",
-        f"- Average latency per example: {(metrics['latency_ms'].get('average') or 0.0):.1f} ms.",
-        "",
-        "## Biggest Regressions",
-    ]
-    if failure_counts:
-        for label, count in sorted(
-            failure_counts.items(), key=lambda item: (-item[1], item[0])
-        )[:5]:
-            lines.append(f"- {label}: {count}")
-    else:
-        lines.append("- No failures recorded in this run.")
+
+    sorted_failures = (
+        sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        if failure_counts
+        else []
+    )
 
     recommendation = "keep"
-    if failure_counts:
-        recommendation = "investigate"
-    if generation.get("end_to_end_success_rate") == 0.0:
+    if failure_counts or generation.get("end_to_end_success_rate") == 0.0:
         recommendation = "investigate"
 
-    lines.extend(
-        [
-            "",
-            "## Recommendation",
-            f"- {recommendation}",
-            "",
-            "## Artifacts",
-            f"- {output_dir / 'manifest.json'}",
-            f"- {output_dir / 'metrics.json'}",
-            f"- {output_dir / 'predictions.jsonl'}",
-            f"- {output_dir / 'failures.jsonl'}",
-            f"- {output_dir / 'manual_review.csv'}",
-            f"- {output_dir / 'retrieval_examples.jsonl'}",
-            f"- {output_dir / 'trace_index.json'}",
-        ]
+    env = Environment(
+        loader=FileSystemLoader(Path(__file__).parent / "templates"),
+        autoescape=False,
     )
-    return lines
+    template = env.get_template("summary.md.j2")
+
+    rendered = template.render(
+        run_id=run_id,
+        subset_label=subset_label,
+        notes=notes,
+        metrics=metrics,
+        retrieval=retrieval,
+        generation=generation,
+        retrieval_top_k=retrieval_top_k,
+        failure_counts=sorted_failures,
+        recommendation=recommendation,
+        output_dir=output_dir,
+        metric_display=_metric_display,
+    )
+
+    return rendered.splitlines()
 
 
 async def _maybe_await_result(value: Any) -> Any:
@@ -1119,3 +1096,22 @@ async def evaluate_split_async(
         now=now,
         max_concurrency=max_concurrency,
     )
+
+
+__all__ = [
+    "load_eval_examples",
+    "build_eval_config",
+    "with_config_overrides",
+    "build_run_id",
+    "evaluate_examples_async",
+    "evaluate_split_async",
+    "doc_recall_at_k",
+    "span_recall_at_k",
+    "mrr_at_k",
+    "citation_coverage",
+    "citations_map_to_retrieved",
+    "rouge_l_f1",
+    "token_f1",
+    "exact_match",
+    "sacrebleu_score",
+]

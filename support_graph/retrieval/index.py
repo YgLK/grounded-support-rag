@@ -14,7 +14,7 @@ from support_graph.providers import (
     ProviderConfigLike,
     build_embeddings as build_provider_embeddings,
 )
-from support_graph.types import DomainLike, parse_domain
+from support_graph.types import ChunkRecord, DomainLike, parse_domain
 
 
 class VectorStoreWithAddDocuments(Protocol):
@@ -52,7 +52,7 @@ def psycopg_connection_string(connection: str) -> str:
     return connection.replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-def load_chunk_records(path: str | Path) -> list[dict]:
+def load_chunk_records(path: str | Path) -> list[ChunkRecord]:
     chunk_path = Path(path)
     if not chunk_path.exists():
         raise FileNotFoundError(f"Chunk artifact not found: {chunk_path}")
@@ -87,7 +87,7 @@ def build_embeddings(
 
 
 def chunk_record_to_document(
-    chunk_record: dict, document_cls: type[Document] | None = None
+    chunk_record: ChunkRecord, document_cls: type[Document] | None = None
 ) -> Document:
     resolved_document_cls = document_cls or Document
     text = str(chunk_record.get("text", ""))
@@ -107,14 +107,13 @@ def chunk_record_to_document(
 
 
 def chunk_records_to_documents(
-    chunk_records: list[dict],
-    document_cls: type[Document] | None = None,
+    chunk_records: list[ChunkRecord], document_cls: type[Document] | None = None
 ) -> tuple[list[Document], list[str]]:
     documents = [
-        chunk_record_to_document(chunk_record, document_cls=document_cls)
+        chunk_record_to_document(chunk_record, document_cls)
         for chunk_record in chunk_records
     ]
-    ids = [str(chunk_record.get("chunk_id", "")) for chunk_record in chunk_records]
+    ids = [chunk_record["chunk_id"] for chunk_record in chunk_records]
     return documents, ids
 
 
@@ -243,3 +242,18 @@ def index_documents(
         ids=vector_ids,
         **vectorstore_kwargs,
     )
+
+
+__all__ = [
+    "build_collection_name",
+    "build_vector_id",
+    "normalize_postgres_connection",
+    "load_chunk_records",
+    "validate_index_config",
+    "build_embeddings",
+    "chunk_record_to_document",
+    "chunk_records_to_documents",
+    "index_documents",
+    "load_indexed_chunk_ids",
+    "collection_row_count",
+]

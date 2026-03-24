@@ -1,0 +1,47 @@
+# SupportGraph Eval
+
+Run: {{ run_id }}
+Subset: {{ subset_label }}
+
+## What Changed
+- {{ notes or 'Phase 4 MVP eval harness run.' }}
+
+## Headline Metrics
+- Doc Recall@3: {{ metric_display(retrieval.get('doc_recall_at_3'), retrieval_top_k=retrieval_top_k, metric_k=3) }}
+- Span Recall@5: {{ metric_display(retrieval.get('span_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- MRR@5: {{ metric_display(retrieval.get('mrr_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- ROUGE-L: {{ metric_display(generation.get('rouge_l')) }}
+- F1: {{ metric_display(generation.get('token_f1')) }}
+- Citation coverage: {{ metric_display(generation.get('citation_coverage')) }}
+
+## Paper-Reference Metrics
+- Recall@1: {{ metric_display(retrieval.get('doc_recall_at_1'), retrieval_top_k=retrieval_top_k, metric_k=1) }}
+- Recall@5: {{ metric_display(retrieval.get('doc_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- Recall@10: {{ metric_display(retrieval.get('doc_recall_at_10'), retrieval_top_k=retrieval_top_k, metric_k=10) }}
+- Exact Match: {{ metric_display(generation.get('exact_match')) }}
+- SacreBLEU: {{ metric_display(generation.get('sacrebleu')) }}
+
+## Biggest Wins
+- Retrieval is working over {{ metrics['counts']['examples'] }} evaluated examples.
+- Average latency per example: {{ "%.1f"|format(metrics['latency_ms'].get('average') or 0.0) }} ms.
+
+## Biggest Regressions
+{% if failure_counts %}
+{% for label, count in failure_counts[:5] %}
+- {{ label }}: {{ count }}
+{% endfor %}
+{% else %}
+- No failures recorded in this run.
+{% endif %}
+
+## Recommendation
+- {{ recommendation }}
+
+## Artifacts
+- {{ output_dir }}/manifest.json
+- {{ output_dir }}/metrics.json
+- {{ output_dir }}/predictions.jsonl
+- {{ output_dir }}/failures.jsonl
+- {{ output_dir }}/manual_review.csv
+- {{ output_dir }}/retrieval_examples.jsonl
+- {{ output_dir }}/trace_index.json

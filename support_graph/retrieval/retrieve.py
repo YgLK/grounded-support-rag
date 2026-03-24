@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Protocol, TypedDict
+from typing import Any
 
 from langchain_community.retrievers import BM25Retriever
 from langchain_postgres import PGVector
@@ -16,50 +16,19 @@ from support_graph.retrieval.index import (
     normalize_postgres_connection,
     validate_index_config,
 )
+from support_graph.types import (
+    Example,
+    NormalizedRetrievalHit,
+    QueryContext,
+    QueryContextTurn,
+    RetrieverLike,
+    VectorStoreLike,
+)
 
 QUERY_TOKEN_STOPWORDS = frozenset(get_stop_words("en"))
 
 
-class QueryContextTurn(TypedDict):
-    role: str
-    utterance: str
-
-
-class QueryContext(TypedDict):
-    domain: str
-    latest_user_need: str
-    last_agent_question: str
-    carry_forward_context: list[QueryContextTurn]
-
-
-class NormalizedRetrievalHit(TypedDict):
-    rank: int
-    original_rank: int
-    chunk_id: str | None
-    domain: str | None
-    doc_id: str | None
-    doc_title: str | None
-    section_id: str | None
-    section_title: str | None
-    parent_titles: list[str]
-    span_ids: list[str]
-    token_count: int | None
-    text: str
-    score: float | None
-    vector_distance: float | None
-
-
-class VectorStoreLike(Protocol):
-    def similarity_search_with_score(
-        self,
-        query: str,
-        *,
-        k: int = 5,
-        filter: dict | None = None,
-    ) -> list[Any]: ...
-
-
-def _conversation_from_example(example: dict) -> list[dict]:
+def _conversation_from_example(example: dict[str, Any]) -> list[dict[str, Any]]:
     if example.get("conversation"):
         return list(example.get("conversation", []))
     if example.get("turns_before_target"):
@@ -67,7 +36,9 @@ def _conversation_from_example(example: dict) -> list[dict]:
     return []
 
 
-def _latest_user_utterance(example: dict, conversation: list[dict]) -> str:
+def _latest_user_utterance(
+    example: dict[str, Any], conversation: list[dict[str, Any]]
+) -> str:
     latest = example.get("latest_user_utterance")
     if latest:
         return str(latest)
@@ -77,7 +48,7 @@ def _latest_user_utterance(example: dict, conversation: list[dict]) -> str:
     return ""
 
 
-def _domain_from_example(example: dict) -> str:
+def _domain_from_example(example: dict[str, Any]) -> str:
     return str(example.get("domain") or "").strip()
 
 
@@ -140,7 +111,23 @@ def _is_duplicate_or_substring_variant(candidate: str, latest_user: str) -> bool
     )
 
 
-def build_query_context(example: dict) -> QueryContext:
+def build_query_context(example: Example | dict[str, Any]) -> QueryContext:
+    """Extract and format essential context from a conversation example.
+
+    This function extracts key dialogue components for document retrieval:
+    - Latest user utterance (the current need)
+    - Last agent question (if it was a clarifying question)
+    - Carry-forward context (up to 2 meaningful prior turns)
+
+    Filters out duplicate phrases and short/meaningless turns to keep context focused.
+
+    Args:
+        example: A dialogue record containing the domain, user utterance, and conversation history.
+
+    Returns:
+        A QueryContext dict containing the domain, latest user need, last agent question,
+        and up to 2 preceding user/agent turns as carry-forward context.
+    """
     conversation = _conversation_from_example(example)
     latest_user = _latest_user_utterance(example, conversation).strip()
     latest_user_index = _find_latest_user_index(example, conversation)
@@ -221,7 +208,7 @@ def _render_query_context(
 
 
 def build_query(
-    example: dict,
+    example: Example | dict[str, Any],
     history_turn_limit: int = 4,
     *,
     include_history: bool = True,
@@ -241,7 +228,7 @@ def build_query(
 
 
 def build_legacy_query(
-    example: dict,
+    example: Example | dict[str, Any],
     history_turn_limit: int = 4,
     *,
     include_history: bool = True,
@@ -286,16 +273,30 @@ def query_context_tokens(context: QueryContext) -> set[str]:
 def build_metadata_filter(
     *,
     domain: str | None = None,
-    doc_id: str | None = None,
-    doc_ids: list[str] | None = None,
+    doc_ids: list[str] | str | None = None,
 ) -> dict | None:
+    """Construct a metadata filter dictionary for vector search.
+
+    Translates basic criteria into vector store-compatible filters:
+    - Sets exact `domain` matching
+    - Deduplicates and handles single vs. multiple (`$in`) `doc_id` filters
+
+    Args:
+        domain: Domain string to filter by (e.g., 'dmv').
+        doc_ids: Optional document ID or list of permissible document IDs.
+
+    Returns:
+        Filter criteria dictionary, or None if empty.
+    """
     filters: dict[str, Any] = {}
     if domain:
         filters["domain"] = domain
 
-    values = [value for value in (doc_ids or []) if value]
-    if doc_id:
-        values.append(doc_id)
+    values = []
+    if isinstance(doc_ids, str):
+        values = [doc_ids]
+    elif doc_ids:
+        values = [value for value in doc_ids if value]
     deduped_values = list(dict.fromkeys(values))
 
     if len(deduped_values) == 1:
@@ -324,6 +325,19 @@ def _document_page_content_and_metadata(
 
 
 def normalize_retrieval_hits(hits: list[Any]) -> list[NormalizedRetrievalHit]:
+    """Standardize hit objects from different retrievers into a common format.
+
+    Unwraps diverse formats into a unified `NormalizedRetrievalHit` dictionary:
+    - Tuples of `(Document, score)`
+    - Dictionary representations
+    - Objects with `page_content` and `metadata`
+
+    Args:
+        hits: Raw hit objects from vector or BM25 retrievers.
+
+    Returns:
+        List of standardized NormalizedRetrievalHit dictionaries.
+    """
     normalized: list[NormalizedRetrievalHit] = []
     for index, hit in enumerate(hits, start=1):
         document, score = _hit_document_and_score(hit)
@@ -360,10 +374,23 @@ def _overlap_count(query_tokens: set[str], text: str) -> int:
 
 
 def rerank_retrieval_hits(
-    hits: list[dict],
+    hits: list[NormalizedRetrievalHit],
     *,
     query_context: QueryContext | None = None,
-) -> list[dict]:
+) -> list[NormalizedRetrievalHit]:
+    """Rerank retrieval results using a heuristic scoring algorithm.
+
+    Applies custom heuristics to sort chunks from multiple retrievers:
+    - Penalizes chunks with low text/title overlap with query context
+    - Awards bonuses to title chunks, short chunks, and single-span chunks
+
+    Args:
+        hits: List of NormalizedRetrievalHit dicts.
+        query_context: Optional context for measuring token overlap.
+
+    Returns:
+        Hits sorted by `rerank_score` with updated `rank` attributes.
+    """
     reranked = [dict(hit) for hit in hits]
     query_tokens = query_context_tokens(query_context or {})
 
@@ -452,15 +479,16 @@ def _normalized_bm25_hits(
     retriever: BM25Retriever | None,
     query: str,
     domain: str,
-    doc_id: str | None,
-    doc_ids: list[str] | None,
+    doc_ids: list[str] | str | None,
 ) -> list[NormalizedRetrievalHit]:
     if retriever is None:
         return []
 
-    allowed_doc_ids = {value for value in (doc_ids or []) if value}
-    if doc_id:
-        allowed_doc_ids.add(doc_id)
+    allowed_doc_ids = set()
+    if isinstance(doc_ids, str):
+        allowed_doc_ids.add(doc_ids)
+    elif doc_ids:
+        allowed_doc_ids.update(value for value in doc_ids if value)
 
     hits: list[Any] = []
     for hit in retriever.invoke(query):
@@ -475,19 +503,42 @@ def _normalized_bm25_hits(
 
 def retrieve_chunks(
     *,
-    example: dict,
+    example: Example | dict[str, Any],
     vectorstore: VectorStoreLike | None = None,
-    keyword_retriever: BM25Retriever | None = None,
+    keyword_retriever: RetrieverLike | None = None,
     config: RuntimeConfig | None = None,
     top_k: int = 5,
     candidate_k: int | None = None,
     query: str | None = None,
     query_context: QueryContext | None = None,
     domain: str | None = None,
-    doc_id: str | None = None,
-    doc_ids: list[str] | None = None,
+    doc_ids: list[str] | str | None = None,
     rerank: bool = True,
-) -> list[dict]:
+) -> list[NormalizedRetrievalHit]:
+    """Execute the end-to-end document retrieval pipeline.
+
+    Pipeline stages:
+    - Dense vector search (primary)
+    - Optional BM25 keyword search (supplementary)
+    - Hit normalization and deduplication by chunk ID
+    - Optional heuristic reranking
+
+    Args:
+        example: Dialogue example used for query/context generation.
+        vectorstore: Vector store instance to query.
+        keyword_retriever: Optional BM25 retriever.
+        config: Runtime configuration for defaults.
+        top_k: Final number of chunks to return.
+        candidate_k: Number of pre-rerank candidates.
+        query: Explicit query string (overrides example-based generation).
+        query_context: Explicit context for reranking.
+        domain: Domain filter (overrides example-based generation).
+        doc_ids: Optional exact document ID or list of allowed document IDs.
+        rerank: Whether to apply heuristic reranking to candidates.
+
+    Returns:
+        List of top_k normalized chunk dicts, sorted by relevance.
+    """
     resolved_query_context = query_context or build_query_context(example)
     resolved_query = query or build_query(example, include_labels=False)
     resolved_domain = domain or _domain_from_example(example)
@@ -500,7 +551,6 @@ def retrieve_chunks(
     resolved_candidate_k = max(resolved_top_k, int(resolved_candidate_k))
     metadata_filter = build_metadata_filter(
         domain=resolved_domain,
-        doc_id=doc_id,
         doc_ids=doc_ids,
     )
 
@@ -520,7 +570,6 @@ def retrieve_chunks(
         retriever=keyword_retriever,
         query=resolved_query,
         domain=resolved_domain,
-        doc_id=doc_id,
         doc_ids=doc_ids,
     )
     if bm25_hits:
@@ -536,3 +585,16 @@ def retrieve_chunks(
         normalized_hits, query_context=resolved_query_context
     )
     return reranked_hits[:resolved_top_k]
+
+
+__all__ = [
+    "build_query_context",
+    "build_query",
+    "build_legacy_query",
+    "build_metadata_filter",
+    "normalize_retrieval_hits",
+    "rerank_retrieval_hits",
+    "retrieve_chunks",
+    "get_vectorstore",
+    "build_keyword_retriever",
+]

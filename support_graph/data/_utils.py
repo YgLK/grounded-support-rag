@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Iterable, cast
+from typing import Any, Iterable, cast
 
-from support_graph.types import Domain, DomainLike, TurnRole, parse_domain
+from support_graph.types import (
+    DialogueTurn,
+    Domain,
+    DomainLike,
+    Reference,
+    TurnRole,
+    parse_domain,
+)
 
 
 SUPPORTED_TURN_ROLES = frozenset({"agent", "user"})
@@ -47,7 +54,7 @@ def _normalize_turn_role(value: object) -> TurnRole:
     return cast(TurnRole, normalized)
 
 
-def normalize_reference(reference: dict) -> dict:
+def normalize_reference(reference: dict[str, Any]) -> Reference:
     label = _required_value(reference, "label")
     id_sp = _required_value(reference, "id_sp")
     doc_id = _required_value(reference, "doc_id")
@@ -58,7 +65,7 @@ def normalize_reference(reference: dict) -> dict:
     }
 
 
-def normalize_turn(turn: dict) -> dict:
+def normalize_turn(turn: dict[str, Any]) -> DialogueTurn:
     references = _required_list(turn, "references")
     role = _required_value(turn, "role")
     da = _required_value(turn, "da")

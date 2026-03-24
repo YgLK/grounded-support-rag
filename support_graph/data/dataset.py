@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Iterator, cast
+from typing import Any, Iterable, Iterator, cast
 
 from support_graph.data._utils import normalize_domains, normalize_turn
 from support_graph.types import (
     DatasetSplitLike,
+    Dialogue,
+    Document,
+    DocumentSpan,
     DomainLike,
     parse_dataset_split,
     parse_domain,
@@ -54,7 +57,7 @@ def _require_value(record: dict, field: str) -> object:
     return value
 
 
-def _normalize_span(span: dict) -> dict:
+def _normalize_span(span: dict[str, Any]) -> DocumentSpan:
     parent_titles = _require_list(span.get("parent_titles"), "parent_titles")
     tag = _require_value(span, "tag")
     text_sp = _require_value(span, "text_sp")
@@ -82,7 +85,7 @@ def _normalize_span(span: dict) -> dict:
 def load_documents(
     dataset_root: str | Path,
     domains: Iterable[DomainLike] | DomainLike | None = None,
-) -> list[dict]:
+) -> list[Document]:
     """Load raw MultiDoc2Dial documents.
 
     The returned records preserve source metadata and add a normalized, sorted
@@ -93,7 +96,7 @@ def load_documents(
     domain_filter = normalize_domains(domains)
     payload = _load_json(dataset_root / DOC_FILENAME)
     doc_data = _require_dict(payload.get("doc_data"), "doc_data")
-    documents: list[dict] = []
+    documents: list[Document] = []
 
     for domain, docs in _sorted_items(doc_data):
         resolved_domain = parse_domain(domain)
@@ -138,7 +141,7 @@ def load_dialogues(
     dataset_root: str | Path,
     split: DatasetSplitLike,
     domains: Iterable[DomainLike] | DomainLike | None = None,
-) -> list[dict]:
+) -> list[Dialogue]:
     """Load raw MultiDoc2Dial dialogue records for a split."""
 
     dataset_root = Path(dataset_root)
@@ -148,7 +151,7 @@ def load_dialogues(
         dataset_root / DIAL_FILENAME_TEMPLATE.format(split=resolved_split)
     )
     dial_data = _require_dict(payload.get("dial_data"), "dial_data")
-    dialogues: list[dict] = []
+    dialogues: list[Dialogue] = []
 
     for domain, dials in _sorted_items(dial_data):
         resolved_domain = parse_domain(domain)
@@ -174,3 +177,9 @@ def load_dialogues(
             )
 
     return dialogues
+
+
+__all__ = [
+    "load_documents",
+    "load_dialogues",
+]

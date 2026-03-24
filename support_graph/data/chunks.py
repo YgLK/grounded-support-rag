@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from support_graph.data._utils import normalize_domains
+from support_graph.types import ChunkRecord, Document
 
 
 _MISSING_POSITION = 10**18
@@ -44,13 +45,13 @@ def _section_sort_key(section: dict) -> tuple:
 
 
 def _chunk_record(
-    document: dict,
-    section: dict,
+    document: dict[str, Any],
+    section: dict[str, Any],
     *,
     subchunk_index: int,
     text: str,
-    spans: list[dict],
-) -> dict:
+    spans: list[dict[str, Any]],
+) -> ChunkRecord:
     text = text.strip()
     return {
         "chunk_id": f"{document['domain']}::{document['doc_id']}::sec::{section['section_id']}::sub::{subchunk_index}",
@@ -69,7 +70,7 @@ def _chunk_record(
     }
 
 
-def _group_sections(document: dict) -> list[dict]:
+def _group_sections(document: dict[str, Any]) -> list[dict[str, Any]]:
     section_map: dict[str, list[dict]] = defaultdict(list)
     heading_context_by_title: dict[str, list[str]] = {}
     for span in document["spans"]:
@@ -120,8 +121,8 @@ def _group_sections(document: dict) -> list[dict]:
 
 
 def _emit_section_chunks(
-    document: dict, section: dict, max_tokens_per_chunk: int
-) -> list[dict]:
+    document: dict[str, Any], section: dict[str, Any], max_tokens_per_chunk: int
+) -> list[ChunkRecord]:
     spans = section["spans"]
     if not spans:
         text = section["text"] or document["doc_text"]
@@ -171,10 +172,10 @@ def _emit_section_chunks(
 
 
 def build_chunks(
-    documents: list[dict],
+    documents: list[Document],
     max_tokens_per_chunk: int = 512,
     domains: Iterable[str] | str | None = None,
-) -> list[dict]:
+) -> list[ChunkRecord]:
     """Build deterministic section-aware chunks from document records.
 
     `max_tokens_per_chunk` is enforced with the local approximation in
@@ -184,7 +185,7 @@ def build_chunks(
     if max_tokens_per_chunk <= 0:
         raise ValueError("max_tokens_per_chunk must be positive.")
     domain_filter = normalize_domains(domains)
-    chunks: list[dict] = []
+    chunks: list[ChunkRecord] = []
 
     for document in documents:
         if domain_filter is not None and document["domain"] not in domain_filter:
@@ -196,10 +197,16 @@ def build_chunks(
     return chunks
 
 
-def write_chunks_jsonl(chunks: list[dict], path: str | Path) -> None:
+def write_chunks_jsonl(chunks: list[ChunkRecord], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for chunk in chunks:
             handle.write(json.dumps(chunk, ensure_ascii=True))
             handle.write("\n")
+
+
+__all__ = [
+    "build_chunks",
+    "write_chunks_jsonl",
+]
