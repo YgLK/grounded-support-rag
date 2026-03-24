@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-support-graph = "support_graph.app.cli:main"
+support-graph = "support_graph.cli.handlers:main"
 
 [tool.setuptools.packages.find]
 include = ["support_graph*"]
