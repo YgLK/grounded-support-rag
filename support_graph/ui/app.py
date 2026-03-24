@@ -8,41 +8,21 @@ from pathlib import Path
 from typing import cast
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from support_graph.config.settings import Settings
-from support_graph.ui.live import (
-    LiveRunConfigurationError,
-    LiveRunExampleNotFoundError,
-    iter_live_run_stream,
-    prepare_live_run_session,
-)
+from support_graph.ui.dependencies import init_dependencies
 from support_graph.ui.loaders import (
     ArtifactNotFoundError,
     InvalidArtifactError,
     WorkbenchArtifactLoader,
     build_loader,
 )
-from support_graph.ui.models import (
-    ArtifactExplorerView,
-    EvalFailureTableView,
-    EvalReportDetailView,
-    EvalReportListView,
-    EvalRunDetailView,
-    EvalRunListView,
-    EvalRunSummary,
-    ExampleDetailView,
-    FailureLabel,
-    SortOrder,
-    StandaloneRunDetailView,
-    StandaloneRunListView,
-    TargetMode,
-)
+from support_graph.ui.routers import api, live_routes, pages
 
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-TARGET_MODE_OPTIONS: tuple[TargetMode, ...] = ("answer", "follow_up")
 
 
 def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
@@ -50,6 +30,8 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
     ui_settings = cast(Settings, artifact_loader.settings)
     templates = _build_templates()
     app = FastAPI(title="SupportGraph Workbench")
+
+    init_dependencies(artifact_loader, templates, ui_settings)
 
     @app.exception_handler(ArtifactNotFoundError)
     async def _handle_not_found(
@@ -75,360 +57,11 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
             status_code=409,
         )
 
-    @app.get("/api/artifacts", response_model=ArtifactExplorerView)
-    def artifact_explorer(
-        domain: str | None = None,
-        subset: str | None = None,
-        provider: str | None = None,
-        chat_model: str | None = None,
-        order: SortOrder = "desc",
-    ) -> ArtifactExplorerView:
-        return artifact_loader.artifact_explorer(
-            domain=domain,
-            subset=subset,
-            provider=provider,
-            chat_model=chat_model,
-            order=order,
-        )
-
-    @app.get("/api/evals", response_model=EvalRunListView)
-    def list_eval_runs(
-        domain: str | None = None,
-        subset: str | None = None,
-        provider: str | None = None,
-        chat_model: str | None = None,
-        order: SortOrder = "desc",
-    ) -> EvalRunListView:
-        return artifact_loader.list_eval_runs(
-            domain=domain,
-            subset=subset,
-            provider=provider,
-            chat_model=chat_model,
-            order=order,
-        )
-
-    @app.get("/api/evals/{run_id}", response_model=EvalRunDetailView)
-    def eval_run_detail(run_id: str) -> EvalRunDetailView:
-        return artifact_loader.load_eval_run(run_id)
-
-    @app.get("/api/evals/{run_id}/failures", response_model=EvalFailureTableView)
-    def eval_failures(
-        run_id: str,
-        label: FailureLabel | None = None,
-        target_mode: TargetMode | None = None,
-    ) -> EvalFailureTableView:
-        return artifact_loader.load_eval_failures(
-            run_id,
-            failure_label=label,
-            target_mode=target_mode,
-        )
-
-    @app.get(
-        "/api/evals/{run_id}/examples/{example_id}",
-        response_model=ExampleDetailView,
-    )
-    def eval_example_detail(run_id: str, example_id: str) -> ExampleDetailView:
-        return artifact_loader.load_eval_example(run_id, example_id)
-
-    @app.get("/api/runs", response_model=StandaloneRunListView)
-    def list_standalone_runs(order: SortOrder = "desc") -> StandaloneRunListView:
-        return artifact_loader.list_standalone_runs(order=order)
-
-    @app.get("/api/runs/{run_id}", response_model=StandaloneRunDetailView)
-    def standalone_run_detail(run_id: str) -> StandaloneRunDetailView:
-        return artifact_loader.load_standalone_run(run_id)
-
-    @app.get("/api/reports", response_model=EvalReportListView)
-    def list_reports(order: SortOrder = "desc") -> EvalReportListView:
-        return artifact_loader.list_eval_reports(order=order)
-
-    @app.get("/api/reports/{report_id}", response_model=EvalReportDetailView)
-    def report_detail(report_id: str) -> EvalReportDetailView:
-        return artifact_loader.load_eval_report(report_id)
-
-    @app.get("/", response_class=HTMLResponse)
-    def workbench_home(
-        request: Request,
-        domain: str | None = None,
-        subset: str | None = None,
-        provider: str | None = None,
-        chat_model: str | None = None,
-        order: SortOrder = "desc",
-    ) -> HTMLResponse:
-        explorer = artifact_loader.artifact_explorer(
-            domain=domain,
-            subset=subset,
-            provider=provider,
-            chat_model=chat_model,
-            order=order,
-        )
-        if _is_htmx(request):
-            return _template_response(
-                templates,
-                request,
-                "partials/artifact_sections.html",
-                {"explorer": explorer},
-            )
-        filter_options = _artifact_filter_options(
-            artifact_loader.list_eval_runs(order="desc").items
-        )
-        return _template_response(
-            templates,
-            request,
-            "pages/home.html",
-            _page_context(
-                title="Artifact Explorer",
-                active_nav="artifacts",
-                explorer=explorer,
-                filter_options=filter_options,
-                current_filters={
-                    "domain": domain or "",
-                    "subset": subset or "",
-                    "provider": provider or "",
-                    "chat_model": chat_model or "",
-                    "order": order,
-                },
-            ),
-        )
-
-    @app.get("/evals/{run_id}", response_class=HTMLResponse)
-    def eval_run_page(request: Request, run_id: str) -> HTMLResponse:
-        detail = artifact_loader.load_eval_run(run_id)
-        example_index = {
-            entry.example_id: entry for entry in detail.trace_index_entries
-        }
-        failure_rows = [
-            {
-                "record": record,
-                "trace_entry": example_index.get(record.example_id),
-            }
-            for record in detail.failures[:8]
-        ]
-        return _template_response(
-            templates,
-            request,
-            "pages/eval_detail.html",
-            _page_context(
-                title=f"Eval {run_id}",
-                active_nav="artifacts",
-                detail=detail,
-                failure_rows=failure_rows,
-                failure_buckets=_sorted_failure_counts(detail.metrics.failure_counts),
-            ),
-        )
-
-    @app.get("/evals/{run_id}/failures", response_class=HTMLResponse)
-    def eval_failures_page(
-        request: Request,
-        run_id: str,
-        label: FailureLabel | None = None,
-        target_mode: TargetMode | None = None,
-    ) -> HTMLResponse:
-        table = artifact_loader.load_eval_failures(
-            run_id,
-            failure_label=label,
-            target_mode=target_mode,
-        )
-        if _is_htmx(request):
-            return _template_response(
-                templates,
-                request,
-                "partials/failure_table.html",
-                {
-                    "table": table,
-                    "run_id": run_id,
-                },
-            )
-        labels = _failure_label_options(table)
-        return _template_response(
-            templates,
-            request,
-            "pages/eval_failures.html",
-            _page_context(
-                title=f"Failures {run_id}",
-                active_nav="artifacts",
-                table=table,
-                run_id=run_id,
-                available_failure_labels=labels,
-                target_mode_options=TARGET_MODE_OPTIONS,
-            ),
-        )
-
-    @app.get(
-        "/evals/{run_id}/examples/{example_id}",
-        response_class=HTMLResponse,
-    )
-    def eval_example_page(
-        request: Request,
-        run_id: str,
-        example_id: str,
-    ) -> HTMLResponse:
-        detail = artifact_loader.load_eval_example(run_id, example_id)
-        return _template_response(
-            templates,
-            request,
-            "pages/example_detail.html",
-            _page_context(
-                title=f"Example {example_id}",
-                active_nav="artifacts",
-                detail=detail,
-            ),
-        )
-
-    @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def standalone_run_page(request: Request, run_id: str) -> HTMLResponse:
-        detail = artifact_loader.load_standalone_run(run_id)
-        return _template_response(
-            templates,
-            request,
-            "pages/run_detail.html",
-            _page_context(
-                title=f"Run {run_id}",
-                active_nav="artifacts",
-                detail=detail,
-            ),
-        )
-
-    @app.get("/reports/{report_id}", response_class=HTMLResponse)
-    def report_page(request: Request, report_id: str) -> HTMLResponse:
-        detail = artifact_loader.load_eval_report(report_id)
-        return _template_response(
-            templates,
-            request,
-            "pages/report_detail.html",
-            _page_context(
-                title=detail.summary.title,
-                active_nav="artifacts",
-                detail=detail,
-            ),
-        )
-
-    @app.get("/live", response_class=HTMLResponse)
-    def live_page(request: Request) -> HTMLResponse:
-        return _template_response(
-            templates,
-            request,
-            "pages/live.html",
-            _page_context(
-                title="Live Run",
-                active_nav="live",
-            ),
-        )
-
-    @app.get("/live/session", response_class=HTMLResponse)
-    def live_session(request: Request, example_id: str) -> HTMLResponse:
-        cleaned_example_id = example_id.strip()
-        if not cleaned_example_id:
-            return _template_response(
-                templates,
-                request,
-                "partials/live_error.html",
-                {"detail": "Enter an example id to start a live run."},
-                status_code=400,
-            )
-        try:
-            session = prepare_live_run_session(
-                ui_settings,
-                example_id=cleaned_example_id,
-            )
-        except LiveRunConfigurationError as exc:
-            return _template_response(
-                templates,
-                request,
-                "partials/live_error.html",
-                {"detail": str(exc)},
-                status_code=400,
-            )
-        except LiveRunExampleNotFoundError as exc:
-            return _template_response(
-                templates,
-                request,
-                "partials/live_error.html",
-                {"detail": str(exc)},
-                status_code=404,
-            )
-        return _template_response(
-            templates,
-            request,
-            "partials/live_session.html",
-            {"session": session},
-        )
-
-    @app.get("/live/stream")
-    async def live_stream(example_id: str, run_id: str) -> StreamingResponse:
-        headers = {
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-        return StreamingResponse(
-            iter_live_run_stream(
-                ui_settings,
-                example_id=example_id,
-                run_id=run_id,
-            ),
-            headers=headers,
-            media_type="text/event-stream",
-        )
+    app.include_router(api.router)
+    app.include_router(live_routes.router)
+    app.include_router(pages.router)
 
     return app
-
-
-def _artifact_filter_options(items: list[EvalRunSummary]) -> dict[str, list[str]]:
-    return {
-        "domains": sorted({domain for item in items for domain in item.domains}),
-        "subsets": sorted({item.subset_label for item in items}),
-        "providers": sorted({item.provider.type for item in items}),
-        "chat_models": sorted(
-            {
-                item.provider.chat_model
-                for item in items
-                if item.provider.chat_model is not None
-            }
-        ),
-    }
-
-
-def _failure_label_options(table: EvalFailureTableView) -> list[str]:
-    labels = {str(label) for label in table.failure_counts}
-    labels.update(str(item.failure_label) for item in table.items)
-    return sorted(labels)
-
-
-def _sorted_failure_counts(failure_counts: dict[str, int]) -> list[tuple[str, int]]:
-    return sorted(
-        failure_counts.items(),
-        key=lambda item: (-item[1], item[0]),
-    )
-
-
-def _page_context(
-    *,
-    title: str,
-    active_nav: str,
-    **extra: object,
-) -> dict[str, object]:
-    return {
-        "page_title": title,
-        "active_nav": active_nav,
-        **extra,
-    }
-
-
-def _template_response(
-    templates: Jinja2Templates,
-    request: Request,
-    name: str,
-    context: dict[str, object],
-    *,
-    status_code: int = 200,
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name=name,
-        context={"request": request, **context},
-        status_code=status_code,
-    )
 
 
 def _build_templates() -> Jinja2Templates:
@@ -482,6 +115,35 @@ def _is_api_request(request: Request) -> bool:
 
 def _is_htmx(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
+
+
+def _template_response(
+    templates: Jinja2Templates,
+    request: Request,
+    name: str,
+    context: dict[str, object],
+    *,
+    status_code: int = 200,
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name=name,
+        context={"request": request, **context},
+        status_code=status_code,
+    )
+
+
+def _page_context(
+    *,
+    title: str,
+    active_nav: str,
+    **extra: object,
+) -> dict[str, object]:
+    return {
+        "page_title": title,
+        "active_nav": active_nav,
+        **extra,
+    }
 
 
 def _datetime_label(value: datetime | str | None) -> str:

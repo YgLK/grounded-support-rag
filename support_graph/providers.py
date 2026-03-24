@@ -31,13 +31,9 @@ class ProviderConfigLike(Protocol):
 
 
 def normalize_provider_type(value: str | Provider | None) -> Provider:
-    if value is None:
-        return DEFAULT_PROVIDER_TYPE
     if isinstance(value, Provider):
         return value
     normalized = str(value).strip()
-    if not normalized:
-        return DEFAULT_PROVIDER_TYPE
     return Provider.parse(normalized)
 
 
