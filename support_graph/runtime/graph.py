@@ -239,6 +239,11 @@ def _initial_state(
 
 
 def _build_graph_app(runtime: Runtime, *, run_started: float) -> Any:
+    """Construct and compile the LangGraph workflow.
+
+    Wires together all nodes (routing, retrieval, grading, generation) with
+    conditional edges that dictate the control flow.
+    """
     graph_builder = StateGraph(GraphState)
 
     async def route_query_node(state: GraphState) -> GraphState:
@@ -539,6 +544,13 @@ async def run_graph_async(
     _stream_responses: bool = False,
     _runtime_resources: RuntimeResources | None = None,
 ) -> dict:
+    """Execute a single example through the full retrieval-augmented generation graph.
+
+    - Initializes shared resources (vectorstore, chat model, tracing)
+    - Compiles the LangGraph application
+    - Executes the graph from start to finish
+    - Normalizes the output state into a final dictionary payload
+    """
     run_started = time.perf_counter()
     logger.info(
         "Starting graph run for example=%s domain=%s",
@@ -602,6 +614,12 @@ async def astream_graph_events(
     vectorstore: Any = None,
     chat_model: Any = None,
 ) -> AsyncIterator[GraphStreamEvent]:
+    """Stream real-time events from the graph execution.
+
+    Wraps `run_graph_async` with an async queue to yield milestone events
+    (e.g., query generated, chunks retrieved) and generation token deltas
+    as they occur. This is primarily used by live UI/CLI tools.
+    """
     queue: asyncio.Queue[GraphStreamEvent | None] = asyncio.Queue()
 
     async def event_sink(event: GraphStreamEvent) -> None:

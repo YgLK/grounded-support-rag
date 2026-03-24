@@ -653,7 +653,12 @@ def _build_evidence_chunks(
 
 
 async def route_query(*, state: GraphState, runtime: Runtime) -> dict:
-    """Classify the user intent into chitchat or document_query."""
+    """Classify the user intent into chitchat or document_query.
+
+    - Fast path that filters out conversational noise before expensive retrieval
+    - Returns a routing dict with 'intent' and 'reason'
+    - Falls back to 'document_query' if the LLM fails or is disabled
+    """
     if not _llm_available(runtime):
         return {"intent": "document_query", "reason": "No LLM available for routing."}
 
@@ -675,8 +680,9 @@ async def route_query(*, state: GraphState, runtime: Runtime) -> dict:
 def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     """Build the retrieval query string and context from conversation state.
 
-    Returns a tuple of (query_string, query_context) based on the configured
-    query mode in experiment_options.
+    - Extracts contextual keywords from recent turns based on configured `query_mode`
+    - Modes include: legacy full transcript, latest turn only, or structured extraction
+    - Returns a tuple of (query_string, query_context_dict)
     """
     del runtime
     query_example = _query_example_from_state(state)
@@ -703,6 +709,12 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
 
 
 async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
+    """Execute vector and keyword search to find relevant documentation.
+
+    - Dispatches to the underlying retrieval pipeline using the prepared query
+    - Handles vector similarities, BM25 keyword matching, deduplication, and reranking
+    - Results are added to state as `retrieval_ranked_chunks`
+    """
     experiment_options = state.get("experiment_options", {})
     query = state.get("refined_query") or state.get("query")
     if query is None:
@@ -731,6 +743,12 @@ async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
 
 
 async def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
+    """Evaluate whether retrieved chunks sufficiently answer the user's need.
+
+    - Calls an LLM to grade evidence as 'sufficient', 'partial', or 'insufficient'
+    - Identifies specific missing information if the grade is 'partial'
+    - Falls back to heuristic length-based grading if the LLM fails
+    """
     retrieved_chunks = _reasoning_chunks(state)
     if not retrieved_chunks:
         return _heuristic_evidence_grade(retrieved_chunks)
@@ -760,6 +778,12 @@ async def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
 
 
 def refine_query(*, state: GraphState, runtime: Runtime) -> str:
+    """Improve the search query based on missing information from the grader.
+
+    - Appends missing conditions or focus section titles to the original query
+    - Triggered when evidence is graded 'partial' and max attempts aren't reached
+    - Output loops back into a subsequent `retrieve_docs` pass
+    """
     del runtime
     current_query = state.get("query") or ""
     grade = state.get("evidence_grade", {})
@@ -788,6 +812,12 @@ def refine_query(*, state: GraphState, runtime: Runtime) -> str:
 
 
 async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
+    """Generate the final grounded answer using retrieved evidence.
+
+    - Only called when evidence is graded 'sufficient'
+    - Uses streaming generation if enabled to yield fast token deltas
+    - Enforces citation constraints and falls back to deterministic heuristic answers on failure
+    """
     retrieved_chunks = _reasoning_chunks(state)
     grade = state.get("evidence_grade", {})
     if not _llm_available(runtime):
@@ -846,6 +876,12 @@ async def generate_response(*, state: GraphState, runtime: Runtime) -> dict:
 
 
 async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict:
+    """Handle edge cases where no confident answer can be generated.
+
+    - Triggered for chitchat, insufficient evidence, or partial evidence after max retries
+    - Uses an LLM to generate polite clarification requests or abstentions
+    - Will opportunistically ground partial answers if 'answer_forward_grounding' is enabled
+    """
     retrieved_chunks = _reasoning_chunks(state)
     grade = state.get("evidence_grade", {})
     experiment_options = state.get("experiment_options", {})
@@ -916,6 +952,12 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
 
 
 def finalize(*, state: GraphState, payload: dict) -> dict:
+    """Enforce strict post-generation constraints on the final response.
+
+    - Normalizes citation IDs and ensures they map to actual retrieved chunks
+    - Overrides LLM decisions if they contradict the evidence grade (e.g., answering on insufficient evidence)
+    - Returns the cleaned payload ready for presentation
+    """
     payload = {
         **payload,
         "response_text": str(payload.get("response_text", "")).strip(),

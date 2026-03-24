@@ -12,10 +12,6 @@ from tenacity.wait import wait_exponential_jitter
 
 
 _T = TypeVar("_T")
-_RETRYABLE_MESSAGE_PATTERN = re.compile(
-    r"(429|rate limit|timeout|temporar|try again|connection|unavailable|bad gateway|service unavailable|internal server error)",
-    re.IGNORECASE,
-)
 
 
 class LLMCallTimeoutError(TimeoutError):
@@ -36,30 +32,39 @@ def _exception_status_code(exc: BaseException) -> int | None:
 
 
 def is_retryable_exception(exc: BaseException) -> bool:
+    """Determine if an LLM call failure is safe to retry.
+
+    - Returns False for intentional timeouts (LLMCallTimeoutError)
+    - Returns True for connection errors, HTTP 429 rate limits, or HTTP 5xx errors
+    - Uses regex only as a fallback for transient unstructured error text
+    """
     if isinstance(exc, LLMCallTimeoutError):
         return False
     if isinstance(exc, (TimeoutError, ConnectionError, asyncio.TimeoutError, OSError)):
         return True
 
-    exception_name = type(exc).__name__.lower()
-    if exception_name in {
+    retryable_exception_names = {
         "connecttimeout",
         "readtimeout",
         "apiconnectionerror",
         "internalservererror",
         "serviceunavailableerror",
         "ratelimiterror",
-    }:
+    }
+    retryable_message_pattern = re.compile(
+        r"(temporar(?:y|ily)|try again|connection (?:reset|aborted|dropped)|tim(?:e|ed) out)",
+        re.IGNORECASE,
+    )
+
+    exception_name = type(exc).__name__.lower()
+    if exception_name in retryable_exception_names:
         return True
 
     status_code = _exception_status_code(exc)
-    if status_code == 429:
+    if status_code is not None and (status_code == 429 or 500 <= status_code < 600):
         return True
-    if status_code is not None and 500 <= status_code < 600:
-        return True
-    if _RETRYABLE_MESSAGE_PATTERN.search(str(exc)):
-        return True
-    return False
+
+    return bool(retryable_message_pattern.search(str(exc)))
 
 
 async def ainvoke_with_retry(
@@ -70,6 +75,13 @@ async def ainvoke_with_retry(
     base_delay_seconds: float,
     max_delay_seconds: float,
 ) -> _T:
+    """Execute an async LLM call with a configured retry and timeout policy.
+
+    - Wraps the call in `asyncio.wait_for` if a timeout is configured
+    - Uses `tenacity` for exponential backoff with jitter
+    - Only retries exceptions that pass `is_retryable_exception`
+    - Reraises the final exception if max attempts are exceeded
+    """
     if max_attempts <= 0:
         raise ValueError("max_attempts must be positive.")
     if base_delay_seconds < 0.0:
