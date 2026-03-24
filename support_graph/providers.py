@@ -9,6 +9,21 @@ from langchain.embeddings import init_embeddings
 
 from support_graph.types import ChoiceStrEnum
 
+__all__ = [
+    "DEFAULT_PROVIDER_TYPE",
+    "DEFAULT_OPENROUTER_BASE_URL",
+    "Provider",
+    "ProviderConfigLike",
+    "build_chat_model",
+    "build_embeddings",
+    "chat_provider",
+    "chat_provider_base_url",
+    "embedding_provider",
+    "embedding_provider_base_url",
+    "normalize_provider_type",
+    "validate_chat_provider_type",
+]
+
 
 class Provider(ChoiceStrEnum):
     OLLAMA = "ollama"
@@ -179,19 +194,3 @@ def build_embeddings(
         provider=_langchain_provider_name(provider),
         **_embedding_provider_kwargs(config, provider),
     )
-
-
-__all__ = [
-    "DEFAULT_PROVIDER_TYPE",
-    "DEFAULT_OPENROUTER_BASE_URL",
-    "Provider",
-    "ProviderConfigLike",
-    "build_chat_model",
-    "build_embeddings",
-    "chat_provider",
-    "chat_provider_base_url",
-    "embedding_provider",
-    "embedding_provider_base_url",
-    "normalize_provider_type",
-    "validate_chat_provider_type",
-]

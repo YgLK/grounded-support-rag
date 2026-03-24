@@ -10,6 +10,11 @@ from typing import Any, Iterable
 from support_graph.data._utils import normalize_domains
 from support_graph.types import ChunkRecord, Document
 
+__all__ = [
+    "build_chunks",
+    "write_chunks_jsonl",
+]
+
 
 _MISSING_POSITION = 10**18
 
@@ -204,9 +209,3 @@ def write_chunks_jsonl(chunks: list[ChunkRecord], path: str | Path) -> None:
         for chunk in chunks:
             handle.write(json.dumps(chunk, ensure_ascii=True))
             handle.write("\n")
-
-
-__all__ = [
-    "build_chunks",
-    "write_chunks_jsonl",
-]

@@ -62,6 +62,24 @@ from support_graph.types import (
     parse_eval_subset,
 )
 
+__all__ = [
+    "load_eval_examples",
+    "build_eval_config",
+    "with_config_overrides",
+    "build_run_id",
+    "evaluate_examples_async",
+    "evaluate_split_async",
+    "doc_recall_at_k",
+    "span_recall_at_k",
+    "mrr_at_k",
+    "citation_coverage",
+    "citations_map_to_retrieved",
+    "rouge_l_f1",
+    "token_f1",
+    "exact_match",
+    "sacrebleu_score",
+]
+
 
 END_TO_END_TEXT_THRESHOLD = 0.35
 _SACREBLEU = BLEU(effective_order=True)
@@ -1096,22 +1114,3 @@ async def evaluate_split_async(
         now=now,
         max_concurrency=max_concurrency,
     )
-
-
-__all__ = [
-    "load_eval_examples",
-    "build_eval_config",
-    "with_config_overrides",
-    "build_run_id",
-    "evaluate_examples_async",
-    "evaluate_split_async",
-    "doc_recall_at_k",
-    "span_recall_at_k",
-    "mrr_at_k",
-    "citation_coverage",
-    "citations_map_to_retrieved",
-    "rouge_l_f1",
-    "token_f1",
-    "exact_match",
-    "sacrebleu_score",
-]

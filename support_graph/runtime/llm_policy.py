@@ -10,6 +10,12 @@ from typing import TypeVar
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt
 from tenacity.wait import wait_exponential_jitter
 
+__all__ = [
+    "LLMCallTimeoutError",
+    "ainvoke_with_retry",
+    "is_retryable_exception",
+]
+
 
 _T = TypeVar("_T")
 
@@ -109,10 +115,3 @@ async def ainvoke_with_retry(
             except asyncio.TimeoutError as exc:
                 raise LLMCallTimeoutError(timeout_seconds) from exc
     raise RuntimeError("LLM retry policy exhausted without returning or raising.")
-
-
-__all__ = [
-    "LLMCallTimeoutError",
-    "ainvoke_with_retry",
-    "is_retryable_exception",
-]

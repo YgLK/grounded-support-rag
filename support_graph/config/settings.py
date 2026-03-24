@@ -18,6 +18,15 @@ from support_graph.config.runtime import (
 from support_graph.providers import Provider
 from support_graph.types import Domain, DomainLike, parse_domain, parse_domains
 
+__all__ = [
+    "DatasetSettings",
+    "PathSettings",
+    "Settings",
+    "SettingsFile",
+    "read_dotenv",
+    "read_settings_toml",
+]
+
 DEFAULT_SETTINGS_FILE_NAME = "support_graph.toml"
 DEFAULT_SECRETS_FILE_NAME = ".env"
 
@@ -260,13 +269,3 @@ class Settings:
             chunk_artifact_path=self.chunk_artifact_path(resolved_domain),
         )
         return apply_runtime_experiment_overrides(config, experiment)
-
-
-__all__ = [
-    "DatasetSettings",
-    "PathSettings",
-    "Settings",
-    "SettingsFile",
-    "read_dotenv",
-    "read_settings_toml",
-]

@@ -25,6 +25,18 @@ from support_graph.types import (
     VectorStoreLike,
 )
 
+__all__ = [
+    "build_query_context",
+    "build_query",
+    "build_legacy_query",
+    "build_metadata_filter",
+    "normalize_retrieval_hits",
+    "rerank_retrieval_hits",
+    "retrieve_chunks",
+    "get_vectorstore",
+    "build_keyword_retriever",
+]
+
 QUERY_TOKEN_STOPWORDS = frozenset(get_stop_words("en"))
 
 
@@ -585,16 +597,3 @@ def retrieve_chunks(
         normalized_hits, query_context=resolved_query_context
     )
     return reranked_hits[:resolved_top_k]
-
-
-__all__ = [
-    "build_query_context",
-    "build_query",
-    "build_legacy_query",
-    "build_metadata_filter",
-    "normalize_retrieval_hits",
-    "rerank_retrieval_hits",
-    "retrieve_chunks",
-    "get_vectorstore",
-    "build_keyword_retriever",
-]

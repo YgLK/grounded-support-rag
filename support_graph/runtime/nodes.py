@@ -43,6 +43,24 @@ from support_graph.runtime.schemas import (
 )
 from support_graph.runtime.traces import write_trace_event
 
+__all__ = [
+    "_build_evidence_chunks",
+    "_emit_graph_event",
+    "_trace",
+    "build_chat_model",
+    "build_runtime_async",
+    "expand_neighbor_sections",
+    "finalize",
+    "generate_response",
+    "grade_evidence",
+    "prepare_query",
+    "refine_query",
+    "resolve_runtime_resources_async",
+    "resolve_without_answer",
+    "retrieve_docs",
+    "route_query",
+]
+
 
 logger = get_logger(__name__)
 QueryMode = Literal["legacy_transcript", "latest_user_only", "structured"]
@@ -1142,22 +1160,3 @@ async def resolve_runtime_resources_async(
         chunk_records_by_doc=chunk_records_by_doc,
         prompts=resolve_prompt_set(config.prompt_version),
     )
-
-
-__all__ = [
-    "_build_evidence_chunks",
-    "_emit_graph_event",
-    "_trace",
-    "build_chat_model",
-    "build_runtime_async",
-    "expand_neighbor_sections",
-    "finalize",
-    "generate_response",
-    "grade_evidence",
-    "prepare_query",
-    "refine_query",
-    "resolve_runtime_resources_async",
-    "resolve_without_answer",
-    "retrieve_docs",
-    "route_query",
-]

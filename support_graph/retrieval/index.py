@@ -16,6 +16,20 @@ from support_graph.providers import (
 )
 from support_graph.types import ChunkRecord, DomainLike, parse_domain
 
+__all__ = [
+    "build_collection_name",
+    "build_vector_id",
+    "normalize_postgres_connection",
+    "load_chunk_records",
+    "validate_index_config",
+    "build_embeddings",
+    "chunk_record_to_document",
+    "chunk_records_to_documents",
+    "index_documents",
+    "load_indexed_chunk_ids",
+    "collection_row_count",
+]
+
 
 class VectorStoreWithAddDocuments(Protocol):
     def add_documents(self, documents: list[Document], *, ids: list[str]) -> Any: ...
@@ -242,18 +256,3 @@ def index_documents(
         ids=vector_ids,
         **vectorstore_kwargs,
     )
-
-
-__all__ = [
-    "build_collection_name",
-    "build_vector_id",
-    "normalize_postgres_connection",
-    "load_chunk_records",
-    "validate_index_config",
-    "build_embeddings",
-    "chunk_record_to_document",
-    "chunk_records_to_documents",
-    "index_documents",
-    "load_indexed_chunk_ids",
-    "collection_row_count",
-]

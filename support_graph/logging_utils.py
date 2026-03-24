@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+__all__ = ["configure_logging", "get_logger"]
 
 DEFAULT_LOG_LEVEL = "INFO"
 LOG_LEVELS = {
@@ -77,6 +78,3 @@ def get_logger(name: str) -> logging.Logger:
     if name.startswith("support_graph"):
         return logging.getLogger(name)
     return logging.getLogger(f"support_graph.{name}")
-
-
-__all__ = ["configure_logging", "get_logger"]

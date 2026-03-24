@@ -17,6 +17,17 @@ from support_graph.types import Domain, DomainLike
 if TYPE_CHECKING:
     from support_graph.config.settings import Settings
 
+__all__ = [
+    "ConfigValidationError",
+    "RuntimeConfig",
+    "RuntimeExperimentOverrides",
+    "apply_runtime_experiment_overrides",
+    "build_runtime_config",
+    "DEFAULT_CONTENT_ONLY_REASONING",
+    "DEFAULT_NEIGHBOR_EXPANSION",
+    "DEFAULT_RETRIEVAL_RERANK",
+]
+
 DEFAULT_RETRIEVAL_RERANK = True
 DEFAULT_CONTENT_ONLY_REASONING = True
 DEFAULT_NEIGHBOR_EXPANSION = True
@@ -127,15 +138,3 @@ def apply_runtime_experiment_overrides(
 
 def build_runtime_config(settings: Settings, domain: DomainLike) -> RuntimeConfig:
     return settings.runtime_for(domain)
-
-
-__all__ = [
-    "ConfigValidationError",
-    "RuntimeConfig",
-    "RuntimeExperimentOverrides",
-    "apply_runtime_experiment_overrides",
-    "build_runtime_config",
-    "DEFAULT_CONTENT_ONLY_REASONING",
-    "DEFAULT_NEIGHBOR_EXPANSION",
-    "DEFAULT_RETRIEVAL_RERANK",
-]

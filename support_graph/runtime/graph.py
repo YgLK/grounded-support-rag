@@ -46,6 +46,21 @@ from support_graph.runtime.schemas import (
     strip_internal_fields,
 )
 
+__all__ = [
+    "astream_graph_events",
+    "build_chat_model",
+    "expand_neighbor_sections",
+    "finalize",
+    "generate_response",
+    "grade_evidence",
+    "prepare_query",
+    "refine_query",
+    "resolve_runtime_resources_async",
+    "resolve_without_answer",
+    "retrieve_docs",
+    "run_graph_async",
+]
+
 
 GraphRoute = Literal["generate_response", "refine_query", "resolve_without_answer"]
 logger = get_logger(__name__)
@@ -660,19 +675,3 @@ async def astream_graph_events(
             yield event
     finally:
         await task
-
-
-__all__ = [
-    "astream_graph_events",
-    "build_chat_model",
-    "expand_neighbor_sections",
-    "finalize",
-    "generate_response",
-    "grade_evidence",
-    "prepare_query",
-    "refine_query",
-    "resolve_runtime_resources_async",
-    "resolve_without_answer",
-    "retrieve_docs",
-    "run_graph_async",
-]

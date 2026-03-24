@@ -13,6 +13,12 @@ from support_graph.types import (
     parse_domain,
 )
 
+__all__ = [
+    "normalize_domains",
+    "normalize_reference",
+    "normalize_turn",
+]
+
 
 SUPPORTED_TURN_ROLES = frozenset({"agent", "user"})
 
@@ -81,10 +87,3 @@ def normalize_turn(turn: dict[str, Any]) -> DialogueTurn:
             if reference is not None
         ],
     }
-
-
-__all__ = [
-    "normalize_domains",
-    "normalize_reference",
-    "normalize_turn",
-]

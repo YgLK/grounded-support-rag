@@ -21,6 +21,11 @@ from support_graph.types import (
     parse_domain,
 )
 
+__all__ = [
+    "load_documents",
+    "load_dialogues",
+]
+
 DOC_FILENAME = "multidoc2dial_doc.json"
 DIAL_FILENAME_TEMPLATE = "multidoc2dial_dial_{split}.json"
 _MISSING_POSITION = 10**18
@@ -177,9 +182,3 @@ def load_dialogues(
             )
 
     return dialogues
-
-
-__all__ = [
-    "load_documents",
-    "load_dialogues",
-]

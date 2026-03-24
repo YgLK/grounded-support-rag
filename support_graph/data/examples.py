@@ -8,6 +8,13 @@ from pathlib import Path
 from support_graph.data._utils import normalize_turn
 from support_graph.types import Dialogue, Example, TargetMode
 
+__all__ = [
+    "build_turn_examples",
+    "write_examples_jsonl",
+    "load_examples_jsonl",
+    "load_example_record",
+]
+
 
 def _target_mode(turn: dict) -> TargetMode:
     if str(turn["da"]).startswith("respond_"):
@@ -102,11 +109,3 @@ def load_example_record(example_id: str, paths: list[str | Path]) -> Example:
             if record["example_id"] == example_id:
                 return record
     raise FileNotFoundError(f"Example not found: {example_id}")
-
-
-__all__ = [
-    "build_turn_examples",
-    "write_examples_jsonl",
-    "load_examples_jsonl",
-    "load_example_record",
-]
