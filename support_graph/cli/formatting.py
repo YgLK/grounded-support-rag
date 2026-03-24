@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from support_graph.app.cli_shared import metric_text, relative_path, shorten
+from support_graph.cli.utils import metric_text, relative_path, shorten
 from support_graph.config.settings import Settings
 
 

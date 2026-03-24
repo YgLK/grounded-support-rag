@@ -1,4 +1,4 @@
-from support_graph.app.cli import main
+from support_graph.cli.handlers import main
 
 
 if __name__ == "__main__":

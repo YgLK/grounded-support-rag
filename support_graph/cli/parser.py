@@ -6,7 +6,7 @@ import argparse
 from dataclasses import dataclass
 from typing import Callable
 
-from support_graph.app.cli_shared import (
+from support_graph.cli.utils import (
     DOMAIN_CHOICES,
     EVAL_SUBSET_CHOICES,
     SPLIT_CHOICES,
