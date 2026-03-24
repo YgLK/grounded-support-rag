@@ -51,9 +51,3 @@ llm_retry_max_delay_seconds = 4.0
 tracing_enabled = false
 project = "support-graph"
 endpoint = ""
-
-[observability.otel]
-enabled = false
-service_name = "support-graph"
-exporter = "otlp"
-endpoint = ""

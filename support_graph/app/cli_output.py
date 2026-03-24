@@ -266,15 +266,7 @@ def format_trace_show_output(
     observability = trace_summary.get("observability", {})
     observability_lines: list[str] = []
     if observability:
-        otel = observability.get("opentelemetry", {})
         langsmith = observability.get("langsmith", {})
-        if otel.get("enabled"):
-            observability_lines.append(
-                "OpenTelemetry: {service} via {exporter}".format(
-                    service=otel.get("service_name", "support-graph"),
-                    exporter=otel.get("exporter", "console"),
-                )
-            )
         if langsmith.get("enabled"):
             observability_lines.append(
                 f"LangSmith: {langsmith.get('project', 'support-graph')}"

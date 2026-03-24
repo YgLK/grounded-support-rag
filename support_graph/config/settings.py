@@ -107,16 +107,8 @@ class LangSmithFileConfig(_FrozenModel):
     endpoint: str | None = None
 
 
-class OtelFileConfig(_FrozenModel):
-    enabled: bool = False
-    service_name: str = "support-graph"
-    exporter: str | None = "otlp"
-    endpoint: str | None = None
-
-
 class ObservabilityFileConfig(_FrozenModel):
     langsmith: LangSmithFileConfig = Field(default_factory=LangSmithFileConfig)
-    otel: OtelFileConfig = Field(default_factory=OtelFileConfig)
 
 
 class SettingsFile(_FrozenModel):
@@ -229,10 +221,6 @@ class Settings:
                 langsmith_tracing_enabled=file_config.observability.langsmith.tracing_enabled,
                 langsmith_project=file_config.observability.langsmith.project,
                 langsmith_endpoint=file_config.observability.langsmith.endpoint,
-                otel_enabled=file_config.observability.otel.enabled,
-                otel_service_name=file_config.observability.otel.service_name,
-                otel_exporter=file_config.observability.otel.exporter,
-                otel_endpoint=file_config.observability.otel.endpoint,
                 postgres_dsn=_optional_secret(secrets, "SUPPORT_GRAPH_POSTGRES_DSN"),
                 openrouter_api_key=_optional_secret(
                     secrets, "SUPPORT_GRAPH_OPENROUTER_API_KEY"
@@ -240,7 +228,6 @@ class Settings:
                 langsmith_api_key=_optional_secret(
                     secrets, "SUPPORT_GRAPH_LANGSMITH_API_KEY"
                 ),
-                otel_headers=_optional_secret(secrets, "SUPPORT_GRAPH_OTEL_HEADERS"),
                 domain=selected_domain,
                 collection_name=f"support_graph_{selected_domain}",
                 chunk_artifact_path=derived_dir / "chunks" / f"{selected_domain}.jsonl",

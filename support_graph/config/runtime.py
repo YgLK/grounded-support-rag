@@ -67,11 +67,6 @@ class RuntimeConfig:
     langsmith_project: str | None = None
     langsmith_api_key: str | None = None
     langsmith_endpoint: str | None = None
-    otel_enabled: bool = False
-    otel_service_name: str = "support-graph"
-    otel_exporter: str | None = None
-    otel_endpoint: str | None = None
-    otel_headers: str | None = None
     domain: Domain = Domain.DMV
     collection_name: str = "support_graph_dmv"
     retrieval_rerank: bool = DEFAULT_RETRIEVAL_RERANK
