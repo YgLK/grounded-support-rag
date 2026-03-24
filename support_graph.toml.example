@@ -41,7 +41,6 @@ prompt_version = "v1"
 retrieval_top_k = 5
 retrieval_candidate_k = 12
 max_retrieval_attempts = 2
-llm_max_concurrency = 4
 llm_timeout_seconds = 60.0
 llm_max_retries = 3
 llm_retry_base_delay_seconds = 0.5

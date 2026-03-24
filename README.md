@@ -1,6 +1,6 @@
 # SupportGraph
 
-SupportGraph is a CLI-first modular monolith for grounded support assistance over MultiDoc2Dial. The current implementation covers Phases 1 through 4 from the planning docs: local config/bootstrap, raw dataset loading, section-aware chunk building, agent-turn example building, deterministic DMV eval subsets, pgvector indexing, retrieval-backed `run`, and the offline eval harness.
+SupportGraph is a CLI-first modular monolith for grounded support assistance over MultiDoc2Dial. The current implementation covers the planned MVP path: local config/bootstrap, raw dataset loading, section-aware chunk building, agent-turn example building, deterministic DMV eval subsets, pgvector indexing, retrieval-backed `run`, and the offline eval harness.
 
 ## MVP Scope
 
@@ -34,7 +34,7 @@ uv run support-graph build-subsets --domain dmv --split validation
 uv run support-graph index-docs --domain dmv
 uv run support-graph run --example-id 'dmv::1409501a35697e0ce68561e29577b90a::turn_2'
 uv run support-graph eval --split validation --domain dmv
-uv run support-graph ablate-smoke10 --domain dmv --limit 10
+uv run support-graph experiment-smoke10 --domain dmv --limit 10
 uv run support-graph review-failures --run-id 20260318-143000-dmv-smoke
 uv run support-graph trace-show --run-id 20260318-143000-dmv-smoke --example-id 'dmv::1409501a35697e0ce68561e29577b90a::turn_2'
 uv run support-graph ui --host 127.0.0.1 --port 8008
@@ -64,6 +64,8 @@ Eval run directories under `outputs/evals/runs/<run_id>/` include:
 
 Recent smoke-run comparisons are tracked in [EVAL_PROGRESS.md](/Users/yglk/coding/support-graph/EVAL_PROGRESS.md).
 
+Historical planning and spec docs now live under [docs/archive/README.md](/Users/yglk/coding/support-graph/docs/archive/README.md) to keep the repo root focused on active operator docs.
+
 ## Current Package Layout
 
 The code is organized by concern:
@@ -72,7 +74,7 @@ The code is organized by concern:
 - `support_graph/data/`: raw dataset loading, chunk building, example building, eval subsets in [support_graph/data/README.md](support_graph/data/README.md)
 - `support_graph/retrieval/`: pgvector indexing, query construction, retrieval, reranking in [support_graph/retrieval/README.md](support_graph/retrieval/README.md)
 - `support_graph/runtime/`: the LangGraph runtime and local trace writing in [support_graph/runtime/README.md](support_graph/runtime/README.md)
-- `support_graph/evaluation/`: offline metrics, eval runs, Smoke-10 ablations, embedding benchmark in [support_graph/evaluation/README.md](support_graph/evaluation/README.md)
+- `support_graph/evaluation/`: offline metrics, eval runs, Smoke-10 experiments, embedding benchmark in [support_graph/evaluation/README.md](support_graph/evaluation/README.md)
 - `support_graph/config/`: environment loading and runtime config assembly in [support_graph/config/README.md](support_graph/config/README.md)
 - `support_graph/app/`: CLI entrypoints and terminal output formatting in [support_graph/app/README.md](support_graph/app/README.md)
 - `support_graph/ui/`: Workbench pages, HTMX partials, live SSE execution, and artifact-backed view loaders in [support_graph/ui/README.md](support_graph/ui/README.md)
@@ -217,7 +219,7 @@ flowchart LR
 
     subgraph Eval["Offline Evaluation"]
         Evaluate["evaluation/evaluate.py"]
-        Ablation["evaluation/ablation.py"]
+        Experiment["evaluation/experiment.py"]
         Benchmark["evaluation/benchmark.py"]
     end
 
@@ -255,7 +257,7 @@ flowchart LR
     EvalSubsets --> Evaluate
     Evaluate --> Graph
     Evaluate --> EvalFiles
-    Ablation --> Evaluate
+    Experiment --> Evaluate
     Benchmark --> Derived
     Benchmark --> ProviderHelpers
 ```
@@ -270,7 +272,7 @@ flowchart TD
     D --> E["support_graph.data.eval_subsets<br/>build_subset"]
     C --> F["data/derived/chunks/dmv.jsonl"]
     D --> G["data/derived/examples/dmv_validation.jsonl"]
-    E --> H["data/eval_subsets/smoke.jsonl<br/>data/eval_subsets/frozen_ablation.jsonl"]
+    E --> H["data/eval_subsets/smoke.jsonl<br/>data/eval_subsets/frozen_experiment.jsonl"]
     F --> I["support_graph.retrieval.index<br/>index_documents"]
     I --> J["pgvector collection<br/>support_graph_dmv"]
     G --> K["support_graph.runtime.graph<br/>run_graph"]
@@ -328,7 +330,7 @@ flowchart LR
     E --> H["resolve_without_answer"]
     I["No model call"] --> J["build_chunks / build_examples / build_subsets"]
     I --> K["query builder / reranker / neighbor expansion"]
-    I --> L["eval metrics / failure labels / ablation guardrails"]
+    I --> L["eval metrics / failure labels / experiment guardrails"]
 ```
 
 - The embedding model is used to index retrieval chunks and to embed retrieval queries for pgvector search.
@@ -435,17 +437,17 @@ flowchart LR
     B --> C["loaders, chunking, example building, committed subsets"]
     D["tests/retrieval/*"] --> E["Deterministic query builder, metadata filter, hit normalization, reranker, index adapter"]
     F["tests/runtime/*"] --> G["Graph control flow, retry loop, neighbor expansion, ranked vs expanded evidence"]
-    H["tests/evaluation/*"] --> I["Metric math, artifact writing, ablation guardrails, benchmark helpers"]
+    H["tests/evaluation/*"] --> I["Metric math, artifact writing, experiment guardrails, benchmark helpers"]
     J["tests/app/*"] --> K["CLI output hierarchy and missing-config handling"]
 ```
 
 More concretely:
 
-- `tests/data/*` reads the committed `multidoc2dial/` files and checks document counts, dialogue counts, chunk determinism, example shape, and that `smoke` and `frozen_ablation` subsets match the committed JSONL files.
+- `tests/data/*` reads the committed `multidoc2dial/` files and checks document counts, dialogue counts, chunk determinism, example shape, and that `smoke` and `frozen_experiment` subsets match the committed JSONL files.
 - `tests/retrieval/*` checks the compact history-aware query builder, candidate-pool retrieval, deterministic reranking, and index conversion logic.
 - `tests/runtime/*` monkeypatches graph nodes to verify the path through the graph, the one-retry loop, and same-doc neighbor expansion behavior.
 - `tests/evaluation/*` uses fake predictions to verify metric computation, that retrieval metrics use `retrieval_ranked_chunks`, and that citation validation uses `retrieved_chunks`.
-- `tests/app/*` checks terminal UX: missing config, missing index, output hierarchy for `run`, `eval`, and `ablate-smoke10`, plus the new `review-failures` and `trace-show` analysis commands.
+- `tests/app/*` checks terminal UX: missing config, missing index, output hierarchy for `run`, `eval`, and `experiment-smoke10`, plus the new `review-failures` and `trace-show` analysis commands.
 
 If you want a true end-to-end run against local services, use the CLI commands rather than relying on the unit tests:
 
@@ -561,9 +563,9 @@ CLI commands also write timestamped execution logs under `logs/` by default. Ove
 ## Eval Notes
 
 - `eval` defaults to the committed `smoke` subset so the default command stays practical on a local machine.
-- Use `--subset frozen_ablation` for a fairer ablation pass.
+- Use `--subset frozen_experiment` for a fairer experiment pass.
 - Use `--subset full_validation` once the DMV benchmark is stable and you want the full validation run.
-- `ablate-smoke10` runs the control plus three targeted variants on the first 10 committed smoke examples and writes a structured report under `outputs/evals/reports/`.
+- `experiment-smoke10` runs the control plus three targeted variants on the first 10 committed smoke examples and writes a structured report under `outputs/evals/reports/`.
 - `review-failures` inspects one eval run’s failure list and review artifacts from the terminal.
 - `trace-show` resolves an evaluated example through `trace_index.json` and prints the raw graph trace summary.
 
