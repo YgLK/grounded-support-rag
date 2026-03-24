@@ -14,24 +14,20 @@ from pydantic import BaseModel
 
 from support_graph.config.runtime import RuntimeConfig
 from support_graph.logging_utils import get_logger
-from support_graph.providers import build_chat_model as build_provider_chat_model
 from support_graph.providers import (
+    build_chat_model as build_provider_chat_model,
     chat_provider as resolved_chat_provider,
-    embedding_provider as resolved_embedding_provider,
 )
 from support_graph.retrieval.index import load_chunk_records
-from support_graph.retrieval.retrieve import build_legacy_query
-from support_graph.retrieval.retrieve import build_query as build_retrieval_query
 from support_graph.retrieval.retrieve import (
     build_keyword_retriever,
+    build_legacy_query,
+    build_query as build_retrieval_query,
     build_query_context,
     get_vectorstore,
     retrieve_chunks,
 )
-from support_graph.runtime.llm_policy import (
-    LLMCallTimeoutError,
-    ainvoke_with_retry,
-)
+from support_graph.runtime.llm_policy import LLMCallTimeoutError, ainvoke_with_retry
 from support_graph.runtime.observability import build_observability
 from support_graph.runtime.prompts import resolve_prompt_set
 from support_graph.runtime.schemas import (
