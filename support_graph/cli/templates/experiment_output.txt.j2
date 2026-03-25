@@ -1,0 +1,20 @@
+SupportGraph Experiment
+Scope: {{ scope }}
+
+Variants
+{% for item in results %}
+- {{ item.title }}: {{ item.status }} | Span Recall@5 {{ '%.3f'|format(item.span) }} | Citation {{ '%.3f'|format(item.citation) }} | E2E {{ '%.3f'|format(item.e2e) }}
+{% endfor %}
+
+Recommendation
+{{ recommendation }}: {{ recommendation_line }}
+
+Frozen-200
+{% if frozen_result %}
+ran: {{ frozen_result }}
+{% else %}
+skipped: Smoke-10 gate not met
+{% endif %}
+
+Artifacts
+{{ report_path }}

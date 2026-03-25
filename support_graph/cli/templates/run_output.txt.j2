@@ -1,0 +1,45 @@
+SupportGraph Run
+Run: {{ result.run_id }}
+Example: {{ result.example_id }}
+
+Context
+User: {{ result.latest_user_utterance or 'No recent user turn found.' }}
+
+Decision: {{ result.decision }}
+
+Response
+{{ result.response_text }}
+
+Citations
+{% if result.citations %}
+{% for citation in result.citations %}
+[{{ loop.index }}] {{ citation.get('doc_id') }} :: spans {{ citation.get("span_ids", []) | join(',') }}
+{% endfor %}
+{% else %}
+None
+{% endif %}
+
+Next
+{% for line in next_lines %}
+{{ line }}
+{% endfor %}
+
+Trace
+Attempts: {{ trace_summary.get('retrieval_attempts', 0) }}
+Path: {{ trace_summary.get('graph_path', []) | join(' -> ') }}
+Fallbacks: {{ trace_summary.get('fallback_count', 0) }}
+{% if verbose %}
+
+Verbose
+Final Query: {{ trace_summary.get('final_query', '') }}
+Evidence Grade: {{ result.get('evidence_grade', {}) }}
+Retrieved Chunks
+{% for chunk in result.get("retrieved_chunks", [])[:5] %}
+- {{ chunk.get('chunk_id') }} :: {{ chunk.get('text', '')[:160] }}
+{% endfor %}
+{% endif %}
+
+Artifacts
+{{ artifact_paths.manifest }}
+{{ artifact_paths.result }}
+{{ artifact_paths.trace }}

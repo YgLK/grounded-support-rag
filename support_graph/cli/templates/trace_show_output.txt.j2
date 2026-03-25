@@ -1,0 +1,45 @@
+SupportGraph Trace Show
+Run: {{ run_id }}
+Example: {{ example_id }}
+
+Trace
+Final Query: {{ trace_summary.get('final_query', '') }}
+Attempts: {{ trace_summary.get('retrieval_attempts', 0) }}
+Path: {{ trace_summary.get('graph_path', []) | join(' -> ') }}
+
+Node Latency
+{% if node_latency_ms %}
+{% for node, latencies in node_latency_ms.items() %}
+{{ node }}: {{ latencies | join(', ') }}
+{% endfor %}
+{% else %}
+none
+{% endif %}
+
+Fallbacks
+{% if fallbacks %}
+{% for fallback in fallbacks %}
+{{ fallback.node }}: {{ fallback.exception_type }} :: {{ fallback.error }}
+{% endfor %}
+{% else %}
+none
+{% endif %}
+
+Observability
+{% if observability_lines %}
+{% for line in observability_lines %}
+{{ line }}
+{% endfor %}
+{% else %}
+none
+{% endif %}
+
+Evidence
+Grade: {{ trace_summary.get('evidence_grade', {}) }}
+Counts: ranked {{ trace_summary.get('retrieval_ranked_count', 0) }} / expanded {{ trace_summary.get('retrieved_count', 0) }}
+
+Decision
+{{ trace_summary.get('decision', '') }}
+
+Artifact
+{{ trace_path }}

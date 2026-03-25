@@ -1,0 +1,25 @@
+SupportGraph Review Failures
+Run: {{ run_id }}
+
+Failure Counts
+{% if failure_counts %}
+{% for label, count in failure_counts %}
+{{ label }}: {{ count }}
+{% endfor %}
+{% else %}
+none: 0
+{% endif %}
+
+Examples
+{% if examples %}
+{% for example in examples %}
+{{ example.example_id }} | {{ example.label }} | {{ example.decision }} | {{ example.need }}
+{% endfor %}
+{% else %}
+No matching failures.
+{% endif %}
+
+Artifacts
+{% for path in artifact_paths %}
+{{ path }}
+{% endfor %}

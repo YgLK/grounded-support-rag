@@ -1,0 +1,30 @@
+SupportGraph Eval
+Run: {{ run_id }}
+Subset: {{ subset_label }}
+
+Headline Metrics
+Doc Recall@3: {{ headline_metrics.doc_recall_at_3 }}
+Span Recall@5: {{ headline_metrics.span_recall_at_5 }}
+ROUGE-L: {{ headline_metrics.rouge_l }}
+F1: {{ headline_metrics.token_f1 }}
+
+Paper Reference
+Recall@1: {{ paper_metrics.recall_at_1 }}
+Recall@5: {{ paper_metrics.recall_at_5 }}
+Recall@10: {{ paper_metrics.recall_at_10 }}
+Exact Match: {{ paper_metrics.exact_match }}
+SacreBLEU: {{ paper_metrics.sacrebleu }}
+
+Failure Snapshot
+{% if failure_snapshot %}
+{% for label, count in failure_snapshot %}
+{{ label }}: {{ count }}
+{% endfor %}
+{% else %}
+none: 0
+{% endif %}
+
+Artifacts
+{% for path in artifact_paths %}
+{{ path }}
+{% endfor %}

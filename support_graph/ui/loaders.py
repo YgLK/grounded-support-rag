@@ -71,7 +71,15 @@ class InvalidArtifactError(Exception):
 
 
 class WorkbenchArtifactLoader:
-    """Read normalized Workbench views from the on-disk artifact contract."""
+    """Loads and normalizes artifacts for the Workbench UI.
+
+    Responsibilities:
+    - Acts as a data access layer between the FastAPI backend and on-disk artifacts
+    - Reads manifests, metrics, predictions, and other files from various run types
+    - Transforms raw data into structured Pydantic models for API responses
+    - Locates and validates artifact directories and required files
+    - Encapsulates the on-disk artifact contract logic
+    """
 
     def __init__(self, settings: Settings):
         self.settings = settings
