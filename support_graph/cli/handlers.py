@@ -67,10 +67,12 @@ logger = get_logger(__name__)
 
 
 def _load_settings(args: argparse.Namespace) -> Settings:
+    """Load settings from TOML files specified in CLI arguments."""
     return Settings.load(args.config_file, args.secrets_file)
 
 
 def _run_config(settings: Settings, domain: DomainLike) -> RuntimeConfig:
+    """Get the runtime configuration for a specific domain."""
     return settings.runtime_for(domain)
 
 
@@ -80,6 +82,7 @@ def _print_missing_config(
     settings: Settings,
     missing: list[str],
 ) -> int:
+    """Print a standardized error message for missing configuration fields."""
     print_lines(
         missing_config_lines(
             title=title,
@@ -96,6 +99,7 @@ def _print_config_validation_error(
     settings: Settings,
     error: ConfigValidationError,
 ) -> int:
+    """Print a standardized error message for a configuration validation error."""
     return _print_missing_config(
         title=title,
         settings=settings,
@@ -111,6 +115,27 @@ def _ensure_chunk_artifact(
     max_tokens_per_chunk: int,
     reason: str,
 ) -> Path:
+    """Ensure a chunk artifact exists, creating it on-demand if missing.
+
+    A chunk artifact is a JSONL file where each line represents a piece of a
+    source document, optimized for retrieval. It serves as the canonical source
+    for indexing, benchmarking, and retrieval operations.
+
+    - Checks for a pre-existing chunk file at the conventional path.
+    - If found, returns the path immediately.
+    - If missing, it triggers a full build pipeline: loads documents, builds chunks,
+      and writes the new artifact to disk.
+
+    Args:
+        settings: The application settings.
+        domain: The domain for which to ensure chunks.
+        chunk_file: An optional explicit path to the chunk file.
+        max_tokens_per_chunk: The token limit for chunking.
+        reason: The reason for needing the chunks (for logging).
+
+    Returns:
+        The path to the existing or newly created chunk artifact.
+    """
     chunk_artifact_path = (
         Path(chunk_file) if chunk_file else settings.chunk_artifact_path(domain)
     )
@@ -137,6 +162,7 @@ def _checked_collection_row_count(
     postgres_dsn: str,
     collection_name: str,
 ) -> tuple[int | None, str | None]:
+    """Safely get the row count of a vector collection, handling exceptions."""
     try:
         return collection_row_count(postgres_dsn, collection_name), None
     except Exception as exc:
@@ -156,6 +182,7 @@ def _index_preflight_error_lines(
     collection_name: str,
     domain: DomainLike,
 ) -> list[str] | None:
+    """Check if the vector index is available and populated, returning error lines if not."""
     row_count, row_count_error = _checked_collection_row_count(
         postgres_dsn,
         collection_name,
@@ -182,6 +209,7 @@ def _ensure_index_ready(
     collection_name: str,
     domain: DomainLike,
 ) -> bool:
+    """Run index pre-flight checks and print error messages if checks fail."""
     error_lines = _index_preflight_error_lines(
         title=title,
         postgres_dsn=postgres_dsn,
@@ -200,6 +228,7 @@ def _required_eval_run_dir(
     settings: Settings,
     run_id: str,
 ) -> Path | None:
+    """Check for a complete eval run directory, printing an error if missing."""
     output_dir = run_output_dir(settings, run_id)
     if not output_dir.exists():
         print_lines(
@@ -227,6 +256,7 @@ def _required_eval_run_dir(
 
 
 def _answer_example_count(examples: list[dict]) -> int:
+    """Count the number of examples with a target mode of 'answer'."""
     return sum(1 for example in examples if example.get("target_mode") == "answer")
 
 
@@ -235,6 +265,7 @@ def load_example_record(
     settings: Settings,
     domain: DomainLike | None = None,
 ) -> dict:
+    """Load a single example record by ID, creating it on-demand if missing."""
     candidate_paths = []
     if domain is not None:
         candidate_paths.append(
@@ -259,6 +290,7 @@ def load_example_record(
 
 
 def _log_graph_event(event: dict) -> None:
+    """Log a graph execution event to the console with structured formatting."""
     kind = str(event.get("kind") or "")
     run_id = str(event.get("run_id") or "unknown-run")
     example_id = str(event.get("example_id") or "unknown-example")
@@ -323,6 +355,7 @@ def _log_graph_event(event: dict) -> None:
 
 
 def _build_chunks(args: argparse.Namespace) -> int:
+    """CLI handler for the 'build-chunks' command."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     logger.info("Building chunks for domain=%s", domain)
@@ -353,6 +386,7 @@ def _build_chunks(args: argparse.Namespace) -> int:
 
 
 def _build_examples(args: argparse.Namespace) -> int:
+    """CLI handler for the 'build-examples' command."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     logger.info("Building examples for domain=%s split=%s", domain, args.split)
@@ -389,6 +423,7 @@ def _build_examples(args: argparse.Namespace) -> int:
 
 
 def _build_subsets(args: argparse.Namespace) -> int:
+    """CLI handler for the 'build-subsets' command."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     logger.info("Building eval subsets for domain=%s split=%s", domain, args.split)
@@ -439,6 +474,7 @@ def _build_subsets(args: argparse.Namespace) -> int:
 
 
 def _index_docs(args: argparse.Namespace) -> int:
+    """CLI handler for the 'index' command."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     try:
@@ -490,6 +526,7 @@ def _index_docs(args: argparse.Namespace) -> int:
 
 
 def _benchmark_embeddings(args: argparse.Namespace) -> int:
+    """CLI handler for the 'benchmark-embeddings' command."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     try:
@@ -550,6 +587,7 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
 
 
 def _run_example(args: argparse.Namespace) -> int:
+    """CLI handler for the 'run' command."""
     settings = _load_settings(args)
     try:
         settings.runtime.validate_for_run()
@@ -639,6 +677,7 @@ def _run_example(args: argparse.Namespace) -> int:
 
 
 def _eval_split(args: argparse.Namespace) -> int:
+    """CLI handler for the 'eval' command."""
     settings = _load_settings(args)
     try:
         settings.runtime.validate_for_run()
@@ -688,6 +727,7 @@ def _eval_split(args: argparse.Namespace) -> int:
 
 
 def _experiment_smoke10(args: argparse.Namespace) -> int:
+    """CLI handler for the 'experiment-smoke10' command."""
     settings = _load_settings(args)
     try:
         settings.runtime.validate_for_run()
@@ -726,6 +766,7 @@ def _experiment_smoke10(args: argparse.Namespace) -> int:
 
 
 def _review_failures(args: argparse.Namespace) -> int:
+    """CLI handler for the 'review-failures' command."""
     settings = _load_settings(args)
     output_dir = _required_eval_run_dir(
         title="SupportGraph Review Failures",
@@ -762,6 +803,7 @@ def _review_failures(args: argparse.Namespace) -> int:
 
 
 def _trace_show(args: argparse.Namespace) -> int:
+    """CLI handler for the 'trace-show' command."""
     settings = _load_settings(args)
     output_dir = _required_eval_run_dir(
         title="SupportGraph Trace Show",
@@ -820,6 +862,7 @@ def _trace_show(args: argparse.Namespace) -> int:
 
 
 def _serve_ui(args: argparse.Namespace) -> int:
+    """CLI handler for the 'ui' command."""
     from support_graph.ui import create_app
     import uvicorn
 

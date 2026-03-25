@@ -46,6 +46,11 @@ def _add_global_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _register_build_chunks(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'build-chunks' command.
+
+    This command processes raw documents into smaller, section-aware chunks
+    suitable for vector embedding and retrieval.
+    """
     build_chunks_parser = subparsers.add_parser(
         "build-chunks", help="Build section-aware chunks."
     )
@@ -63,6 +68,11 @@ def _register_build_chunks(subparsers: Subparsers, handlers: CliHandlers) -> Non
 
 
 def _register_build_examples(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'build-examples' command.
+
+    This command converts raw dialogues into turn-level examples that can be
+    used for evaluation or single-run execution.
+    """
     build_examples_parser = subparsers.add_parser(
         "build-examples", help="Build turn-level examples."
     )
@@ -82,6 +92,12 @@ def _register_build_examples(subparsers: Subparsers, handlers: CliHandlers) -> N
 
 
 def _register_build_subsets(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'build-subsets' command.
+
+    This command creates deterministic, salted subsets from the full evaluation
+    set, such as 'smoke' for quick checks and 'frozen_experiment' for stable
+    comparisons.
+    """
     build_subsets_parser = subparsers.add_parser(
         "build-subsets", help="Build deterministic eval subsets."
     )
@@ -105,6 +121,11 @@ def _register_build_subsets(subparsers: Subparsers, handlers: CliHandlers) -> No
 def _register_benchmark_embeddings(
     subparsers: Subparsers, handlers: CliHandlers
 ) -> None:
+    """Register the 'benchmark-embeddings' command.
+
+    This command measures the throughput (chunks/sec) of the configured
+    embedding model to help estimate the time required for a full indexing run.
+    """
     benchmark_embeddings_parser = subparsers.add_parser(
         "benchmark-embeddings", help="Benchmark local embedding throughput."
     )
@@ -133,6 +154,11 @@ def _register_benchmark_embeddings(
 
 
 def _register_index_docs(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'index-docs' command.
+
+    This command populates the pgvector database with embeddings from a chunk
+    artifact, making the documents searchable.
+    """
     index_docs_parser = subparsers.add_parser(
         "index-docs", help="Index section-aware chunks into pgvector."
     )
@@ -161,6 +187,11 @@ def _register_index_docs(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def _register_run(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'run' command.
+
+    This command executes the full retrieval and generation graph for a single
+    example ID, producing a grounded answer, clarification, or abstention.
+    """
     run_parser = subparsers.add_parser(
         "run", help="Run the retrieval-backed graph for one example."
     )
@@ -174,6 +205,11 @@ def _register_run(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def _register_eval(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'eval' command.
+
+    This command runs the full evaluation harness on a specified dataset split
+    and subset, generating metrics for retrieval and generation.
+    """
     eval_parser = subparsers.add_parser(
         "eval", help="Run the Phase 4 evaluation harness."
     )
@@ -203,6 +239,11 @@ def _register_eval(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def _register_experiment(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'experiment-smoke10' command.
+
+    This command runs a predefined experiment comparing multiple graph variants
+    on the 'smoke' subset and recommends the best performer.
+    """
     experiment_parser = subparsers.add_parser(
         "experiment-smoke10",
         help="Run the DMV Smoke-10 experiment variants and write a comparison note.",
@@ -221,6 +262,11 @@ def _register_experiment(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def _register_review_failures(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'review-failures' command.
+
+    This command provides a summary of failure cases from a specific evaluation
+    run, allowing for filtering by failure label and target mode.
+    """
     review_failures_parser = subparsers.add_parser(
         "review-failures",
         help="Inspect failure examples and review artifacts for one eval run.",
@@ -242,6 +288,11 @@ def _register_review_failures(subparsers: Subparsers, handlers: CliHandlers) -> 
 
 
 def _register_trace_show(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'trace-show' command.
+
+    This command displays a detailed execution trace for a single example from a
+    given evaluation run, showing the graph path, latencies, and decision logic.
+    """
     trace_show_parser = subparsers.add_parser(
         "trace-show",
         help="Inspect the raw trace for one evaluated example.",
@@ -252,6 +303,11 @@ def _register_trace_show(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def _register_ui(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'ui' command.
+
+    This command serves the local SupportGraph Workbench UI, a web-based tool
+    for interactively running and debugging the system.
+    """
     ui_parser = subparsers.add_parser(
         "ui",
         help="Serve the local SupportGraph Workbench UI.",

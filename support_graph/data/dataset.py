@@ -63,6 +63,18 @@ def _require_value(record: dict, field: str) -> object:
 
 
 def _normalize_span(span: dict[str, Any]) -> DocumentSpan:
+    """Normalize a raw document span from the dataset into a typed dictionary.
+
+    - Validates that required fields are present.
+    - Flattens the `parent_titles` structure into a simple list of strings.
+    - Ensures all identifiers and text fields are strings.
+
+    Args:
+        span: A raw span dictionary from the source JSON.
+
+    Returns:
+        A validated and normalized `DocumentSpan` object.
+    """
     parent_titles = _require_list(span.get("parent_titles"), "parent_titles")
     tag = _require_value(span, "tag")
     text_sp = _require_value(span, "text_sp")
@@ -91,12 +103,24 @@ def load_documents(
     dataset_root: str | Path,
     domains: Iterable[DomainLike] | DomainLike | None = None,
 ) -> list[Document]:
-    """Load raw MultiDoc2Dial documents.
+    """Load raw MultiDoc2Dial document records from the dataset.
 
-    The returned records preserve source metadata and add a normalized, sorted
-    span list for downstream section grouping.
+    Parses the source JSON and returns document records with normalized metadata
+    and a sorted span list suitable for downstream section grouping and chunking.
+
+    Args:
+        dataset_root: Path to the MultiDoc2Dial dataset directory.
+        domains: Optional domain filter. Can be a single domain, an iterable of
+            domains, or None to load all domains.
+
+    Returns:
+        List of Document records with normalized spans sorted by section and
+        span positions.
+
+    Raises:
+        FileNotFoundError: If the document file does not exist.
+        ValueError: If required fields are missing from the source data.
     """
-
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
     payload = _load_json(dataset_root / DOC_FILENAME)
@@ -147,7 +171,30 @@ def load_dialogues(
     split: DatasetSplitLike,
     domains: Iterable[DomainLike] | DomainLike | None = None,
 ) -> list[Dialogue]:
-    """Load raw MultiDoc2Dial dialogue records for a split."""
+    """Load raw MultiDoc2Dial dialogue records for a given split.
+
+    Parses the source JSON for a dataset split (e.g., 'train', 'validation')
+    and returns dialogue records with normalized, sorted turns.
+
+    A dialogue logically represents a single conversation, containing:
+    - A unique dialogue ID.
+    - A list of conversational turns, sorted chronologically.
+    - Each turn includes the speaker's role (user/agent), their utterance,
+      and any document references made.
+
+    Args:
+        dataset_root: Path to the MultiDoc2Dial dataset directory.
+        split: The dataset split to load ('train', 'validation', or 'test').
+        domains: Optional domain filter. Can be a single domain, an iterable of
+            domains, or None to load all domains.
+
+    Returns:
+        A list of `Dialogue` records with normalized turns sorted by turn ID.
+
+    Raises:
+        FileNotFoundError: If the dialogue file for the split does not exist.
+        ValueError: If required fields are missing from the source data.
+    """
 
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
