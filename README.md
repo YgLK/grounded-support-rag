@@ -59,12 +59,19 @@ Eval note: current smoke comparisons used `max_retrieval_attempts = 2`, so retri
 
 Recent smoke runs on the same `dmv validation / smoke` subset (`25` examples):
 
+<!-- 
 | Chat | Embeddings | Doc R@3 | Span R@5 | MRR@5 | F1 | Citation Cov. | E2E | Avg Latency |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `openrouter / openai/gpt-oss-120b:nitro` | `ollama / qwen3-embedding:4b-q4_K_M` | 0.760 | 0.307 | 0.573 | 0.211 | 0.240 | 0.160 | 2588 ms |
 | `ollama / qwen3:8b-q4_K_M` | `ollama / qwen3-embedding:4b-q4_K_M` | 0.680 | 0.320 | 0.565 | 0.188 | 0.100 | 0.160 | 27430 ms |
 | `openrouter / openai/gpt-oss-120b:nitro` | `openrouter / qwen/qwen3-embedding-8b` | 0.160 | 0.120 | 0.110 | 0.099 | 0.000 | 0.040 | 7319 ms |
-
+ -->
+ 
+| Chat | Embeddings | Doc R@3 | Span R@5 | MRR@5 | F1 | Citation Cov. | Avg Latency |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `openrouter / openai/gpt-oss-120b:nitro` | `ollama / qwen3-embedding:4b-q4_K_M` | 0.760 | 0.307 | 0.573 | 0.211 | 0.240 | 2588 ms |
+| `ollama / qwen3:8b-q4_K_M` | `ollama / qwen3-embedding:4b-q4_K_M` | 0.680 | 0.320 | 0.565 | 0.188 | 0.100 | 27430 ms |
+| `openrouter / openai/gpt-oss-120b:nitro` | `openrouter / qwen/qwen3-embedding-8b` | 0.160 | 0.120 | 0.110 | 0.099 | 0.000 | 7319 ms |
 
 Conclusions:
 
