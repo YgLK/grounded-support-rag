@@ -74,9 +74,7 @@ def _missing_openrouter_fields(
         missing.append(
             'support_graph.toml: runtime.embedding_provider_type = "openrouter"'
         )
-    if (
-        check_chat or check_embeddings
-    ) and not settings.runtime.openrouter_api_key:
+    if (check_chat or check_embeddings) and not settings.runtime.openrouter_api_key:
         missing.append(".env: SUPPORT_GRAPH_OPENROUTER_API_KEY")
     if check_chat and not settings.runtime.chat_model:
         missing.append("support_graph.toml: runtime.chat_model")
