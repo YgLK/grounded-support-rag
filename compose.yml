@@ -1,7 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: support-graph-postgres
+    container_name: grounded-support-rag-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

@@ -595,7 +595,7 @@ async def run_graph_async(
             runtime.observability.langsmith_project if runtime.observability else None
         ),
         tags=[
-            "support-graph",
+            "grounded-support-rag",
             f"provider:{resolved_chat_provider(config)}",
             f"embedding_provider:{resolved_embedding_provider(config)}",
             f"domain:{initial_state.get('domain')}",

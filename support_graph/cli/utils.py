@@ -112,7 +112,7 @@ def index_missing_lines(
         "Index missing",
         f"No indexed rows found for collection {collection_name}.",
         "Next",
-        f"Run: uv run support-graph index-docs --domain {domain}",
+        f"Run: uv run grounded-support-rag index-docs --domain {domain}",
     ]
 
 

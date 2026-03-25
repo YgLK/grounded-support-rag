@@ -18,7 +18,7 @@ def _subset_sort_key(example: dict, salt: str) -> tuple[str, str]:
 def _subset_salt(target_mode: TargetMode, size: int, salt: str | None) -> str:
     if salt is not None:
         return salt
-    return f"support-graph:{target_mode}:{size}"
+    return f"grounded-support-rag:{target_mode}:{size}"
 
 
 def build_subset(

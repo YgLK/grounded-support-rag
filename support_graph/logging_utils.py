@@ -33,7 +33,7 @@ def _sanitize_filename_part(value: str | None, fallback: str) -> str:
 def _build_log_file_path(log_dir: str | Path, command_name: str | None = None) -> Path:
     directory = Path(log_dir)
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S-%f")
-    command = _sanitize_filename_part(command_name, "support-graph")
+    command = _sanitize_filename_part(command_name, "grounded-support-rag")
     return directory / f"{timestamp}-{command}.log"
 
 

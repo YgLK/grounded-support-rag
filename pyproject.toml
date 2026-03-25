@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "support-graph"
+name = "grounded-support-rag"
 version = "0.1.0"
 description = "CLI-first SupportGraph MVP over MultiDoc2Dial"
 readme = "README.md"
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-support-graph = "support_graph.cli.handlers:main"
+grounded-support-rag = "support_graph.cli.handlers:main"
 
 [tool.setuptools.packages.find]
 include = ["support_graph*"]

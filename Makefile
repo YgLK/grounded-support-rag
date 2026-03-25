@@ -15,7 +15,7 @@ postgres-up:
 	docker compose up -d postgres
 
 ui:
-	uv run support-graph \
+	uv run grounded-support-rag \
 		--config-file $(CONFIG_FILE) \
 		--secrets-file $(SECRETS_FILE) \
 		ui \
@@ -23,7 +23,7 @@ ui:
 		--port $(UI_PORT)
 
 eval-smoke:
-	uv run support-graph \
+	uv run grounded-support-rag \
 		--config-file $(CONFIG_FILE) \
 		--secrets-file $(SECRETS_FILE) \
 		eval \

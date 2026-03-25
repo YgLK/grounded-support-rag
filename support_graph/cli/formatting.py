@@ -335,7 +335,7 @@ def format_trace_show_output(
         langsmith = observability.get("langsmith", {})
         if langsmith.get("enabled"):
             observability_lines.append(
-                f"LangSmith: {langsmith.get('project', 'support-graph')}"
+                f"LangSmith: {langsmith.get('project', 'grounded-support-rag')}"
             )
 
     template_context = {

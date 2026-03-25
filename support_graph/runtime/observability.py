@@ -25,7 +25,7 @@ class Observability:
         if self.langsmith_client is not None:
             summary["langsmith"] = {
                 "enabled": True,
-                "project": self.langsmith_project or "support-graph",
+                "project": self.langsmith_project or "grounded-support-rag",
             }
         return summary
 
@@ -42,7 +42,9 @@ def build_observability(config: ObservabilityConfigLike) -> Observability | None
             client_kwargs["api_key"] = config.langsmith_api_key
         if config.langsmith_endpoint:
             client_kwargs["api_url"] = config.langsmith_endpoint
-        observability.langsmith_project = config.langsmith_project or "support-graph"
+        observability.langsmith_project = (
+            config.langsmith_project or "grounded-support-rag"
+        )
         observability.langsmith_client = Client(**client_kwargs)
 
     return observability

@@ -336,7 +336,7 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 
 def build_parser(handlers: CliHandlers) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="support-graph")
+    parser = argparse.ArgumentParser(prog="grounded-support-rag")
     _add_global_options(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_subcommands(subparsers, handlers)

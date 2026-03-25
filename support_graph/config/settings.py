@@ -111,7 +111,7 @@ class RuntimeFileConfig(_FrozenModel):
 
 class LangSmithFileConfig(_FrozenModel):
     tracing_enabled: bool = False
-    project: str | None = "support-graph"
+    project: str | None = "grounded-support-rag"
     endpoint: str | None = None
 
 
