@@ -19,7 +19,7 @@ from support_graph.ui.loaders import (
     WorkbenchArtifactLoader,
     build_loader,
 )
-from support_graph.ui.routers import api, live_routes, pages
+from support_graph.ui.routers import api, pages
 
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -58,7 +58,6 @@ def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
         )
 
     app.include_router(api.router)
-    app.include_router(live_routes.router)
     app.include_router(pages.router)
 
     return app
