@@ -10,7 +10,7 @@ Path: {{ trace_summary.get('graph_path', []) | join(' -> ') }}
 Node Latency
 {% if node_latency_ms %}
 {% for node, latencies in node_latency_ms.items() %}
-{{ node }}: {{ latencies | join(', ') }}
+{{ node }}: {{ latencies }}
 {% endfor %}
 {% else %}
 none

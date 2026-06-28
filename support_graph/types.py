@@ -31,6 +31,7 @@ class ChoiceStrEnum(StrEnum):
 
 class Domain(ChoiceStrEnum):
     DMV = "dmv"
+    KUBERNETES = "kubernetes"
     SSA = "ssa"
     STUDENTAID = "studentaid"
     VA = "va"

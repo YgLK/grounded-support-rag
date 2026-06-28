@@ -119,7 +119,7 @@ class GraphState(TypedDict, total=False):
     intent: Intent
     response_payload: dict
     final_output: dict
-    ablation_options: dict
+    experiment_options: dict
     fallback_events: list[FallbackTrace]
 
 

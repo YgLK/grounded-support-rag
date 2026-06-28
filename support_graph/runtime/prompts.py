@@ -144,7 +144,7 @@ def _v2_prompt_set() -> PromptSet:
                 (
                     "system",
                     "You are a router. Classify user intent:\n"
-                    "- document_query: Factual questions about DMV, licenses, rules, or fees.\n"
+                    "- document_query: Factual questions about the indexed documentation.\n"
                     "- chitchat: Greetings, thanks, generic feedback, or non-factual statements.\n\n"
                     "Reason before you decide.",
                 ),
@@ -182,7 +182,7 @@ def _v2_prompt_set() -> PromptSet:
                     "CRITICAL RULES:\n"
                     "1. ONLY use information from the provided <context> tags.\n"
                     "2. If the context does not contain the answer, you MUST abstain or clarify.\n"
-                    "3. NEVER use your internal knowledge about the world (e.g., general DMV rules) if they are not in the context.\n"
+                    "3. NEVER use your internal knowledge about the world if it is not in the context.\n"
                     "4. If the context is 'sufficient', provide a direct, helpful answer.\n"
                     "5. If the context is 'partial', ask for the specific missing piece of information.\n\n"
                     "Output Requirements:\n"

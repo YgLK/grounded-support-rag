@@ -22,7 +22,7 @@ FailureLabel = Literal[
     "unsupported_answer",
     "runtime_error",
 ]
-ReportType = Literal["ablation_summary", "comparison_report"]
+ReportType = Literal["ablation_summary", "comparison_report", "experiment_summary"]
 SortOrder = Literal["asc", "desc"]
 
 

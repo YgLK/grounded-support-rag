@@ -202,14 +202,14 @@ def format_experiment_output(result: dict, settings: Settings) -> list[str]:
             }
         )
 
+    frozen_result = result.get("frozen_result") or {}
+
     template_context = {
         "scope": f"{result.get('domain')} smoke / first {result.get('limit')}",
         "results": results_context,
         "recommendation": result.get("recommendation"),
         "recommendation_line": result.get("recommendation_line"),
-        "frozen_result": result.get("frozen_result", {})
-        .get("variant", {})
-        .get("title"),
+        "frozen_result": frozen_result.get("variant", {}).get("title"),
         "report_path": relative_path(
             Path(result["report_artifact_paths"]["report"]),
             settings.paths.project_root,

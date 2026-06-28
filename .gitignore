@@ -1,18 +1,25 @@
 .env
 support_graph.toml
 .pytest_cache/
+.coverage
 .venv/
 __pycache__/
 *.pyc
 support_graph.egg-info/
+grounded_support_rag.egg-info/
 
 data/derived/chunks/*.jsonl
 data/derived/examples/*.jsonl
 
 outputs/evals/*
 !outputs/evals/.gitkeep
+outputs/runs/*
+!outputs/runs/.gitkeep
 outputs/traces/*.jsonl
 !outputs/traces/.gitkeep
+logs/*
 logs/*.log
-!logs/.gitkeep
 support_graph.toml
+
+raw/*
+raw/kubernetes/

@@ -17,6 +17,7 @@ from support_graph.logging_utils import get_logger
 from support_graph.providers import (
     build_chat_model as build_provider_chat_model,
     chat_provider as resolved_chat_provider,
+    embedding_provider as resolved_embedding_provider,
 )
 from support_graph.retrieval.index import load_chunk_records
 from support_graph.retrieval.retrieve import (
@@ -1098,7 +1099,6 @@ async def build_runtime_async(
         chat_model=resolved_resources.chat_model,
         chunk_records_by_doc=resolved_resources.chunk_records_by_doc,
         prompts=resolved_resources.prompts,
-        llm_semaphore=resolved_resources.llm_semaphore,
         trace_path=resolved_trace_path,
         run_id=run_id,
         event_sink=event_sink,

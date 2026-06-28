@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, cast
 
 from support_graph.data._utils import normalize_domains, normalize_turn
+from support_graph.data.kubernetes import load_kubernetes_documents
 from support_graph.types import (
     DatasetSplitLike,
     Dialogue,
     Document,
     DocumentSpan,
+    Domain,
     DomainLike,
     parse_dataset_split,
     parse_domain,
@@ -123,6 +125,9 @@ def load_documents(
     """
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
+    if domain_filter == {Domain.KUBERNETES}:
+        return load_kubernetes_documents(dataset_root)
+
     payload = _load_json(dataset_root / DOC_FILENAME)
     doc_data = _require_dict(payload.get("doc_data"), "doc_data")
     documents: list[Document] = []
@@ -198,6 +203,8 @@ def load_dialogues(
 
     dataset_root = Path(dataset_root)
     domain_filter = normalize_domains(domains)
+    if domain_filter and Domain.KUBERNETES in domain_filter:
+        raise ValueError("Kubernetes uses curated eval subsets, not dialogue files.")
     resolved_split = parse_dataset_split(split)
     payload = _load_json(
         dataset_root / DIAL_FILENAME_TEMPLATE.format(split=resolved_split)

@@ -42,6 +42,7 @@ from support_graph.data.examples import build_turn_examples, write_examples_json
 from support_graph.data.examples import (
     load_example_record as load_example_record_from_paths,
 )
+from support_graph.data.kubernetes import fetch_kubernetes_docs
 from support_graph.evaluation.experiment import run_smoke10_experiment_async
 from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
@@ -379,6 +380,28 @@ def _build_chunks(args: argparse.Namespace) -> int:
             f"Domain: {domain}",
             f"Documents: {len(documents)}",
             f"Chunks: {len(chunks)}",
+            f"Artifact: {output_path}",
+        ]
+    )
+    return 0
+
+
+def _fetch_kubernetes_docs(args: argparse.Namespace) -> int:
+    settings = _load_settings(args)
+    output_path = Path(args.output)
+    if not output_path.is_absolute():
+        output_path = settings.paths.project_root / output_path
+    manifest = fetch_kubernetes_docs(
+        output_path,
+        ref=args.ref,
+        replace=args.replace,
+    )
+    print_lines(
+        [
+            "SupportGraph Fetch Kubernetes Docs",
+            f"Ref: {manifest['requested_ref']}",
+            f"Resolved SHA: {manifest['resolved_sha']}",
+            f"Docs Path: {manifest['docs_path']}",
             f"Artifact: {output_path}",
         ]
     )
@@ -877,6 +900,7 @@ def _serve_ui(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         CliHandlers(
+            fetch_kubernetes_docs=_fetch_kubernetes_docs,
             build_chunks=_build_chunks,
             build_examples=_build_examples,
             build_subsets=_build_subsets,

@@ -278,6 +278,8 @@ def _load_or_build_examples(
     split: DatasetSplitLike,
 ) -> list[Example]:
     resolved_domain = parse_domain(domain)
+    if resolved_domain.value == "kubernetes":
+        raise ValueError("Kubernetes uses curated eval subsets, not dialogue files.")
     resolved_split = parse_dataset_split(split)
     path = settings.paths.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
     if path.exists():
@@ -292,6 +294,21 @@ def _load_or_build_examples(
     return examples
 
 
+def _eval_subset_path(settings: Any, domain: DomainLike, subset: EvalSubset) -> Path:
+    domain_path = (
+        settings.paths.project_root
+        / "data/eval_subsets"
+        / str(parse_domain(domain))
+        / f"{subset}.jsonl"
+    )
+    if domain_path.exists():
+        return domain_path
+    legacy_path = settings.paths.project_root / "data/eval_subsets" / f"{subset}.jsonl"
+    if legacy_path.exists():
+        return legacy_path
+    return domain_path
+
+
 def load_eval_examples(
     settings: Any,
     domain: DomainLike,
@@ -299,12 +316,8 @@ def load_eval_examples(
     subset: EvalSubsetLike,
 ) -> tuple[list[Example], str]:
     resolved_subset = parse_eval_subset(subset)
-    if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_ABLATION}:
-        path = (
-            settings.paths.project_root
-            / "data/eval_subsets"
-            / f"{resolved_subset}.jsonl"
-        )
+    if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_EXPERIMENT}:
+        path = _eval_subset_path(settings, domain, resolved_subset)
         return load_subset_jsonl(path), str(resolved_subset)
     examples = _load_or_build_examples(settings, domain, split)
     return examples, str(EvalSubset.FULL_VALIDATION)

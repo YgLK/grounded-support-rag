@@ -248,7 +248,7 @@ def _initial_state(
         "graph_path": [],
         "run_id": runtime.run_id,
         "max_attempts": max_attempts or config.max_retrieval_attempts,
-        "ablation_options": dict(config.ablation_options or {}),
+        "experiment_options": dict(config.experiment_options or {}),
         "fallback_events": [],
     }
 

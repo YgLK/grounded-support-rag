@@ -108,3 +108,13 @@ uv run grounded-support-rag run --example-id 'dmv::1409501a35697e0ce68561e29577b
 uv run grounded-support-rag eval --split validation --domain dmv
 uv run grounded-support-rag ui --host 127.0.0.1 --port 8008
 ```
+
+Kubernetes docs corpus:
+
+```bash
+uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
+# set [dataset].root = "raw/kubernetes/current" and enabled_domains = ["kubernetes"]
+uv run grounded-support-rag build-chunks --domain kubernetes
+uv run grounded-support-rag index-docs --domain kubernetes
+uv run grounded-support-rag eval --domain kubernetes --subset smoke
+```

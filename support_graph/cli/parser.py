@@ -19,6 +19,7 @@ Subparsers = argparse._SubParsersAction
 
 @dataclass(frozen=True)
 class CliHandlers:
+    fetch_kubernetes_docs: CommandHandler
     build_chunks: CommandHandler
     build_examples: CommandHandler
     build_subsets: CommandHandler
@@ -65,6 +66,31 @@ def _register_build_chunks(subparsers: Subparsers, handlers: CliHandlers) -> Non
         "--output", default=None, help="Optional JSONL output path."
     )
     build_chunks_parser.set_defaults(func=handlers.build_chunks)
+
+
+def _register_fetch_kubernetes_docs(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
+    fetch_parser = subparsers.add_parser(
+        "fetch-kubernetes-docs",
+        help="Fetch a pinned Kubernetes website docs snapshot.",
+    )
+    fetch_parser.add_argument(
+        "--ref",
+        default="main",
+        help="Git ref or SHA from kubernetes/website. Defaults to main.",
+    )
+    fetch_parser.add_argument(
+        "--output",
+        default="raw/kubernetes/current",
+        help="Output corpus directory.",
+    )
+    fetch_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace the output directory if it already exists.",
+    )
+    fetch_parser.set_defaults(func=handlers.fetch_kubernetes_docs)
 
 
 def _register_build_examples(subparsers: Subparsers, handlers: CliHandlers) -> None:
@@ -319,6 +345,7 @@ def _register_ui(subparsers: Subparsers, handlers: CliHandlers) -> None:
 
 def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
     command_registrars: tuple[Callable[[Subparsers, CliHandlers], None], ...] = (
+        _register_fetch_kubernetes_docs,
         _register_build_chunks,
         _register_build_examples,
         _register_build_subsets,
