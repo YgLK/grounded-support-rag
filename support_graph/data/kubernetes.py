@@ -137,7 +137,7 @@ def _slug(value: str) -> str:
 
 def _doc_id(path: Path, docs_root: Path) -> str:
     relative = path.relative_to(docs_root).with_suffix("")
-    if relative.name == "index":
+    if relative.name in {"index", "_index"}:
         relative = relative.parent
     return relative.as_posix() or "index"
 

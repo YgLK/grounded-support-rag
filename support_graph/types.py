@@ -55,6 +55,7 @@ EvalSubsetLike: TypeAlias = EvalSubset | str
 TargetMode = Literal["answer", "follow_up"]
 TurnRole = Literal["agent", "user"]
 QueryContextRole = Literal["agent", "user", "unknown"]
+AnswerType = Literal["definition", "procedure", "diagnosis", "clarification", "abstain"]
 
 
 class Reference(TypedDict):
@@ -130,7 +131,23 @@ class ChunkRecord(TypedDict):
     end_sec: int | None
 
 
-class Example(TypedDict):
+class RAGEvalFields(TypedDict, total=False):
+    """Optional RAG-triad eval fields layered on top of Example.
+
+    When present, these supersede the legacy gold_doc_ids/gold_span_ids/target_turn
+    gating for retrieval and answer scoring. When absent, the harness falls back to
+    the legacy exact gold-doc/gold-span/text-match behavior so existing DMV evals
+    keep working unchanged.
+    """
+
+    expected_sources: list[str]
+    acceptable_sources: list[str]
+    required_points: list[str]
+    forbidden_claims: list[str]
+    answer_type: AnswerType
+
+
+class Example(RAGEvalFields):
     """A turn-level example for evaluation."""
 
     example_id: str
@@ -233,6 +250,20 @@ class MetricsDict(TypedDict, total=False):
     citation_coverage: float | None
     citations_valid: float
     end_to_end_success: float
+    # Graded retrieval metrics over expected_sources + acceptable_sources.
+    hit_at_k: float | None
+    precision_at_k: float | None
+    graded_mrr_at_k: float | None
+    ndcg_at_k: float | None
+    # RAG triad buckets (0..1). Deterministic v1; judge fields populated when enabled.
+    context_relevance: float
+    faithfulness: float
+    answer_relevance: float
+    answer_correctness: float | dict[str, Any]
+    required_points_covered: float
+    forbidden_claims_present: float
+    # Optional LLM judge payload.
+    judge: dict[str, Any]
 
 
 class PredictionRecord(TypedDict, total=False):
@@ -244,6 +275,11 @@ class PredictionRecord(TypedDict, total=False):
     latest_user_utterance: str | None
     gold_doc_ids: list[str]
     gold_span_ids: list[str]
+    expected_sources: list[str]
+    acceptable_sources: list[str]
+    required_points: list[str]
+    forbidden_claims: list[str]
+    answer_type: AnswerType
     target_text: str
     decision: str
     response_text: str
@@ -315,6 +351,7 @@ def parse_eval_subset(value: EvalSubsetLike) -> EvalSubset:
 
 
 __all__ = [
+    "AnswerType",
     "ChatModelLike",
     "ChoiceStrEnum",
     "ChunkRecord",
@@ -338,6 +375,7 @@ __all__ = [
     "QueryContext",
     "QueryContextRole",
     "QueryContextTurn",
+    "RAGEvalFields",
     "Reference",
     "RetrieverLike",
     "TargetMode",

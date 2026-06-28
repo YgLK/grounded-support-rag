@@ -664,6 +664,71 @@ wheels = [
 ]
 
 [[package]]
+name = "grounded-support-rag"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "jinja2" },
+    { name = "langchain" },
+    { name = "langchain-community" },
+    { name = "langchain-core" },
+    { name = "langchain-ollama" },
+    { name = "langchain-openai" },
+    { name = "langchain-postgres" },
+    { name = "langgraph" },
+    { name = "markdown" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "rank-bm25" },
+    { name = "sacrebleu" },
+    { name = "stop-words" },
+    { name = "tenacity" },
+    { name = "tqdm" },
+    { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.135.1" },
+    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "langchain", specifier = ">=1.2.12" },
+    { name = "langchain-community", specifier = ">=0.4.1" },
+    { name = "langchain-core", specifier = ">=1.2.19" },
+    { name = "langchain-ollama", specifier = ">=1.0.1" },
+    { name = "langchain-openai", specifier = ">=1.1.11" },
+    { name = "langchain-postgres", specifier = ">=0.0.17" },
+    { name = "langgraph", specifier = ">=1.1.2" },
+    { name = "markdown", specifier = ">=3.10.2" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "rank-bm25", specifier = ">=0.2.2" },
+    { name = "sacrebleu", specifier = ">=2.6.0" },
+    { name = "stop-words", specifier = ">=2025.11.4" },
+    { name = "tenacity", specifier = ">=9.1.4" },
+    { name = "tqdm", specifier = ">=4.67.3" },
+    { name = "uvicorn", specifier = ">=0.42.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2375,69 +2440,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b7/cb/27ee3d3e0b7b1169269e83331c075b2dd3c4bcc1a005821174c32a273dc4/stop_words-2025.11.4.tar.gz", hash = "sha256:0459072b54b11e43a6fb4c5b05bda87d2accfc4f14c1697974f3739af0f7b43d", size = 68622, upload-time = "2025-11-03T21:07:42.359Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/f5/992d668d21590ed39c6a9d1c62220e9b4b086a165e15fcb7580764cc7ceb/stop_words-2025.11.4-py3-none-any.whl", hash = "sha256:b3fc0722e42b722a9350aad59a8ba5850085a5b45a4ba9de390b4f5c4b86df25", size = 59496, upload-time = "2025-11-03T21:07:41.14Z" },
-]
-
-[[package]]
-name = "grounded-support-rag"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "jinja2" },
-    { name = "langchain" },
-    { name = "langchain-community" },
-    { name = "langchain-core" },
-    { name = "langchain-ollama" },
-    { name = "langchain-openai" },
-    { name = "langchain-postgres" },
-    { name = "langgraph" },
-    { name = "markdown" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "rank-bm25" },
-    { name = "sacrebleu" },
-    { name = "stop-words" },
-    { name = "tenacity" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.135.1" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "langchain", specifier = ">=1.2.12" },
-    { name = "langchain-community", specifier = ">=0.4.1" },
-    { name = "langchain-core", specifier = ">=1.2.19" },
-    { name = "langchain-ollama", specifier = ">=1.0.1" },
-    { name = "langchain-openai", specifier = ">=1.1.11" },
-    { name = "langchain-postgres", specifier = ">=0.0.17" },
-    { name = "langgraph", specifier = ">=1.1.2" },
-    { name = "markdown", specifier = ">=3.10.2" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "rank-bm25", specifier = ">=0.2.2" },
-    { name = "sacrebleu", specifier = ">=2.6.0" },
-    { name = "stop-words", specifier = ">=2025.11.4" },
-    { name = "tenacity", specifier = ">=9.1.4" },
-    { name = "uvicorn", specifier = ">=0.42.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pre-commit", specifier = ">=4.5.1" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
 ]
 
 [[package]]

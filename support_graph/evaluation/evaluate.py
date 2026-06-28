@@ -6,6 +6,7 @@ import asyncio
 import csv
 import inspect
 import json
+import math
 import re
 from collections import Counter
 from datetime import datetime
@@ -78,6 +79,14 @@ __all__ = [
     "token_f1",
     "exact_match",
     "sacrebleu_score",
+    "hit_at_k",
+    "precision_at_k",
+    "graded_mrr_at_k",
+    "ndcg_at_k",
+    "required_point_coverage",
+    "forbidden_claims_hit",
+    "has_rag_eval_fields",
+    "RAGTriadJudge",
 ]
 
 
@@ -94,11 +103,22 @@ MANUAL_REVIEW_COLUMNS = [
     "response_text",
     "gold_doc_ids",
     "gold_span_ids",
+    "expected_sources",
+    "acceptable_sources",
+    "required_points",
+    "forbidden_claims",
+    "answer_type",
     "final_query",
     "retrieval_attempts",
     "retrieval_ranked_chunk_ids",
     "retrieved_chunk_ids",
     "citation_chunk_ids",
+    "context_relevance",
+    "faithfulness",
+    "answer_relevance",
+    "required_points_covered",
+    "forbidden_claims_present",
+    "judge_rationale",
     "decision_correct",
     "evidence_relevant",
     "no_unsupported_claims",
@@ -207,6 +227,234 @@ def mrr_at_k(
     return 0.0
 
 
+def _graded_relevance_map(
+    expected_sources: list[str], acceptable_sources: list[str]
+) -> dict[str, int]:
+    """Map doc_id -> graded relevance: expected=2, acceptable=1, else 0."""
+    grades: dict[str, int] = {}
+    for doc_id in acceptable_sources:
+        if doc_id:
+            grades[doc_id] = 1
+    for doc_id in expected_sources:
+        if doc_id:
+            grades[doc_id] = 2
+    return grades
+
+
+def hit_at_k(
+    expected_sources: list[str],
+    acceptable_sources: list[str],
+    retrieved_chunks: list[NormalizedRetrievalHit],
+    k: int = 5,
+) -> float | None:
+    """1.0 if any expected or acceptable source appears in top-k, else 0.0."""
+    relevant = {doc_id for doc_id in (expected_sources + acceptable_sources) if doc_id}
+    if not relevant:
+        return None
+    retrieved = {
+        chunk.get("doc_id") for chunk in retrieved_chunks[:k] if chunk.get("doc_id")
+    }
+    return 1.0 if relevant & retrieved else 0.0
+
+
+def precision_at_k(
+    expected_sources: list[str],
+    acceptable_sources: list[str],
+    retrieved_chunks: list[NormalizedRetrievalHit],
+    k: int = 5,
+) -> float | None:
+    """Fraction of top-k retrieved docs that are expected or acceptable sources."""
+    relevant = {doc_id for doc_id in (expected_sources + acceptable_sources) if doc_id}
+    if not relevant:
+        return None
+    top_k = retrieved_chunks[:k]
+    if not top_k:
+        return 0.0
+    hits = sum(1 for chunk in top_k if chunk.get("doc_id") in relevant)
+    return hits / len(top_k)
+
+
+def graded_mrr_at_k(
+    expected_sources: list[str],
+    acceptable_sources: list[str],
+    retrieved_chunks: list[NormalizedRetrievalHit],
+    k: int = 5,
+) -> float | None:
+    """MRR using graded relevance: first hit weighted by grade (2 / rank for expected, 1 / rank for acceptable)."""
+    grades = _graded_relevance_map(expected_sources, acceptable_sources)
+    if not grades:
+        return None
+    best = 0.0
+    for rank, chunk in enumerate(retrieved_chunks[:k], start=1):
+        doc_id = chunk.get("doc_id")
+        if doc_id in grades:
+            best = grades[doc_id] / rank
+            break
+    # Normalize to [0, 1] using max possible grade (2).
+    return best / 2.0
+
+
+def ndcg_at_k(
+    expected_sources: list[str],
+    acceptable_sources: list[str],
+    retrieved_chunks: list[NormalizedRetrievalHit],
+    k: int = 5,
+) -> float | None:
+    """Discounted cumulative gain for expected sources plus alternate sources.
+
+    Expected sources are the ideal target. Acceptable sources are valid alternates
+    that should earn partial credit when expected sources are not retrieved, but
+    they are not extra required documents in the ideal ranking.
+    """
+    grades = _graded_relevance_map(expected_sources, acceptable_sources)
+    if not grades:
+        return None
+    top_k = retrieved_chunks[:k]
+    dcg = 0.0
+    seen_doc_ids: set[str] = set()
+    for rank, chunk in enumerate(top_k, start=1):
+        doc_id = chunk.get("doc_id")
+        if not doc_id or doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(doc_id)
+        grade = grades.get(doc_id, 0)
+        if grade > 0:
+            dcg += (2.0**grade - 1.0) / math.log2(rank + 1)
+    expected_grades = [2 for doc_id in expected_sources if doc_id]
+    ideal_grades = expected_grades[:k] or sorted(grades.values(), reverse=True)[:k]
+    idcg = sum(
+        (2.0**grade - 1.0) / math.log2(rank + 1)
+        for rank, grade in enumerate(ideal_grades, start=1)
+        if grade > 0
+    )
+    return dcg / idcg if idcg > 0 else 0.0
+
+
+def required_point_coverage(required_points: list[str], answer: str) -> float | None:
+    """Deterministic v1: fraction of required points covered by normalized token overlap.
+
+    A required point is "covered" if every content token in the point appears in the
+    answer (bag-of-words containment). Returns None when no required points are
+    declared so callers can skip aggregation.
+    """
+    if not required_points:
+        return None
+    answer_tokens = set(_normalize_text(answer))
+    covered = 0
+    for point in required_points:
+        point_tokens = _normalize_text(point)
+        if not point_tokens:
+            continue
+        if all(token in answer_tokens for token in point_tokens):
+            covered += 1
+    declared = sum(1 for point in required_points if _normalize_text(point))
+    return covered / declared if declared else 0.0
+
+
+def forbidden_claims_hit(forbidden_claims: list[str], answer: str) -> float | None:
+    """Fraction of forbidden claims present in the answer (0 = clean, 1 = all present)."""
+    if not forbidden_claims:
+        return None
+    answer_tokens = set(_normalize_text(answer))
+    hits = 0
+    declared = 0
+    for claim in forbidden_claims:
+        claim_tokens = _normalize_text(claim)
+        if not claim_tokens:
+            continue
+        declared += 1
+        if all(token in answer_tokens for token in claim_tokens):
+            hits += 1
+    return hits / declared if declared else 0.0
+
+
+def has_rag_eval_fields(example: dict) -> bool:
+    """True when an example declares any RAG-triad eval field."""
+    return any(
+        example.get(field)
+        for field in (
+            "expected_sources",
+            "acceptable_sources",
+            "required_points",
+            "forbidden_claims",
+            "answer_type",
+        )
+    )
+
+
+class RAGTriadJudge:
+    """Optional LLM-as-a-judge adapter producing RAG-triad verdicts.
+
+    Disabled by default. When constructed with an inner ``RAGJudge`` (or any
+    object exposing the same async ``faithfulness``/``answer_relevance``/
+    ``context_relevance`` methods), it returns a verdict dict with
+    ``faithful``, ``answer_relevant``, ``required_points_covered``,
+    ``unsupported_claims``, and ``rationale`` fields. When the inner judge is
+    ``None``, :meth:`evaluate` returns ``None`` so callers fall back to the
+    deterministic v1 metrics.
+    """
+
+    def __init__(self, inner: Any | None = None):
+        self._inner = inner
+
+    @classmethod
+    def disabled(cls) -> RAGTriadJudge:
+        return cls(inner=None)
+
+    @property
+    def enabled(self) -> bool:
+        return self._inner is not None
+
+    async def evaluate(
+        self,
+        *,
+        query: str,
+        answer: str,
+        context: str,
+        required_points: list[str],
+        forbidden_claims: list[str],
+    ) -> dict | None:
+        if not self.enabled:
+            return None
+        inner = self._inner
+        faithfulness_result = await inner.faithfulness(context, answer)
+        answer_relevance_result = await inner.answer_relevance(query, answer)
+        context_relevance_result = await inner.context_relevance(query, context)
+        return {
+            "faithful": float(faithfulness_result.score),
+            "answer_relevant": float(answer_relevance_result.score),
+            "context_relevant": float(context_relevance_result.score),
+            "required_points_covered": None,
+            "unsupported_claims": [],
+            "rationale": " | ".join(
+                filter(
+                    None,
+                    [
+                        f"faithfulness: {faithfulness_result.reason}",
+                        f"answer_relevance: {answer_relevance_result.reason}",
+                        f"context_relevance: {context_relevance_result.reason}",
+                    ],
+                )
+            ),
+        }
+
+
+def _join_chunk_text(chunks: list[dict], *, limit: int = 1500) -> str:
+    parts: list[str] = []
+    total = 0
+    for chunk in chunks:
+        text = str(chunk.get("text") or "").strip()
+        if not text:
+            continue
+        if total + len(text) > limit:
+            text = text[: max(0, limit - total)]
+        parts.append(text)
+        total += len(text)
+        if total >= limit:
+            break
+    return "\n\n".join(parts)
+
+
 def citation_coverage(
     gold_span_ids: list[str], citations: list[Citation]
 ) -> float | None:
@@ -240,6 +488,8 @@ def _retrieval_metric_available(retrieval_top_k: int | None, *, k: int) -> bool:
 def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
     target_mode = example.get("target_mode")
     decision = prediction.get("decision")
+    if has_rag_eval_fields(example):
+        return _rag_failure_label(example, prediction, metrics)
     match target_mode:
         case "answer":
             if decision == "clarify":
@@ -270,6 +520,59 @@ def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None
                 return "wrong_doc"
             return None
     raise ValueError(f"Unknown target_mode: {target_mode}")
+
+
+def _rag_failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
+    """Failure labels for RAG-triad examples.
+
+    Splits the legacy ``unsupported_answer`` bucket into clearer labels:
+    ``retrieval_miss``, ``right_source_wrong_section``, ``unfaithful_answer``,
+    ``incomplete_answer``, ``irrelevant_answer``, and ``weak_citations``.
+    """
+    target_mode = example.get("target_mode")
+    decision = prediction.get("decision")
+    if target_mode != "answer":
+        if (metrics.get("hit_at_k") or 0.0) == 0.0 and (
+            metrics.get("doc_recall_at_3") or 0.0
+        ) == 0.0:
+            return "retrieval_miss"
+        return None
+    if decision == "clarify":
+        return "irrelevant_answer"
+    if decision == "abstain":
+        if (metrics.get("hit_at_k") or 0.0) > 0 or (
+            metrics.get("doc_recall_at_3") or 0.0
+        ) > 0:
+            return "incomplete_answer"
+        return "retrieval_miss"
+    # decision == "answer"
+    hit = metrics.get("hit_at_k")
+    if hit is not None:
+        retrieval_ok = hit > 0.0
+    else:
+        retrieval_ok = (metrics.get("doc_recall_at_3") or 0.0) > 0.0
+    if not retrieval_ok:
+        if len(example.get("turns_before_target", [])) >= 3:
+            return "retrieval_miss"
+        return "retrieval_miss"
+    # Retrieved an on-target source but maybe wrong section.
+    expected_hits = (metrics.get("doc_recall_at_3") or 0.0) > 0.0
+    span_miss = (metrics.get("span_recall_at_5") or 0.0) == 0.0
+    if expected_hits and span_miss and (metrics.get("precision_at_k") or 0.0) < 1.0:
+        return "right_source_wrong_section"
+    if (metrics.get("citations_valid") or 0.0) == 0.0 or (
+        metrics.get("citation_coverage") or 0.0
+    ) < 1.0:
+        return "weak_citations"
+    faithfulness = metrics.get("faithfulness")
+    if faithfulness is not None and faithfulness < 1.0:
+        return "unfaithful_answer"
+    if (metrics.get("required_points_covered") or 1.0) < 1.0:
+        return "incomplete_answer"
+    answer_relevance = metrics.get("answer_relevance")
+    if answer_relevance is not None and answer_relevance < 1.0:
+        return "irrelevant_answer"
+    return None
 
 
 def _load_or_build_examples(
@@ -368,7 +671,7 @@ def _prediction_record(
     failure_label: str | None = None,
     runtime_error: dict | None = None,
 ) -> dict:
-    return {
+    record = {
         "example_id": example.get("example_id"),
         "target_mode": example.get("target_mode"),
         "target_turn_id": example.get("target_turn_id"),
@@ -387,6 +690,17 @@ def _prediction_record(
         "failure_label": failure_label,
         **({"runtime_error": runtime_error} if runtime_error is not None else {}),
     }
+    if has_rag_eval_fields(example):
+        record.update(
+            {
+                "expected_sources": example.get("expected_sources", []),
+                "acceptable_sources": example.get("acceptable_sources", []),
+                "required_points": example.get("required_points", []),
+                "forbidden_claims": example.get("forbidden_claims", []),
+                "answer_type": example.get("answer_type"),
+            }
+        )
+    return record
 
 
 def _prediction_metrics(
@@ -394,11 +708,13 @@ def _prediction_metrics(
     prediction: dict,
     *,
     retrieval_top_k: int | None = None,
+    judge_verdict: dict | None = None,
 ) -> dict:
     target_text = str(example.get("target_turn", {}).get("utterance", ""))
     retrieval_ranked_chunks = _prediction_retrieval_ranked_chunks(prediction)
     retrieved_chunks = _prediction_retrieved_chunks(prediction)
     citations = prediction.get("citations", [])
+    response_text = str(prediction.get("response_text", ""))
     doc_recalls = {
         k: (
             doc_recall_at_k(
@@ -421,10 +737,10 @@ def _prediction_metrics(
         if _retrieval_metric_available(retrieval_top_k, k=5)
         else None
     )
-    rouge = rouge_l_f1(str(prediction.get("response_text", "")), target_text)
-    f1 = token_f1(str(prediction.get("response_text", "")), target_text)
-    em = exact_match(str(prediction.get("response_text", "")), target_text)
-    bleu = sacrebleu_score(str(prediction.get("response_text", "")), target_text)
+    rouge = rouge_l_f1(response_text, target_text)
+    f1 = token_f1(response_text, target_text)
+    em = exact_match(response_text, target_text)
+    bleu = sacrebleu_score(response_text, target_text)
     citation_cov = citation_coverage(example.get("gold_span_ids", []), citations)
     citations_valid = (
         1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
@@ -438,7 +754,7 @@ def _prediction_metrics(
         and citations_valid == 1.0
         and text_success
     )
-    return {
+    metrics: dict = {
         "doc_recall_at_1": doc_recalls[1],
         "doc_recall_at_3": doc_recalls[3],
         "doc_recall_at_5": doc_recalls[5],
@@ -453,6 +769,88 @@ def _prediction_metrics(
         "citations_valid": citations_valid,
         "end_to_end_success": 1.0 if end_to_end_success else 0.0,
     }
+
+    if has_rag_eval_fields(example):
+        expected_sources = example.get("expected_sources", [])
+        acceptable_sources = example.get("acceptable_sources", [])
+        required_points = example.get("required_points", [])
+        forbidden_claims = example.get("forbidden_claims", [])
+        k = 5
+        graded_available = _retrieval_metric_available(retrieval_top_k, k=k)
+        hit = (
+            hit_at_k(expected_sources, acceptable_sources, retrieval_ranked_chunks, k=k)
+            if graded_available
+            else None
+        )
+        precision = (
+            precision_at_k(
+                expected_sources, acceptable_sources, retrieval_ranked_chunks, k=k
+            )
+            if graded_available
+            else None
+        )
+        graded_mrr = (
+            graded_mrr_at_k(
+                expected_sources, acceptable_sources, retrieval_ranked_chunks, k=k
+            )
+            if graded_available
+            else None
+        )
+        ndcg = (
+            ndcg_at_k(
+                expected_sources, acceptable_sources, retrieval_ranked_chunks, k=k
+            )
+            if graded_available
+            else None
+        )
+        metrics.update(
+            {
+                "hit_at_k": hit,
+                "precision_at_k": precision,
+                "graded_mrr_at_k": graded_mrr,
+                "ndcg_at_k": ndcg,
+            }
+        )
+
+        # Deterministic v1 RAG triad proxies.
+        context_relevance = precision if precision is not None else 0.0
+        forbidden_hit = forbidden_claims_hit(forbidden_claims, response_text)
+        forbidden_score = forbidden_hit if forbidden_hit is not None else 0.0
+        faithfulness = 0.0 if forbidden_score > 0.0 else None
+        answer_relevance = None
+        points_covered = required_point_coverage(required_points, response_text)
+        points_score = points_covered if points_covered is not None else 1.0
+        answer_correctness = {
+            "required_points_covered": points_score,
+            "forbidden_claims_present": forbidden_score,
+            "reference_similarity": {
+                "rouge_l": rouge,
+                "token_f1": f1,
+                "exact_match": em,
+                "sacrebleu": bleu,
+            },
+        }
+        metrics.update(
+            {
+                "context_relevance": context_relevance,
+                "faithfulness": faithfulness,
+                "answer_relevance": answer_relevance,
+                "answer_correctness": answer_correctness,
+                "required_points_covered": points_score,
+                "forbidden_claims_present": forbidden_score,
+            }
+        )
+
+        if judge_verdict is not None:
+            metrics["judge"] = judge_verdict
+            if judge_verdict.get("faithful") is not None:
+                metrics["faithfulness"] = float(judge_verdict["faithful"])
+            if judge_verdict.get("answer_relevant") is not None:
+                metrics["answer_relevance"] = float(judge_verdict["answer_relevant"])
+            if judge_verdict.get("context_relevant") is not None:
+                metrics["context_relevance"] = float(judge_verdict["context_relevant"])
+
+    return metrics
 
 
 def _safe_mean(values: list[float | None]) -> float | None:
@@ -491,6 +889,28 @@ def _metric_mean(records: list[dict], metric: str) -> float | None:
     return _safe_mean([record["metrics"].get(metric) for record in records])
 
 
+def _rag_records(records: list[dict]) -> list[dict]:
+    return [record for record in records if has_rag_eval_fields(record)]
+
+
+def _rag_triad_metrics(records: list[dict]) -> dict:
+    rag = _rag_records(records)
+    if not rag:
+        return {}
+    return {
+        "context_relevance": _metric_mean(rag, "context_relevance"),
+        "faithfulness": _metric_mean(rag, "faithfulness"),
+        "answer_relevance": _metric_mean(rag, "answer_relevance"),
+        "required_points_covered": _metric_mean(rag, "required_points_covered"),
+        "forbidden_claims_present": _metric_mean(rag, "forbidden_claims_present"),
+        "hit_at_k": _metric_mean(rag, "hit_at_k"),
+        "precision_at_k": _metric_mean(rag, "precision_at_k"),
+        "graded_mrr_at_k": _metric_mean(rag, "graded_mrr_at_k"),
+        "ndcg_at_k": _metric_mean(rag, "ndcg_at_k"),
+        "examples": len(rag),
+    }
+
+
 def _aggregate_metrics(predictions: list[dict]) -> dict:
     answer_predictions = [
         record for record in predictions if record.get("target_mode") == "answer"
@@ -526,11 +946,14 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
         )
         p95_latency = ordered_latencies[p95_index]
 
+    rag_answer = _rag_triad_metrics(answer_predictions)
+    rag_overall = _rag_triad_metrics(predictions)
     return {
         "counts": {
             "examples": len(predictions),
             "answer_examples": len(answer_predictions),
             "follow_up_examples": len(follow_up_predictions),
+            "rag_examples": len(_rag_records(predictions)),
         },
         "retrieval": {
             "answer": retrieval_metrics(answer_predictions),
@@ -552,6 +975,10 @@ def _aggregate_metrics(predictions: list[dict]) -> dict:
                     "end_to_end_success",
                 ),
             }
+        },
+        "rag": {
+            "answer": rag_answer,
+            "overall": rag_overall,
         },
         "decision_distribution": {
             "overall": _rate_map(predictions, "decision"),
@@ -620,6 +1047,8 @@ def _manual_review_rows(run_id: str, predictions: list[dict]) -> list[dict]:
         if not (is_follow_up or is_answer_failure):
             continue
         trace_summary = record.get("trace_summary", {})
+        metrics = record.get("metrics", {})
+        judge = metrics.get("judge") or {}
         rows.append(
             {
                 "run_id": run_id,
@@ -631,6 +1060,13 @@ def _manual_review_rows(run_id: str, predictions: list[dict]) -> list[dict]:
                 "response_text": record.get("response_text", ""),
                 "gold_doc_ids": _compact_join(record.get("gold_doc_ids", [])),
                 "gold_span_ids": _compact_join(record.get("gold_span_ids", [])),
+                "expected_sources": _compact_join(record.get("expected_sources", [])),
+                "acceptable_sources": _compact_join(
+                    record.get("acceptable_sources", [])
+                ),
+                "required_points": _compact_join(record.get("required_points", [])),
+                "forbidden_claims": _compact_join(record.get("forbidden_claims", [])),
+                "answer_type": record.get("answer_type", "") or "",
                 "final_query": trace_summary.get("final_query", ""),
                 "retrieval_attempts": trace_summary.get("retrieval_attempts", 0),
                 "retrieval_ranked_chunk_ids": _compact_join(
@@ -642,6 +1078,16 @@ def _manual_review_rows(run_id: str, predictions: list[dict]) -> list[dict]:
                 "citation_chunk_ids": _compact_join(
                     _citation_chunk_ids(record.get("citations", []))
                 ),
+                "context_relevance": _metric_display(metrics.get("context_relevance")),
+                "faithfulness": _metric_display(metrics.get("faithfulness")),
+                "answer_relevance": _metric_display(metrics.get("answer_relevance")),
+                "required_points_covered": _metric_display(
+                    metrics.get("required_points_covered")
+                ),
+                "forbidden_claims_present": _metric_display(
+                    metrics.get("forbidden_claims_present")
+                ),
+                "judge_rationale": judge.get("rationale", ""),
                 "decision_correct": "",
                 "evidence_relevant": "",
                 "no_unsupported_claims": "",
@@ -819,6 +1265,7 @@ async def evaluate_examples_async(
     subset_label: str | None = None,
     manifest_overrides: dict[str, Any] | None = None,
     max_concurrency: int = 1,
+    judge: RAGTriadJudge | None = None,
 ) -> dict:
     resolved_domain = parse_domain(domain)
     resolved_split = parse_dataset_split(split)
@@ -929,6 +1376,24 @@ async def evaluate_examples_async(
             prediction,
             retrieval_top_k=resolved_config.retrieval_top_k,
         )
+        if judge is not None and judge.enabled and has_rag_eval_fields(example):
+            judge_verdict = await judge.evaluate(
+                query=str(
+                    example.get("latest_user_utterance")
+                    or example.get("target_turn", {}).get("utterance", "")
+                ),
+                answer=str(prediction.get("response_text", "")),
+                context=_join_chunk_text(_prediction_retrieved_chunks(prediction)),
+                required_points=example.get("required_points", []),
+                forbidden_claims=example.get("forbidden_claims", []),
+            )
+            if judge_verdict is not None:
+                metrics = _prediction_metrics(
+                    example,
+                    prediction,
+                    retrieval_top_k=resolved_config.retrieval_top_k,
+                    judge_verdict=judge_verdict,
+                )
         record = _prediction_record(
             example,
             prediction,
@@ -1009,6 +1474,17 @@ async def evaluate_examples_async(
         "graph": {
             "enable_retry": resolved_config.llm_max_retries > 1,
             "decision_policy_version": "v1",
+        },
+        "rag_eval": {
+            "enabled": any(has_rag_eval_fields(ex) for ex in selected_examples),
+            "judge_enabled": bool(judge is not None and judge.enabled),
+            "answer_types": sorted(
+                {
+                    str(ex.get("answer_type"))
+                    for ex in selected_examples
+                    if ex.get("answer_type")
+                }
+            ),
         },
         "prompt_version": resolved_config.prompt_version,
         "notes": notes or "Phase 4 MVP eval harness run.",

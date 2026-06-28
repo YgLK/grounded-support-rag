@@ -9,6 +9,7 @@ from typing import Any, Protocol
 import psycopg
 from langchain_core.documents import Document
 from langchain_postgres import PGVector
+from tqdm import tqdm
 
 from support_graph.providers import (
     ProviderConfigLike,
@@ -138,7 +139,13 @@ def _add_document_batches(
     *,
     batch_size: int,
 ) -> None:
-    for start in range(0, len(documents), batch_size):
+    starts = range(0, len(documents), batch_size)
+    for start in tqdm(
+        starts,
+        desc="Indexing chunks",
+        unit="batch",
+        total=len(starts),
+    ):
         end = start + batch_size
         store.add_documents(documents[start:end], ids=vector_ids[start:end])
 

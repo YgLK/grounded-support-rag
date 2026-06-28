@@ -781,3 +781,669 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
 
     assert len(resolved_configs) == 1
     assert seen_resources == [shared_resources, shared_resources]
+
+
+# ---------------------------------------------------------------------------
+# RAG-triad eval upgrade: graded retrieval, required-point coverage, failure
+# labels, backward compatibility, and the optional LLM judge path.
+# ---------------------------------------------------------------------------
+
+
+def test_hit_at_k_with_expected_and_acceptable_sources() -> None:
+    chunks = [
+        {"doc_id": "noise"},
+        {"doc_id": "reference/glossary/pod"},
+        {"doc_id": "concepts/workloads/pods"},
+    ]
+    assert (
+        evaluate.hit_at_k(
+            ["concepts/workloads/pods"],
+            ["reference/glossary/pod"],
+            chunks,
+            k=5,
+        )
+        == 1.0
+    )
+    assert (
+        evaluate.hit_at_k(
+            ["concepts/workloads/pods"],
+            ["reference/glossary/pod"],
+            [{"doc_id": "noise"}],
+            k=5,
+        )
+        == 0.0
+    )
+    assert evaluate.hit_at_k([], [], [{"doc_id": "noise"}], k=5) is None
+
+
+def test_precision_at_k_counts_expected_and_acceptable() -> None:
+    chunks = [
+        {"doc_id": "concepts/workloads/pods"},
+        {"doc_id": "noise"},
+        {"doc_id": "reference/glossary/pod"},
+    ]
+    assert (
+        evaluate.precision_at_k(
+            ["concepts/workloads/pods"],
+            ["reference/glossary/pod"],
+            chunks,
+            k=3,
+        )
+        == 2 / 3
+    )
+
+
+def test_graded_mrr_at_k_weights_expected_above_acceptable() -> None:
+    chunks = [
+        {"doc_id": "reference/glossary/pod"},
+        {"doc_id": "concepts/workloads/pods"},
+    ]
+    # Acceptable (grade 1) at rank 1 -> 1/1 / 2 = 0.5
+    assert (
+        evaluate.graded_mrr_at_k(
+            ["concepts/workloads/pods"],
+            ["reference/glossary/pod"],
+            chunks,
+            k=5,
+        )
+        == 0.5
+    )
+    # Expected (grade 2) at rank 1 -> 2/1 / 2 = 1.0
+    assert (
+        evaluate.graded_mrr_at_k(
+            ["concepts/workloads/pods"],
+            [],
+            [{"doc_id": "concepts/workloads/pods"}],
+            k=5,
+        )
+        == 1.0
+    )
+
+
+def test_ndcg_at_k_with_graded_relevance() -> None:
+    # Non-ideal order: acceptable (grade 1) before expected (grade 2).
+    chunks = [
+        {"doc_id": "reference/glossary/pod"},
+        {"doc_id": "concepts/workloads/pods"},
+        {"doc_id": "noise"},
+    ]
+    ndcg = evaluate.ndcg_at_k(
+        ["concepts/workloads/pods"],
+        ["reference/glossary/pod"],
+        chunks,
+        k=5,
+    )
+    # Ideal order only requires the expected source; acceptable sources are alternates.
+    assert ndcg is not None
+    assert 0.5 < ndcg < 1.0
+    # Perfect ranking: expected source at rank 1. Acceptable source is not required.
+    assert (
+        evaluate.ndcg_at_k(
+            ["concepts/workloads/pods"],
+            ["reference/glossary/pod"],
+            [{"doc_id": "concepts/workloads/pods"}],
+            k=5,
+        )
+        == 1.0
+    )
+    # Repeated chunks from the same expected doc must not push NDCG above 1.0.
+    assert (
+        evaluate.ndcg_at_k(
+            ["concepts/services-networking/service"],
+            [],
+            [
+                {"doc_id": "concepts/services-networking/service"},
+                {"doc_id": "concepts/services-networking/service"},
+            ],
+            k=5,
+        )
+        == 1.0
+    )
+
+
+def test_required_point_coverage_full_partial_and_zero() -> None:
+    answer = (
+        "A Pod is the smallest deployable compute object with shared storage "
+        "and shared network resources."
+    )
+    full = [
+        "smallest deployable compute object",
+        "shared storage",
+        "shared network resources",
+    ]
+    assert evaluate.required_point_coverage(full, answer) == 1.0
+
+    partial = [
+        "smallest deployable compute object",
+        "one or more containers",
+    ]
+    assert evaluate.required_point_coverage(partial, answer) == 0.5
+
+    assert evaluate.required_point_coverage(["missing claim entirely"], answer) == 0.0
+    assert evaluate.required_point_coverage([], answer) is None
+
+
+def test_forbidden_claims_hit_detects_present_claims() -> None:
+    answer = "A Pod is a virtual machine that runs containers."
+    assert evaluate.forbidden_claims_hit(["Pod is a virtual machine"], answer) == 1.0
+    assert (
+        evaluate.forbidden_claims_hit(["Pod is a virtual machine"], "A Pod is a unit.")
+        == 0.0
+    )
+    assert evaluate.forbidden_claims_hit([], answer) is None
+
+
+def test_prediction_metrics_legacy_examples_unchanged_without_rag_fields() -> None:
+    metrics = evaluate._prediction_metrics(
+        {
+            "target_mode": "answer",
+            "target_turn": {"utterance": "Bring proof of insurance."},
+            "gold_doc_ids": ["doc-a"],
+            "gold_span_ids": ["1"],
+        },
+        {
+            "decision": "answer",
+            "response_text": "Bring proof of insurance.",
+            "citations": [{"chunk_id": "chunk-a", "span_ids": ["1"]}],
+            "retrieval_ranked_chunks": [
+                {"doc_id": "doc-a", "chunk_id": "chunk-a", "span_ids": ["1"]}
+            ],
+            "retrieved_chunks": [
+                {"doc_id": "doc-a", "chunk_id": "chunk-a", "span_ids": ["1"]}
+            ],
+        },
+        retrieval_top_k=5,
+    )
+
+    # Legacy metrics present, RAG triad absent.
+    assert metrics["doc_recall_at_5"] == 1.0
+    assert metrics["end_to_end_success"] == 1.0
+    assert "context_relevance" not in metrics
+    assert "faithfulness" not in metrics
+    assert "answer_correctness" not in metrics
+    assert "hit_at_k" not in metrics
+
+
+def test_prediction_metrics_rag_example_emits_triad_and_graded_metrics() -> None:
+    metrics = evaluate._prediction_metrics(
+        {
+            "target_mode": "answer",
+            "target_turn": {
+                "utterance": "A Pod is the smallest deployable compute object."
+            },
+            "gold_doc_ids": ["concepts/workloads/pods"],
+            "gold_span_ids": ["concepts/workloads/pods#overview"],
+            "expected_sources": ["concepts/workloads/pods"],
+            "acceptable_sources": ["reference/glossary/pod"],
+            "required_points": ["smallest deployable compute object"],
+            "forbidden_claims": [],
+            "answer_type": "definition",
+        },
+        {
+            "decision": "answer",
+            "response_text": "A Pod is the smallest deployable compute object.",
+            "citations": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#overview"],
+                }
+            ],
+            "retrieval_ranked_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#overview"],
+                }
+            ],
+            "retrieved_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#overview"],
+                }
+            ],
+        },
+        retrieval_top_k=5,
+    )
+
+    assert metrics["hit_at_k"] == 1.0
+    assert metrics["precision_at_k"] == 1.0
+    assert metrics["ndcg_at_k"] == 1.0
+    assert metrics["context_relevance"] == 1.0
+    assert metrics["faithfulness"] is None
+    assert metrics["answer_relevance"] is None
+    assert metrics["required_points_covered"] == 1.0
+    assert metrics["answer_correctness"]["required_points_covered"] == 1.0
+    assert metrics["answer_correctness"]["reference_similarity"]["rouge_l"] == 1.0
+    # Legacy metrics still present for continuity.
+    assert metrics["doc_recall_at_3"] == 1.0
+    assert metrics["rouge_l"] == 1.0
+
+
+def test_rag_failure_label_retrieval_miss() -> None:
+    example = {
+        "target_mode": "answer",
+        "expected_sources": ["concepts/workloads/pods"],
+        "acceptable_sources": [],
+        "required_points": ["smallest deployable compute object"],
+    }
+    metrics = {
+        "hit_at_k": 0.0,
+        "doc_recall_at_3": 0.0,
+        "span_recall_at_5": 0.0,
+        "precision_at_k": 0.0,
+        "faithfulness": 1.0,
+        "citations_valid": 1.0,
+        "citation_coverage": 1.0,
+        "required_points_covered": 1.0,
+        "answer_relevance": 1.0,
+    }
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, metrics)
+        == "retrieval_miss"
+    )
+
+
+def test_rag_failure_label_right_source_wrong_section() -> None:
+    example = {
+        "target_mode": "answer",
+        "expected_sources": ["concepts/workloads/pods"],
+        "acceptable_sources": ["reference/glossary/pod"],
+        "required_points": ["smallest deployable compute object"],
+    }
+    metrics = {
+        "hit_at_k": 1.0,
+        "doc_recall_at_3": 1.0,
+        "span_recall_at_5": 0.0,
+        "precision_at_k": 0.5,
+        "faithfulness": 1.0,
+        "citations_valid": 1.0,
+        "citation_coverage": 1.0,
+        "required_points_covered": 1.0,
+        "answer_relevance": 1.0,
+    }
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, metrics)
+        == "right_source_wrong_section"
+    )
+
+
+def test_rag_failure_label_weak_citations_and_unfaithful() -> None:
+    example = {
+        "target_mode": "answer",
+        "expected_sources": ["concepts/workloads/pods"],
+        "acceptable_sources": [],
+        "required_points": ["smallest deployable compute object"],
+    }
+    base = {
+        "hit_at_k": 1.0,
+        "doc_recall_at_3": 1.0,
+        "span_recall_at_5": 1.0,
+        "precision_at_k": 1.0,
+        "required_points_covered": 1.0,
+        "answer_relevance": 1.0,
+    }
+    weak = {
+        **base,
+        "faithfulness": 1.0,
+        "citations_valid": 0.0,
+        "citation_coverage": 0.0,
+    }
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, weak)
+        == "weak_citations"
+    )
+    unfaithful = {
+        **base,
+        "faithfulness": 0.0,
+        "citations_valid": 1.0,
+        "citation_coverage": 1.0,
+    }
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, unfaithful)
+        == "unfaithful_answer"
+    )
+
+
+def test_rag_failure_label_incomplete_and_irrelevant() -> None:
+    example = {
+        "target_mode": "answer",
+        "expected_sources": ["concepts/workloads/pods"],
+        "acceptable_sources": [],
+        "required_points": ["smallest deployable compute object"],
+    }
+    base = {
+        "hit_at_k": 1.0,
+        "doc_recall_at_3": 1.0,
+        "span_recall_at_5": 1.0,
+        "precision_at_k": 1.0,
+        "faithfulness": 1.0,
+        "citations_valid": 1.0,
+        "citation_coverage": 1.0,
+        "answer_relevance": 1.0,
+    }
+    incomplete = {**base, "required_points_covered": 0.5}
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, incomplete)
+        == "incomplete_answer"
+    )
+    irrelevant = {**base, "answer_relevance": 0.5, "required_points_covered": 1.0}
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, irrelevant)
+        == "irrelevant_answer"
+    )
+
+
+def test_legacy_failure_labels_preserved_when_no_rag_fields() -> None:
+    example = {
+        "target_mode": "answer",
+        "gold_doc_ids": ["doc-a"],
+        "gold_span_ids": ["1"],
+        "turns_before_target": [],
+    }
+    metrics = {
+        "doc_recall_at_3": 0.0,
+        "span_recall_at_5": 0.0,
+        "citations_valid": 1.0,
+        "citation_coverage": 1.0,
+        "end_to_end_success": 0.0,
+    }
+    assert (
+        evaluate._failure_label(example, {"decision": "answer"}, metrics) == "wrong_doc"
+    )
+
+
+def test_rag_triad_judge_disabled_returns_none() -> None:
+    judge = evaluate.RAGTriadJudge.disabled()
+    assert judge.enabled is False
+    import asyncio
+
+    verdict = asyncio.run(
+        judge.evaluate(
+            query="q",
+            answer="a",
+            context="c",
+            required_points=[],
+            forbidden_claims=[],
+        )
+    )
+    assert verdict is None
+
+
+def test_rag_triad_judge_enabled_overrides_deterministic_metrics() -> None:
+    class FakeResult:
+        def __init__(self, score: float, reason: str):
+            self.score = score
+            self.reason = reason
+
+    class FakeInner:
+        async def faithfulness(self, context, answer):
+            return FakeResult(0.8, "mostly faithful")
+
+        async def answer_relevance(self, query, answer):
+            return FakeResult(0.9, "on topic")
+
+        async def context_relevance(self, query, context):
+            return FakeResult(0.7, "useful")
+
+    judge = evaluate.RAGTriadJudge(inner=FakeInner())
+    assert judge.enabled is True
+    metrics = evaluate._prediction_metrics(
+        {
+            "target_mode": "answer",
+            "target_turn": {"utterance": "A Pod is the smallest deployable object."},
+            "gold_doc_ids": ["concepts/workloads/pods"],
+            "gold_span_ids": ["concepts/workloads/pods#overview"],
+            "expected_sources": ["concepts/workloads/pods"],
+            "acceptable_sources": [],
+            "required_points": ["smallest deployable object"],
+            "forbidden_claims": [],
+            "answer_type": "definition",
+        },
+        {
+            "decision": "answer",
+            "response_text": "A Pod is the smallest deployable object.",
+            "citations": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#overview"],
+                }
+            ],
+            "retrieval_ranked_chunks": [
+                {"doc_id": "concepts/workloads/pods", "chunk_id": "chunk-pod"}
+            ],
+            "retrieved_chunks": [
+                {"doc_id": "concepts/workloads/pods", "chunk_id": "chunk-pod"}
+            ],
+        },
+        retrieval_top_k=5,
+        judge_verdict={
+            "faithful": 0.8,
+            "answer_relevant": 0.9,
+            "context_relevant": 0.7,
+            "required_points_covered": None,
+            "unsupported_claims": [],
+            "rationale": "judge rationale",
+        },
+    )
+    assert metrics["faithfulness"] == 0.8
+    assert metrics["answer_relevance"] == 0.9
+    assert metrics["context_relevance"] == 0.7
+    assert metrics["judge"]["rationale"] == "judge rationale"
+
+
+def test_evaluate_kubernetes_smoke_emits_rag_triad_buckets_and_review_columns(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    """Integration: mocked kubernetes smoke eval produces all four RAG buckets,
+    a summary that explains retrieval/grounding/relevance/correctness failures,
+    and a manual review CSV with the new RAG review columns.
+    """
+    settings = make_settings(project_root=tmp_path, enabled_domains=("kubernetes",))
+    now = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
+
+    examples = [
+        {
+            "example_id": "kubernetes::pods::turn_2",
+            "domain": "kubernetes",
+            "target_mode": "answer",
+            "target_turn_id": 2,
+            "latest_user_utterance": "What is a Kubernetes Pod?",
+            "target_turn": {
+                "utterance": (
+                    "A Pod is the smallest deployable compute object in Kubernetes "
+                    "and represents one or more containers with shared storage and "
+                    "network resources."
+                )
+            },
+            "gold_doc_ids": ["concepts/workloads/pods"],
+            "gold_span_ids": ["concepts/workloads/pods#overview"],
+            "expected_sources": ["concepts/workloads/pods"],
+            "acceptable_sources": ["reference/glossary/pod"],
+            "required_points": [
+                "smallest deployable compute object",
+                "one or more containers",
+                "shared storage",
+                "shared network resources",
+            ],
+            "forbidden_claims": [],
+            "answer_type": "definition",
+        },
+        {
+            "example_id": "kubernetes::deployments::turn_2",
+            "domain": "kubernetes",
+            "target_mode": "answer",
+            "target_turn_id": 2,
+            "latest_user_utterance": "What does a Kubernetes Deployment manage?",
+            "target_turn": {
+                "utterance": (
+                    "A Deployment manages Pods and ReplicaSets and lets you "
+                    "declaratively roll out application updates."
+                )
+            },
+            "gold_doc_ids": ["concepts/workloads/controllers/deployment"],
+            "gold_span_ids": ["concepts/workloads/controllers/deployment#overview"],
+            "expected_sources": ["concepts/workloads/controllers/deployment"],
+            "acceptable_sources": [
+                "tasks/run-application/run-stateless-application-deployment"
+            ],
+            "required_points": [
+                "Deployment manages Pods",
+                "Deployment manages ReplicaSets",
+                "declaratively roll out application updates",
+            ],
+            "forbidden_claims": [],
+            "answer_type": "definition",
+        },
+    ]
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        write_trace_event(
+            trace_path,
+            {
+                "node": "prepare_query",
+                "query": example["latest_user_utterance"],
+                "latency_ms": 1.0,
+            },
+        )
+        write_trace_event(
+            trace_path,
+            {
+                "node": "retrieve_docs",
+                "retrieval_attempts": 1,
+                "retrieval_ranked_count": 1,
+                "retrieved_count": 1,
+                "latency_ms": 2.0,
+            },
+        )
+        write_trace_event(
+            trace_path,
+            {
+                "node": "finalize",
+                "decision": "answer",
+                "total_latency_ms": 50.0,
+                "latency_ms": 0.5,
+            },
+        )
+        if example["example_id"] == "kubernetes::pods::turn_2":
+            doc_id = "concepts/workloads/pods"
+            chunk_id = "chunk-pod"
+            span_ids = ["concepts/workloads/pods#overview"]
+            response = (
+                "A Pod is the smallest deployable compute object in Kubernetes "
+                "and represents one or more containers with shared storage and "
+                "network resources."
+            )
+        else:
+            # Deployment retrieval miss: wrong doc retrieved.
+            doc_id = "concepts/workloads/pods"
+            chunk_id = "chunk-wrong"
+            span_ids = ["concepts/workloads/pods#overview"]
+            response = "A Deployment manages Pods and ReplicaSets."
+        return {
+            "decision": "answer",
+            "response_text": response,
+            "citations": [
+                {"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}
+            ],
+            "retrieval_ranked_chunks": [
+                {"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}
+            ],
+            "retrieved_chunks": [
+                {"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}
+            ],
+            "trace_summary": {
+                "retrieval_attempts": 1,
+                "graph_path": ["prepare_query", "retrieve_docs", "finalize"],
+                "latency_ms": 50.0,
+                "trace_path": str(trace_path),
+                "final_query": example["latest_user_utterance"],
+            },
+            "latest_user_utterance": example["latest_user_utterance"],
+        }
+
+    result = asyncio.run(
+        evaluate.evaluate_examples_async(
+            examples,
+            settings=settings,
+            domain="kubernetes",
+            split="validation",
+            subset_name="smoke",
+            notes="RAG triad smoke test",
+            run_graph_func=fake_run_graph,
+            now=now,
+        )
+    )
+
+    output_dir = result["output_dir"]
+    metrics = json.loads((output_dir / "metrics.json").read_text(encoding="utf-8"))
+    predictions = [
+        json.loads(line)
+        for line in (output_dir / "predictions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    manual_review_rows = list(
+        csv.DictReader(
+            (output_dir / "manual_review.csv").read_text(encoding="utf-8").splitlines()
+        )
+    )
+    summary = (output_dir / "summary.md").read_text(encoding="utf-8")
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    # All four RAG eval buckets present in metrics JSON.
+    rag = metrics["rag"]["answer"]
+    assert "context_relevance" in rag
+    assert "faithfulness" in rag
+    assert "answer_relevance" in rag
+    assert "required_points_covered" in rag
+    assert rag["examples"] == 2
+    assert metrics["counts"]["rag_examples"] == 2
+
+    # Per-prediction RAG fields and graded retrieval metrics.
+    pods_pred = next(p for p in predictions if p["example_id"].endswith("pods::turn_2"))
+    dep_pred = next(
+        p for p in predictions if p["example_id"].endswith("deployments::turn_2")
+    )
+    assert pods_pred["expected_sources"] == ["concepts/workloads/pods"]
+    assert pods_pred["answer_type"] == "definition"
+    assert pods_pred["metrics"]["hit_at_k"] == 1.0
+    assert pods_pred["metrics"]["required_points_covered"] == 1.0
+    assert pods_pred["metrics"]["answer_correctness"]["required_points_covered"] == 1.0
+    # Pods: full success -> no failure label.
+    assert pods_pred["failure_label"] is None
+
+    # Deployment retrieval miss surfaces as retrieval_miss with graded hit@k = 0.
+    assert dep_pred["metrics"]["hit_at_k"] == 0.0
+    assert dep_pred["failure_label"] == "retrieval_miss"
+
+    # Summary renders both headline RAG metrics and legacy paper-reference metrics,
+    # and explains the failure as a retrieval failure.
+    assert "RAG Triad" in summary
+    assert "Graded Retrieval" in summary
+    assert "Paper-Reference Metrics" in summary
+    assert "retrieval_miss" in summary
+
+    # Manual review CSV includes the new RAG review columns.
+    review_columns = set(manual_review_rows[0].keys())
+    assert "expected_sources" in review_columns
+    assert "acceptable_sources" in review_columns
+    assert "required_points" in review_columns
+    assert "context_relevance" in review_columns
+    assert "faithfulness" in review_columns
+    assert "answer_relevance" in review_columns
+    assert "required_points_covered" in review_columns
+    assert "judge_rationale" in review_columns
+    # Only the failing deployment example lands in manual review.
+    assert len(manual_review_rows) == 1
+    assert manual_review_rows[0]["example_id"] == "kubernetes::deployments::turn_2"
+    assert manual_review_rows[0]["failure_label"] == "retrieval_miss"
+
+    # Manifest records RAG eval enablement.
+    assert manifest["rag_eval"]["enabled"] is True
+    assert manifest["rag_eval"]["judge_enabled"] is False
+    assert manifest["rag_eval"]["answer_types"] == ["definition"]

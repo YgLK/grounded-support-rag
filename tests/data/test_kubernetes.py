@@ -59,6 +59,32 @@ A Pod is the smallest deployable compute object in Kubernetes.
     assert "smallest deployable" in document["spans"][1]["text_sp"]
 
 
+def test_load_kubernetes_documents_normalizes_hugo_index_doc_ids(
+    tmp_path: Path,
+) -> None:
+    _write_doc(
+        tmp_path,
+        "concepts/workloads/pods/_index.md",
+        "---\ntitle: Pods\n---\nPod docs.\n",
+    )
+    _write_doc(
+        tmp_path,
+        "concepts/services-networking/service/index.md",
+        "---\ntitle: Services\n---\nService docs.\n",
+    )
+
+    documents = load_kubernetes_documents(tmp_path)
+
+    assert [document["doc_id"] for document in documents] == [
+        "concepts/services-networking/service",
+        "concepts/workloads/pods",
+    ]
+    assert [document["spans"][0]["id_sp"] for document in documents] == [
+        "concepts/services-networking/service#overview",
+        "concepts/workloads/pods#overview",
+    ]
+
+
 def test_load_documents_dispatches_kubernetes_domain(tmp_path: Path) -> None:
     _write_doc(
         tmp_path,

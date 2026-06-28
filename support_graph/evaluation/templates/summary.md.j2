@@ -14,6 +14,22 @@ Subset: {{ subset_label }}
 - F1: {{ metric_display(generation.get('token_f1')) }}
 - Citation coverage: {{ metric_display(generation.get('citation_coverage')) }}
 
+{% set rag = metrics.get('rag', {}).get('answer', {}) or {} %}
+{% if rag %}
+## RAG Triad (answer examples)
+- Context relevance: {{ metric_display(rag.get('context_relevance')) }}
+- Faithfulness: {{ metric_display(rag.get('faithfulness')) }}
+- Answer relevance: {{ metric_display(rag.get('answer_relevance')) }}
+- Required points covered: {{ metric_display(rag.get('required_points_covered')) }}
+- Forbidden claims present: {{ metric_display(rag.get('forbidden_claims_present')) }}
+
+## Graded Retrieval (expected=2, acceptable=1)
+- Hit@5: {{ metric_display(rag.get('hit_at_k'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- Precision@5: {{ metric_display(rag.get('precision_at_k'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- Graded MRR@5: {{ metric_display(rag.get('graded_mrr_at_k'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+- NDCG@5: {{ metric_display(rag.get('ndcg_at_k'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
+{% endif %}
+
 ## Paper-Reference Metrics
 - Recall@1: {{ metric_display(retrieval.get('doc_recall_at_1'), retrieval_top_k=retrieval_top_k, metric_k=1) }}
 - Recall@5: {{ metric_display(retrieval.get('doc_recall_at_5'), retrieval_top_k=retrieval_top_k, metric_k=5) }}
