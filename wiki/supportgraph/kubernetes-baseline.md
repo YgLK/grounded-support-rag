@@ -1,11 +1,11 @@
 # Kubernetes Baseline
 
 > Sources: SupportGraph local eval artifacts, 2026-06-28
-> Raw: [Kubernetes Baseline Eval](../../raw/supportgraph/2026-06-28-kubernetes-baseline-eval.md); [Kubernetes Normalized Smoke Eval](../../raw/supportgraph/2026-06-28-kubernetes-normalized-smoke-eval.md)
+> Raw: [Kubernetes Baseline Eval](../../raw/supportgraph/2026-06-28-kubernetes-baseline-eval.md); [Kubernetes Normalized Smoke Eval](../../raw/supportgraph/2026-06-28-kubernetes-normalized-smoke-eval.md); [Kubernetes Smoke Eval Cleanup](../../raw/supportgraph/2026-06-28-kubernetes-smoke-eval-cleanup.md)
 
 ## Overview
 
-The first end-to-end Kubernetes baseline ran against a pinned `kubernetes/website` docs snapshot, built a full 10,379-chunk index, and completed the 3-example Kubernetes smoke eval. A follow-up run after normalizing Hugo `_index.md` pages to website-style doc IDs improved document recall, confirming that the Pods failure was partly corpus-ID plumbing rather than pure retrieval quality. The smoke set still is not a reliable quality gate: remaining failures include a section-level mismatch, a true deployment retrieval miss, and a strict generation/text-overlap miss.
+The first end-to-end Kubernetes baseline ran against a pinned `kubernetes/website` docs snapshot, built a full 10,379-chunk index, and completed the 3-example Kubernetes smoke eval. A follow-up run after normalizing Hugo `_index.md` pages to website-style doc IDs improved document recall, confirming that the Pods failure was partly corpus-ID plumbing rather than pure retrieval quality. After the RAG triad rubric cleanup, the current smoke baseline has one remaining failure: `deployments` is a `retrieval_miss`. `pods` and `services` now clear through rubric aliases, acceptable spans, and required-point grading.
 
 ## Baseline Run
 
@@ -31,6 +31,15 @@ After `_index` normalization:
 - End-to-end success: 0.000
 - Failure labels: `right_doc_wrong_section` 1, `wrong_doc` 1, `unsupported_answer` 1
 
+After RAG triad rubric cleanup:
+
+- Eval run: `20260628-224937-kubernetes-smoke`
+- Smoke subset: 3 answer examples
+- Failure labels: `retrieval_miss` 1
+- Cleared examples: `pods`, `services`
+- Remaining failure: `deployments`
+- Index rebuild: not needed
+
 Original baseline:
 
 - Doc Recall@3: 0.333
@@ -44,11 +53,11 @@ Original baseline:
 
 ## Findings
 
-The Pods example improved from `wrong_doc` to `right_doc_wrong_section` after `_index` normalization. The fixed run retrieves `concepts/workloads/pods` at rank 2, but the top matching section is `what-is-a-pod` while the smoke gold expects `overview`. The remaining failure is now section-level gold alignment, not doc ID drift.
+The Pods example improved from `wrong_doc` to `right_doc_wrong_section` after `_index` normalization. The fixed run retrieves `concepts/workloads/pods` at rank 2, with useful evidence in `what-is-a-pod` while the legacy gold expected `overview`. The current rubric treats that as acceptable evidence when required points are covered, so Pods is no longer a smoke failure.
 
 The Deployments example retrieved broad tutorial and controller overview pages, not `concepts/workloads/controllers/deployment`. The generated answer was mostly correct, but evidence support did not line up with the curated target.
 
-The Services example retrieved and cited `concepts/services-networking/service` with doc recall, span recall, and citation coverage all at 1.0. It still failed end-to-end, so the current text-overlap gate is stricter than semantic correctness for concise Kubernetes support answers.
+The Services example retrieved and cited `concepts/services-networking/service` with doc recall, span recall, and citation coverage all at 1.0. The current rubric accepts the answer through required-point and acceptable-span grading, removing the old strict text-overlap false negative.
 
 ## Operational Notes
 
@@ -56,8 +65,8 @@ Local Ollama could not serve embeddings because the installed binary crashed dur
 
 ## Next Checks
 
-- Decide whether Kubernetes smoke gold spans should target semantic sections like `what-is-a-pod` rather than synthetic `overview` sections.
-- Add a semantic or judge-backed generation check for short Kubernetes answer variants.
+- Investigate the remaining Deployment retrieval miss before any reindex.
+- Compare top retrieved Deployment chunks against the expected deployment doc, then consider query expansion or rerank/title boosts only if the artifacts support it.
 
 ## RAG Triad Eval Upgrade (2026-06-28)
 
