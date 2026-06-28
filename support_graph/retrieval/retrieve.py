@@ -424,6 +424,7 @@ def rerank_retrieval_hits(
             ]
         )
         title_overlap_count = _overlap_count(query_tokens, title_text)
+        path_overlap_count = _overlap_count(query_tokens, str(hit.get("doc_id", "")))
 
         rerank_score = (
             base_score
@@ -432,9 +433,11 @@ def rerank_retrieval_hits(
             + (0.02 if span_count == 1 else 0.0)
             - (0.03 * min(3, text_overlap_count))
             - (0.04 * min(2, title_overlap_count))
+            - (0.04 * min(2, path_overlap_count))
         )
         hit["text_overlap_count"] = text_overlap_count
         hit["title_overlap_count"] = title_overlap_count
+        hit["path_overlap_count"] = path_overlap_count
         hit["rerank_score"] = round(rerank_score, 6)
         return (rerank_score, int(hit.get("original_rank", hit.get("rank", 0))))
 
@@ -577,6 +580,8 @@ def retrieve_chunks(
         filter=metadata_filter,
     )
     normalized_hits = normalize_retrieval_hits(hits)
+    for hit in normalized_hits:
+        hit["retrieval_source"] = "dense"
 
     bm25_hits = _normalized_bm25_hits(
         retriever=keyword_retriever,
@@ -585,9 +590,23 @@ def retrieve_chunks(
         doc_ids=doc_ids,
     )
     if bm25_hits:
+        dense_scores = [
+            float(hit["vector_distance"])
+            for hit in normalized_hits
+            if hit.get("vector_distance") is not None
+        ]
+        keyword_base_score = min(dense_scores) if dense_scores else 0.0
         seen_chunk_ids = {hit["chunk_id"] for hit in normalized_hits}
         for hit in bm25_hits:
             if hit["chunk_id"] not in seen_chunk_ids:
+                keyword_rank = int(hit.get("original_rank") or hit.get("rank") or 0)
+                hit["retrieval_source"] = "keyword"
+                # BM25 results do not carry vector distances. Put keyword-only
+                # hits on the same score scale as dense candidates so rerank
+                # can use text/title overlap instead of discarding them.
+                if hit.get("score") is None:
+                    hit["score"] = keyword_base_score + (keyword_rank * 0.002)
+                    hit["vector_distance"] = hit["score"]
                 normalized_hits.append(hit)
                 seen_chunk_ids.add(hit["chunk_id"])
 

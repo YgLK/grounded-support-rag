@@ -43,6 +43,7 @@ from support_graph.providers import (
     embedding_provider as resolved_embedding_provider,
     embedding_provider_base_url,
 )
+from support_graph.types import RequiredPoint
 from support_graph.runtime.graph import resolve_runtime_resources_async, run_graph_async
 from support_graph.runtime.traces import (
     load_trace_events,
@@ -103,6 +104,7 @@ MANUAL_REVIEW_COLUMNS = [
     "response_text",
     "gold_doc_ids",
     "gold_span_ids",
+    "acceptable_span_ids",
     "expected_sources",
     "acceptable_sources",
     "required_points",
@@ -204,15 +206,30 @@ def doc_recall_at_k(
 
 
 def span_recall_at_k(
-    gold_span_ids: list[str], retrieved_chunks: list[NormalizedRetrievalHit], k: int = 5
+    gold_span_ids: list[str],
+    retrieved_chunks: list[NormalizedRetrievalHit],
+    k: int = 5,
+    *,
+    acceptable_span_ids: list[str] | None = None,
 ) -> float | None:
+    """Fraction of gold spans covered by retrieved chunk spans.
+
+    When ``acceptable_span_ids`` is provided, those spans count as equivalent
+    substitutes: a retrieved acceptable span covers a gold span slot. The
+    denominator stays ``len(gold)`` so recall is capped at 1.0 and never
+    penalizes retrieving an equivalent section. Returns None when no gold
+    spans are declared.
+    """
     gold = {span_id for span_id in gold_span_ids if span_id}
     if not gold:
         return None
     retrieved_spans: set[str] = set()
     for chunk in retrieved_chunks[:k]:
         retrieved_spans.update(str(span_id) for span_id in chunk.get("span_ids", []))
-    return len(gold & retrieved_spans) / len(gold)
+    hit_spans = set(gold)
+    if acceptable_span_ids:
+        hit_spans.update(span_id for span_id in acceptable_span_ids if span_id)
+    return min(1.0, len(hit_spans & retrieved_spans) / len(gold))
 
 
 def mrr_at_k(
@@ -330,24 +347,49 @@ def ndcg_at_k(
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def required_point_coverage(required_points: list[str], answer: str) -> float | None:
+def _point_phrases(point: RequiredPoint) -> list[str]:
+    """Normalize a required-point entry to a list of alternative phrase strings."""
+    if isinstance(point, str):
+        return [point]
+    return [phrase for phrase in point if isinstance(phrase, str)]
+
+
+def _point_is_declared(point: RequiredPoint) -> bool:
+    """True when at least one phrase in the point has content tokens."""
+    return any(_normalize_text(phrase) for phrase in _point_phrases(point))
+
+
+def _point_is_covered(point: RequiredPoint, answer_tokens: set[str]) -> bool:
+    """True when any alternative phrase for the point is bag-of-words contained."""
+    for phrase in _point_phrases(point):
+        phrase_tokens = _normalize_text(phrase)
+        if phrase_tokens and all(token in answer_tokens for token in phrase_tokens):
+            return True
+    return False
+
+
+def required_point_coverage(
+    required_points: list[RequiredPoint], answer: str
+) -> float | None:
     """Deterministic v1: fraction of required points covered by normalized token overlap.
 
     A required point is "covered" if every content token in the point appears in the
-    answer (bag-of-words containment). Returns None when no required points are
-    declared so callers can skip aggregation.
+    answer (bag-of-words containment). A required point may also be a list of
+    alternative phrases; the point is covered when any phrase matches, and the
+    alias group counts as a single required point. Returns None when no required
+    points are declared so callers can skip aggregation.
     """
     if not required_points:
         return None
     answer_tokens = set(_normalize_text(answer))
     covered = 0
+    declared = 0
     for point in required_points:
-        point_tokens = _normalize_text(point)
-        if not point_tokens:
+        if not _point_is_declared(point):
             continue
-        if all(token in answer_tokens for token in point_tokens):
+        declared += 1
+        if _point_is_covered(point, answer_tokens):
             covered += 1
-    declared = sum(1 for point in required_points if _normalize_text(point))
     return covered / declared if declared else 0.0
 
 
@@ -456,15 +498,27 @@ def _join_chunk_text(chunks: list[dict], *, limit: int = 1500) -> str:
 
 
 def citation_coverage(
-    gold_span_ids: list[str], citations: list[Citation]
+    gold_span_ids: list[str],
+    citations: list[Citation],
+    *,
+    acceptable_span_ids: list[str] | None = None,
 ) -> float | None:
+    """Fraction of gold spans covered by citation span_ids.
+
+    When ``acceptable_span_ids`` is provided, citing an acceptable span counts
+    as covering a gold span slot (capped at 1.0). Returns None when no gold
+    spans are declared.
+    """
     gold = {span_id for span_id in gold_span_ids if span_id}
     if not gold:
         return None
     cited_spans: set[str] = set()
     for citation in citations:
         cited_spans.update(str(span_id) for span_id in citation.get("span_ids", []))
-    return len(gold & cited_spans) / len(gold)
+    hit_spans = set(gold)
+    if acceptable_span_ids:
+        hit_spans.update(span_id for span_id in acceptable_span_ids if span_id)
+    return min(1.0, len(hit_spans & cited_spans) / len(gold))
 
 
 def citations_map_to_retrieved(
@@ -698,6 +752,7 @@ def _prediction_record(
                 "required_points": example.get("required_points", []),
                 "forbidden_claims": example.get("forbidden_claims", []),
                 "answer_type": example.get("answer_type"),
+                "acceptable_span_ids": example.get("acceptable_span_ids", []),
             }
         )
     return record
@@ -715,6 +770,11 @@ def _prediction_metrics(
     retrieved_chunks = _prediction_retrieved_chunks(prediction)
     citations = prediction.get("citations", [])
     response_text = str(prediction.get("response_text", ""))
+    # Acceptable span alternates only apply to RAG examples; legacy examples
+    # keep exact gold_span_ids behavior.
+    acceptable_span_ids = (
+        example.get("acceptable_span_ids", []) if has_rag_eval_fields(example) else None
+    )
     doc_recalls = {
         k: (
             doc_recall_at_k(
@@ -728,7 +788,12 @@ def _prediction_metrics(
         for k in (1, 3, 5, 10)
     }
     span_recall = (
-        span_recall_at_k(example.get("gold_span_ids", []), retrieval_ranked_chunks, k=5)
+        span_recall_at_k(
+            example.get("gold_span_ids", []),
+            retrieval_ranked_chunks,
+            k=5,
+            acceptable_span_ids=acceptable_span_ids,
+        )
         if _retrieval_metric_available(retrieval_top_k, k=5)
         else None
     )
@@ -741,7 +806,11 @@ def _prediction_metrics(
     f1 = token_f1(response_text, target_text)
     em = exact_match(response_text, target_text)
     bleu = sacrebleu_score(response_text, target_text)
-    citation_cov = citation_coverage(example.get("gold_span_ids", []), citations)
+    citation_cov = citation_coverage(
+        example.get("gold_span_ids", []),
+        citations,
+        acceptable_span_ids=acceptable_span_ids,
+    )
     citations_valid = (
         1.0 if citations_map_to_retrieved(citations, retrieved_chunks) else 0.0
     )
@@ -1060,6 +1129,9 @@ def _manual_review_rows(run_id: str, predictions: list[dict]) -> list[dict]:
                 "response_text": record.get("response_text", ""),
                 "gold_doc_ids": _compact_join(record.get("gold_doc_ids", [])),
                 "gold_span_ids": _compact_join(record.get("gold_span_ids", [])),
+                "acceptable_span_ids": _compact_join(
+                    record.get("acceptable_span_ids", [])
+                ),
                 "expected_sources": _compact_join(record.get("expected_sources", [])),
                 "acceptable_sources": _compact_join(
                     record.get("acceptable_sources", [])

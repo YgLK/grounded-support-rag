@@ -56,6 +56,7 @@ TargetMode = Literal["answer", "follow_up"]
 TurnRole = Literal["agent", "user"]
 QueryContextRole = Literal["agent", "user", "unknown"]
 AnswerType = Literal["definition", "procedure", "diagnosis", "clarification", "abstain"]
+RequiredPoint: TypeAlias = str | list[str]
 
 
 class Reference(TypedDict):
@@ -142,7 +143,8 @@ class RAGEvalFields(TypedDict, total=False):
 
     expected_sources: list[str]
     acceptable_sources: list[str]
-    required_points: list[str]
+    required_points: list[RequiredPoint]
+    acceptable_span_ids: list[str]
     forbidden_claims: list[str]
     answer_type: AnswerType
 
@@ -277,7 +279,8 @@ class PredictionRecord(TypedDict, total=False):
     gold_span_ids: list[str]
     expected_sources: list[str]
     acceptable_sources: list[str]
-    required_points: list[str]
+    acceptable_span_ids: list[str]
+    required_points: list[RequiredPoint]
     forbidden_claims: list[str]
     answer_type: AnswerType
     target_text: str
@@ -377,6 +380,7 @@ __all__ = [
     "QueryContextTurn",
     "RAGEvalFields",
     "Reference",
+    "RequiredPoint",
     "RetrieverLike",
     "TargetMode",
     "TraceSummary",

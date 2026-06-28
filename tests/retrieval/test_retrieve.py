@@ -310,6 +310,79 @@ def test_retrieve_chunks_merges_filtered_keyword_hits_without_duplicates() -> No
     ]
 
 
+def test_retrieve_chunks_scores_keyword_hits_on_dense_scale_before_rerank() -> None:
+    class FakeVectorStore:
+        def similarity_search_with_score(self, query, k=5, filter=None):
+            return [
+                (
+                    SimpleNamespace(
+                        page_content="generic deployment tutorial",
+                        metadata={
+                            "chunk_id": "kubernetes::tutorial::sec::1::sub::0",
+                            "domain": "kubernetes",
+                            "doc_id": "tutorials/hello-minikube",
+                            "section_id": "1",
+                            "section_title": "Create a Deployment",
+                            "span_ids": [
+                                "tutorials/hello-minikube#create-a-deployment"
+                            ],
+                            "token_count": 40,
+                        },
+                    ),
+                    0.36,
+                )
+            ]
+
+    class FakeKeywordRetriever:
+        def invoke(self, query):
+            return [
+                SimpleNamespace(
+                    page_content="Complete Deployment manage updated replicas.",
+                    metadata={
+                        "chunk_id": (
+                            "kubernetes::concepts/workloads/controllers/deployment"
+                            "::sec::complete-deployment::sub::0"
+                        ),
+                        "domain": "kubernetes",
+                        "doc_id": "concepts/workloads/controllers/deployment",
+                        "section_id": "complete-deployment",
+                        "section_title": "Complete Deployment",
+                        "span_ids": [
+                            "concepts/workloads/controllers/deployment"
+                            "#complete-deployment"
+                        ],
+                        "token_count": 32,
+                    },
+                )
+            ]
+
+    example = {
+        "domain": "kubernetes",
+        "conversation": [
+            {
+                "turn_id": 1,
+                "role": "user",
+                "utterance": "What does a Kubernetes Deployment manage?",
+            }
+        ],
+        "latest_user_turn_id": 1,
+        "latest_user_utterance": "What does a Kubernetes Deployment manage?",
+    }
+
+    results = retrieve.retrieve_chunks(
+        example=example,
+        vectorstore=FakeVectorStore(),
+        keyword_retriever=FakeKeywordRetriever(),
+        top_k=1,
+        candidate_k=1,
+        rerank=True,
+    )
+
+    assert results[0]["doc_id"] == "concepts/workloads/controllers/deployment"
+    assert results[0]["retrieval_source"] == "keyword"
+    assert results[0]["score"] == 0.362
+
+
 def test_rerank_retrieval_hits_penalizes_title_and_short_single_span_chunks() -> None:
     context = {
         "domain": "dmv",
@@ -413,3 +486,52 @@ def test_rerank_retrieval_hits_uses_text_and_title_overlap_to_lift_relevant_chun
     reranked = retrieve.rerank_retrieval_hits(hits, query_context=context)
 
     assert reranked[0]["chunk_id"] == "dmv::doc::sec::2::sub::0"
+
+
+def test_rerank_retrieval_hits_uses_doc_path_overlap_to_lift_canonical_page() -> None:
+    context = {
+        "domain": "kubernetes",
+        "latest_user_need": "What does a Kubernetes Deployment manage?",
+        "last_agent_question": "",
+        "carry_forward_context": [],
+    }
+    hits = [
+        {
+            "rank": 1,
+            "original_rank": 1,
+            "chunk_id": "kubernetes::tutorials/hello-minikube::sec::create::sub::0",
+            "doc_id": "tutorials/hello-minikube",
+            "section_id": "create",
+            "section_title": "Create a Deployment",
+            "parent_titles": [],
+            "span_ids": ["tutorials/hello-minikube#create-a-deployment"],
+            "token_count": 40,
+            "text": "A Kubernetes Deployment checks the health of your Pod.",
+            "score": 0.37,
+            "vector_distance": 0.37,
+        },
+        {
+            "rank": 2,
+            "original_rank": 2,
+            "chunk_id": (
+                "kubernetes::concepts/workloads/controllers/deployment"
+                "::sec::complete-deployment::sub::0"
+            ),
+            "doc_id": "concepts/workloads/controllers/deployment",
+            "section_id": "complete-deployment",
+            "section_title": "Complete Deployment",
+            "parent_titles": [],
+            "span_ids": [
+                "concepts/workloads/controllers/deployment#complete-deployment"
+            ],
+            "token_count": 32,
+            "text": "A complete Deployment has updated replicas available.",
+            "score": 0.372,
+            "vector_distance": 0.372,
+        },
+    ]
+
+    reranked = retrieve.rerank_retrieval_hits(hits, query_context=context)
+
+    assert reranked[0]["doc_id"] == "concepts/workloads/controllers/deployment"
+    assert reranked[0]["path_overlap_count"] == 1

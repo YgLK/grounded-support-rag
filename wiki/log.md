@@ -10,3 +10,6 @@
 
 ## [2026-06-28] ingest | Kubernetes Smoke Eval Cleanup
 - Updated: Kubernetes Baseline
+
+## [2026-06-28] ingest | Kubernetes Smoke-10 Retrieval Baseline
+- Updated: Kubernetes Baseline

@@ -1,6 +1,6 @@
 # Grounded-support-RAG
 
-Grounded-support-RAG is a retrieval-augmented support assistant for grounded question answering over multi-document support knowledge bases (MultiDoc2Dial). It turns source content into indexed evidence, runs a LangGraph pipeline that retrieves and grades relevant context for each user turn, and produces grounded answers with citations, traces, and offline evaluation artifacts for debugging and model comparison.
+Grounded-support-RAG is a retrieval-augmented support assistant for grounded Kubernetes troubleshooting and multi-document support knowledge bases. It turns source content into indexed evidence, runs a LangGraph pipeline that retrieves and grades relevant context for each user turn, and produces grounded answers with citations, traces, and offline evaluation artifacts for debugging and model comparison.
 
 ## Scope
 
@@ -45,17 +45,17 @@ flowchart TD
 
 ## Evaluation Snapshot
 
-Best smoke run on the DMV validation subset (`25` examples):
+Current flagship run: Kubernetes Smoke-10 troubleshooting baseline (`10` examples):
 
 - Chat: `openrouter / openai/gpt-oss-120b:nitro`
-- Embeddings: `ollama / qwen3-embedding:4b-q4_K_M`
-- `Doc Recall@3 0.760`, `Span Recall@5 0.307`, `MRR@5 0.573`
-- `ROUGE-L 0.165`, `F1 0.211`, `Citation Coverage 0.240`, `E2E 0.160`
-- `Avg latency 2588 ms`
+- Embeddings: `openrouter / openai/text-embedding-3-small`
+- `Doc Recall@1 0.700`, `Doc Recall@3 1.000`, `Span Recall@5 1.000`, `MRR@5 0.800`
+- `ROUGE-L 0.178`, `F1 0.237`, `Citation Coverage 1.000`
+- Failure bucket: `incomplete_answer` only; retrieval misses cleared
 
-Eval note: current smoke comparisons used `max_retrieval_attempts = 2`, so retrieval scores still include retry/refinement effects.
+The Kubernetes baseline is intentionally artifact-heavy: each eval writes traces, prediction records, retrieval examples, manual-review CSVs, and a summary that separates retrieval, grounding, citation, and answer-completeness failures.
 
-## Model Comparison
+## DMV Model Comparison
 
 Recent smoke runs on the same `dmv validation / smoke` subset (`25` examples):
 
@@ -73,7 +73,7 @@ Recent smoke runs on the same `dmv validation / smoke` subset (`25` examples):
 | `ollama / qwen3:8b-q4_K_M` | `ollama / qwen3-embedding:4b-q4_K_M` | 0.680 | 0.320 | 0.565 | 0.188 | 0.100 | 27430 ms |
 | `openrouter / openai/gpt-oss-120b:nitro` | `openrouter / qwen/qwen3-embedding-8b` | 0.160 | 0.120 | 0.110 | 0.099 | 0.000 | 7319 ms |
 
-Conclusions:
+DMV conclusions:
 
 - Best practical setup so far is `openrouter / openai/gpt-oss-120b:nitro` + `ollama / qwen3-embedding:4b-q4_K_M`
 - Swapping embeddings from `qwen3:8b-q4_K_M` to `qwen/qwen3-embedding-8b` caused the main retrieval collapse
@@ -100,21 +100,20 @@ Required local config:
 Then run the pipeline:
 
 ```bash
+uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
+uv run grounded-support-rag build-chunks --domain kubernetes
+uv run grounded-support-rag index-docs --domain kubernetes
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
+uv run grounded-support-rag ui --host 127.0.0.1 --port 8008
+```
+
+DMV / MultiDoc2Dial corpus:
+
+```bash
 uv run grounded-support-rag build-chunks --domain dmv
 uv run grounded-support-rag build-examples --domain dmv --split validation
 uv run grounded-support-rag build-subsets --domain dmv --split validation
 uv run grounded-support-rag index-docs --domain dmv
 uv run grounded-support-rag run --example-id 'dmv::1409501a35697e0ce68561e29577b90a::turn_2'
 uv run grounded-support-rag eval --split validation --domain dmv
-uv run grounded-support-rag ui --host 127.0.0.1 --port 8008
-```
-
-Kubernetes docs corpus:
-
-```bash
-uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
-# set [dataset].root = "raw/kubernetes/current" and enabled_domains = ["kubernetes"]
-uv run grounded-support-rag build-chunks --domain kubernetes
-uv run grounded-support-rag index-docs --domain kubernetes
-uv run grounded-support-rag eval --domain kubernetes --subset smoke
 ```

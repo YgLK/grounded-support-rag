@@ -5,6 +5,7 @@ import csv
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import get_type_hints
 
 from support_graph.evaluation import evaluate
 from support_graph.data.eval_subsets import write_subset_jsonl
@@ -1432,6 +1433,7 @@ def test_evaluate_kubernetes_smoke_emits_rag_triad_buckets_and_review_columns(
     review_columns = set(manual_review_rows[0].keys())
     assert "expected_sources" in review_columns
     assert "acceptable_sources" in review_columns
+    assert "acceptable_span_ids" in review_columns
     assert "required_points" in review_columns
     assert "context_relevance" in review_columns
     assert "faithfulness" in review_columns
@@ -1447,3 +1449,492 @@ def test_evaluate_kubernetes_smoke_emits_rag_triad_buckets_and_review_columns(
     assert manifest["rag_eval"]["enabled"] is True
     assert manifest["rag_eval"]["judge_enabled"] is False
     assert manifest["rag_eval"]["answer_types"] == ["definition"]
+
+
+# ---------------------------------------------------------------------------
+# Alias groups for required points and acceptable_span_ids alternates.
+# ---------------------------------------------------------------------------
+
+
+def test_required_point_coverage_legacy_strings_unchanged() -> None:
+    """Legacy list[str] required_points still work exactly as before."""
+    answer = (
+        "A Pod is the smallest deployable compute object with shared storage "
+        "and shared network resources."
+    )
+    full = [
+        "smallest deployable compute object",
+        "shared storage",
+        "shared network resources",
+    ]
+    assert evaluate.required_point_coverage(full, answer) == 1.0
+
+    partial = [
+        "smallest deployable compute object",
+        "one or more containers",
+    ]
+    assert evaluate.required_point_coverage(partial, answer) == 0.5
+
+    assert evaluate.required_point_coverage(["missing claim entirely"], answer) == 0.0
+    assert evaluate.required_point_coverage([], answer) is None
+
+
+def test_required_point_coverage_alias_group_covered_by_any_phrase() -> None:
+    """An alias group is covered when any single phrase matches."""
+    answer = "A Pod is the smallest deployable object in Kubernetes."
+    points = [
+        ["smallest deployable compute object", "smallest deployable object"],
+    ]
+    assert evaluate.required_point_coverage(points, answer) == 1.0
+
+    # First phrase matches, second doesn't — still covered.
+    answer2 = "A Pod is the smallest deployable compute object."
+    assert evaluate.required_point_coverage(points, answer2) == 1.0
+
+
+def test_required_point_coverage_alias_group_counts_as_one_point() -> None:
+    """An alias group counts as a single required point, not multiple."""
+    answer = "A Pod is the smallest deployable object with shared volumes."
+    points = [
+        ["smallest deployable compute object", "smallest deployable object"],
+        ["shared storage", "shared volumes"],
+        "one or more containers",  # not covered
+    ]
+    # 2 of 3 points covered (alias groups each count as one).
+    assert evaluate.required_point_coverage(points, answer) == 2 / 3
+
+
+def test_required_point_coverage_alias_group_no_match_returns_zero() -> None:
+    """When no alias phrase matches, the point is uncovered."""
+    answer = "A Pod is a unit that runs one or more containers."
+    points = [
+        ["smallest deployable compute object", "smallest deployable object"],
+        "one or more containers",
+    ]
+    # "one or more containers" is covered; alias group is not.
+    assert evaluate.required_point_coverage(points, answer) == 0.5
+
+    # No points covered at all.
+    answer_bare = "A Pod is a unit."
+    points_all_miss = [
+        ["smallest deployable compute object", "smallest deployable object"],
+        ["shared storage", "shared volumes"],
+    ]
+    assert evaluate.required_point_coverage(points_all_miss, answer_bare) == 0.0
+
+
+def test_required_point_coverage_pods_unique_ip_address_alias() -> None:
+    answer = (
+        "A Pod is the smallest deployable compute object with one or more "
+        "containers, shared storage, and a unique IP address."
+    )
+    points = [
+        ["smallest deployable compute object", "smallest deployable object"],
+        "one or more containers",
+        ["shared storage", "shared volumes"],
+        [
+            "shared network resources",
+            "unique IP address",
+            "unique network IP address",
+            "shared IP address and port space",
+        ],
+    ]
+    assert evaluate.required_point_coverage(points, answer) == 1.0
+
+
+def test_rag_eval_fields_public_shape_supports_alias_groups_and_spans() -> None:
+    from support_graph.types import RAGEvalFields, RequiredPoint
+
+    hints = get_type_hints(RAGEvalFields)
+    assert RequiredPoint == str | list[str]
+    assert hints["required_points"] == list[RequiredPoint]
+    assert hints["acceptable_span_ids"] == list[str]
+
+    fields: RAGEvalFields = {
+        "expected_sources": ["concepts/workloads/pods"],
+        "acceptable_sources": ["reference/glossary/pod"],
+        "acceptable_span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+        "required_points": [
+            "one or more containers",
+            ["shared network resources", "unique IP address"],
+        ],
+        "forbidden_claims": [],
+        "answer_type": "definition",
+    }
+    assert fields["required_points"][1] == [
+        "shared network resources",
+        "unique IP address",
+    ]
+    assert fields["acceptable_span_ids"] == ["concepts/workloads/pods#what-is-a-pod"]
+
+
+def test_manual_review_rows_include_acceptable_span_ids() -> None:
+    rows = evaluate._manual_review_rows(
+        "run-1",
+        [
+            {
+                "example_id": "kubernetes::pods::turn_2",
+                "target_mode": "answer",
+                "decision": "answer",
+                "failure_label": "incomplete_answer",
+                "latest_user_utterance": "What is a Kubernetes Pod?",
+                "response_text": "A Pod has one or more containers.",
+                "gold_doc_ids": ["concepts/workloads/pods"],
+                "gold_span_ids": ["concepts/workloads/pods#overview"],
+                "acceptable_span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                "expected_sources": ["concepts/workloads/pods"],
+                "acceptable_sources": ["reference/glossary/pod"],
+                "required_points": [["shared network resources", "unique IP address"]],
+                "forbidden_claims": [],
+                "answer_type": "definition",
+                "retrieval_ranked_chunks": [],
+                "retrieved_chunks": [],
+                "citations": [],
+                "trace_summary": {},
+                "metrics": {},
+            }
+        ],
+    )
+    assert rows[0]["acceptable_span_ids"] == "concepts/workloads/pods#what-is-a-pod"
+
+
+def test_span_recall_accepts_acceptable_span_ids() -> None:
+    """RAG span recall counts acceptable spans as equivalent substitutes."""
+    gold = ["concepts/workloads/pods#overview"]
+    acceptable = ["concepts/workloads/pods#what-is-a-pod"]
+    chunks = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    # Retrieving the acceptable span gives full recall (capped at 1.0).
+    assert (
+        evaluate.span_recall_at_k(gold, chunks, k=5, acceptable_span_ids=acceptable)
+        == 1.0
+    )
+    # Retrieving the gold span still gives full recall.
+    chunks_gold = [{"span_ids": ["concepts/workloads/pods#overview"]}]
+    assert (
+        evaluate.span_recall_at_k(
+            gold, chunks_gold, k=5, acceptable_span_ids=acceptable
+        )
+        == 1.0
+    )
+    # Retrieving neither gives zero.
+    chunks_miss = [{"span_ids": ["concepts/workloads/pods#other"]}]
+    assert (
+        evaluate.span_recall_at_k(
+            gold, chunks_miss, k=5, acceptable_span_ids=acceptable
+        )
+        == 0.0
+    )
+
+
+def test_span_recall_legacy_remains_exact_without_acceptable_spans() -> None:
+    """Legacy span recall (no acceptable_span_ids) is unchanged."""
+    gold = ["concepts/workloads/pods#overview"]
+    chunks = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    # Without acceptable spans, the alternate section does not count.
+    assert evaluate.span_recall_at_k(gold, chunks, k=5) == 0.0
+    assert evaluate.span_recall_at_k(gold, chunks, k=5, acceptable_span_ids=None) == 0.0
+    assert evaluate.span_recall_at_k(gold, chunks, k=5, acceptable_span_ids=[]) == 0.0
+
+
+def test_citation_coverage_accepts_acceptable_span_ids() -> None:
+    """RAG citation coverage counts acceptable spans as equivalent."""
+    gold = ["concepts/workloads/pods#overview"]
+    acceptable = ["concepts/workloads/pods#what-is-a-pod"]
+    citations = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    assert (
+        evaluate.citation_coverage(gold, citations, acceptable_span_ids=acceptable)
+        == 1.0
+    )
+    # Legacy: without acceptable spans, alternate section does not count.
+    assert evaluate.citation_coverage(gold, citations) == 0.0
+
+
+def test_prediction_metrics_passes_acceptable_spans_for_rag_examples() -> None:
+    """_prediction_metrics uses acceptable_span_ids for RAG examples only."""
+    # RAG example: acceptable span should boost span_recall and citation_coverage.
+    rag_metrics = evaluate._prediction_metrics(
+        {
+            "target_mode": "answer",
+            "target_turn": {"utterance": "A Pod is the smallest deployable object."},
+            "gold_doc_ids": ["concepts/workloads/pods"],
+            "gold_span_ids": ["concepts/workloads/pods#overview"],
+            "acceptable_span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+            "expected_sources": ["concepts/workloads/pods"],
+            "acceptable_sources": [],
+            "required_points": ["smallest deployable object"],
+            "forbidden_claims": [],
+            "answer_type": "definition",
+        },
+        {
+            "decision": "answer",
+            "response_text": "A Pod is the smallest deployable object.",
+            "citations": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+            "retrieval_ranked_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+            "retrieved_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+        },
+        retrieval_top_k=5,
+    )
+    assert rag_metrics["span_recall_at_5"] == 1.0
+    assert rag_metrics["citation_coverage"] == 1.0
+
+    # Legacy example: acceptable_span_ids is ignored even if present.
+    legacy_metrics = evaluate._prediction_metrics(
+        {
+            "target_mode": "answer",
+            "target_turn": {"utterance": "A Pod is the smallest deployable object."},
+            "gold_doc_ids": ["concepts/workloads/pods"],
+            "gold_span_ids": ["concepts/workloads/pods#overview"],
+            "acceptable_span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+        },
+        {
+            "decision": "answer",
+            "response_text": "A Pod is the smallest deployable object.",
+            "citations": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+            "retrieval_ranked_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+            "retrieved_chunks": [
+                {
+                    "doc_id": "concepts/workloads/pods",
+                    "chunk_id": "chunk-pod",
+                    "span_ids": ["concepts/workloads/pods#what-is-a-pod"],
+                }
+            ],
+        },
+        retrieval_top_k=5,
+    )
+    # Legacy: acceptable span does NOT count; span_recall and citation_coverage are 0.
+    assert legacy_metrics["span_recall_at_5"] == 0.0
+    assert legacy_metrics["citation_coverage"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Integration-style eval tests for the Kubernetes smoke rubric cleanup.
+# ---------------------------------------------------------------------------
+
+
+def _kube_smoke_run(
+    examples: list[dict],
+    *,
+    make_settings,
+    tmp_path: Path,
+    run_graph_func,
+) -> dict:
+    settings = make_settings(project_root=tmp_path, enabled_domains=("kubernetes",))
+    now = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
+    return asyncio.run(
+        evaluate.evaluate_examples_async(
+            examples,
+            settings=settings,
+            domain="kubernetes",
+            split="validation",
+            subset_name="smoke",
+            notes="Smoke rubric cleanup test",
+            run_graph_func=run_graph_func,
+            now=now,
+        )
+    )
+
+
+def _kube_trace_and_result(
+    example, *, doc_id, chunk_id, span_ids, response, trace_path
+):
+    write_trace_event(
+        trace_path,
+        {
+            "node": "prepare_query",
+            "query": example["latest_user_utterance"],
+            "latency_ms": 1.0,
+        },
+    )
+    write_trace_event(
+        trace_path,
+        {
+            "node": "retrieve_docs",
+            "retrieval_attempts": 1,
+            "retrieval_ranked_count": 1,
+            "retrieved_count": 1,
+            "latency_ms": 2.0,
+        },
+    )
+    write_trace_event(
+        trace_path,
+        {
+            "node": "finalize",
+            "decision": "answer",
+            "total_latency_ms": 50.0,
+            "latency_ms": 0.5,
+        },
+    )
+    return {
+        "decision": "answer",
+        "response_text": response,
+        "citations": [{"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}],
+        "retrieval_ranked_chunks": [
+            {"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}
+        ],
+        "retrieved_chunks": [
+            {"doc_id": doc_id, "chunk_id": chunk_id, "span_ids": span_ids}
+        ],
+        "trace_summary": {
+            "retrieval_attempts": 1,
+            "graph_path": ["prepare_query", "retrieve_docs", "finalize"],
+            "latency_ms": 50.0,
+            "trace_path": str(trace_path),
+            "final_query": example["latest_user_utterance"],
+        },
+        "latest_user_utterance": example["latest_user_utterance"],
+    }
+
+
+def _load_smoke_examples() -> list[dict]:
+    """Load the real Kubernetes smoke rubric from the data directory."""
+    from support_graph.data.eval_subsets import load_subset_jsonl
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    path = repo_root / "data/eval_subsets/kubernetes/smoke.jsonl"
+    return load_subset_jsonl(path)
+
+
+def test_smoke_pods_what_is_a_pod_span_not_right_source_wrong_section(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    """Pods retrieval hitting #what-is-a-pod (acceptable span) is not flagged
+    as right_source_wrong_section."""
+    examples = _load_smoke_examples()
+    pods_example = next(
+        ex for ex in examples if ex["example_id"] == "kubernetes::pods::turn_2"
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/pods",
+            chunk_id="chunk-pod-what-is",
+            span_ids=["concepts/workloads/pods#what-is-a-pod"],
+            response=(
+                "A Pod is the smallest deployable compute object in Kubernetes "
+                "and represents one or more containers with shared storage and "
+                "network resources."
+            ),
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [pods_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pods_pred = result["predictions"][0]
+    # Acceptable span gives full span recall and citation coverage.
+    assert pods_pred["metrics"]["span_recall_at_5"] == 1.0
+    assert pods_pred["metrics"]["citation_coverage"] == 1.0
+    # Must NOT be right_source_wrong_section.
+    assert pods_pred["failure_label"] != "right_source_wrong_section"
+    # With full coverage and required points satisfied, no failure label.
+    assert pods_pred["failure_label"] is None
+
+
+def test_smoke_services_alias_answer_reaches_full_required_point_coverage(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    """Services answer using alternate wording (stable network identity / DNS or
+    IP / changing pod IPs) reaches full required-point coverage via aliases."""
+    examples = _load_smoke_examples()
+    services_example = next(
+        ex for ex in examples if ex["example_id"] == "kubernetes::services::turn_2"
+    )
+
+    alternate_answer = (
+        "A Service exposes an application running on Pods as a network service, "
+        "providing a stable network identity (DNS or IP) so clients can reach "
+        "changing pod IPs."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/services-networking/service",
+            chunk_id="chunk-service",
+            span_ids=["concepts/services-networking/service#overview"],
+            response=alternate_answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [services_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    services_pred = result["predictions"][0]
+    # All three required points (with aliases) are covered.
+    assert services_pred["metrics"]["required_points_covered"] == 1.0
+    # No incomplete_answer failure.
+    assert services_pred["failure_label"] != "incomplete_answer"
+    # Full success -> no failure label.
+    assert services_pred["failure_label"] is None
+
+
+def test_smoke_deployments_wrong_retrieval_still_retrieval_miss(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    """Deployments retrieval miss (wrong doc retrieved) still produces
+    retrieval_miss — the strict rubric exposes the real retrieval problem."""
+    examples = _load_smoke_examples()
+    dep_example = next(
+        ex for ex in examples if ex["example_id"] == "kubernetes::deployments::turn_2"
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        # Wrong doc retrieved (pods instead of deployment).
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/pods",
+            chunk_id="chunk-wrong",
+            span_ids=["concepts/workloads/pods#overview"],
+            response="A Deployment manages Pods and ReplicaSets.",
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [dep_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    dep_pred = result["predictions"][0]
+    assert dep_pred["metrics"]["hit_at_k"] == 0.0
+    assert dep_pred["failure_label"] == "retrieval_miss"
