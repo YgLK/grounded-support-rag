@@ -30,13 +30,7 @@ from support_graph.config.runtime import (
 )
 from support_graph.config.settings import Settings
 from support_graph.logging_utils import get_logger
-from support_graph.data.dataset import load_dialogues
 from support_graph.data.eval_subsets import load_subset_jsonl
-from support_graph.data.examples import (
-    build_turn_examples,
-    load_examples_jsonl,
-    write_examples_jsonl,
-)
 from support_graph.providers import (
     chat_provider as resolved_chat_provider,
     chat_provider_base_url,
@@ -258,6 +252,16 @@ def _graded_relevance_map(
     return grades
 
 
+def _unique_doc_ids(doc_ids: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for doc_id in doc_ids:
+        if doc_id and doc_id not in seen:
+            seen.add(doc_id)
+            unique.append(doc_id)
+    return unique
+
+
 def hit_at_k(
     expected_sources: list[str],
     acceptable_sources: list[str],
@@ -337,14 +341,16 @@ def ndcg_at_k(
         grade = grades.get(doc_id, 0)
         if grade > 0:
             dcg += (2.0**grade - 1.0) / math.log2(rank + 1)
-    expected_grades = [2 for doc_id in expected_sources if doc_id]
+    expected_grades = [2] * min(k, len(_unique_doc_ids(expected_sources)))
     ideal_grades = expected_grades[:k] or sorted(grades.values(), reverse=True)[:k]
     idcg = sum(
         (2.0**grade - 1.0) / math.log2(rank + 1)
         for rank, grade in enumerate(ideal_grades, start=1)
         if grade > 0
     )
-    return dcg / idcg if idcg > 0 else 0.0
+    if idcg <= 0:
+        return 0.0
+    return min(1.0, dcg / idcg)
 
 
 def _point_phrases(point: RequiredPoint) -> list[str]:
@@ -635,20 +641,13 @@ def _load_or_build_examples(
     split: DatasetSplitLike,
 ) -> list[Example]:
     resolved_domain = parse_domain(domain)
-    if resolved_domain.value == "kubernetes":
-        raise ValueError("Kubernetes uses curated eval subsets, not dialogue files.")
     resolved_split = parse_dataset_split(split)
     path = settings.paths.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
     if path.exists():
-        return load_examples_jsonl(path)
-    dialogues = load_dialogues(
-        settings.dataset.root,
-        split=resolved_split,
-        domains=[resolved_domain],
+        return load_subset_jsonl(path)
+    raise FileNotFoundError(
+        f"Full-validation examples artifact not found for {resolved_domain} {resolved_split}: {path}"
     )
-    examples = build_turn_examples(dialogues)
-    write_examples_jsonl(examples, path)
-    return examples
 
 
 def _eval_subset_path(settings: Any, domain: DomainLike, subset: EvalSubset) -> Path:

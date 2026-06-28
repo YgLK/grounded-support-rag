@@ -397,7 +397,7 @@ def _heuristic_non_answer_response(state: GraphState) -> dict:
     match grade.get("verdict"):
         case "partial":
             missing = grade.get("missing_information") or [
-                "what condition changed in your DMV case"
+                "what condition changed in your support case"
             ]
             return _clarify_payload(chunks, missing[0])
         case "sufficient" | "insufficient" | None:
@@ -614,7 +614,7 @@ def _best_chunk_for_answer(state: GraphState) -> dict | None:
 def _grounded_answer_from_chunk(chunk: dict) -> str:
     text = " ".join(str(chunk.get("text", "")).split()).strip()
     if not text:
-        return "Relevant DMV documentation was retrieved."
+        return "Relevant documentation was retrieved."
     if text.endswith((".", "!", "?")):
         return text
     return f"{text}."

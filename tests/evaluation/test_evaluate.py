@@ -25,7 +25,7 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
 
     examples = [
         {
-            "example_id": "dmv::one::turn_2",
+            "example_id": "kubernetes::one::turn_2",
             "target_mode": "answer",
             "target_turn_id": 2,
             "turns_before_target": [
@@ -111,7 +111,7 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             notes="Test eval run",
@@ -147,7 +147,7 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
     )
     summary = (output_dir / "summary.md").read_text(encoding="utf-8")
 
-    assert manifest["run_id"] == "20260318-143000-dmv-smoke"
+    assert manifest["run_id"] == "20260318-143000-kubernetes-smoke"
     assert manifest["prompt_version"] == "v-test"
     assert manifest["retrieval"]["candidate_k"] == 12
     assert manifest["retrieval"]["content_only_reasoning"] is True
@@ -171,8 +171,8 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
         retrieval_records[0]["retrieval_ranked_chunks"][0]["chunk_id"] == "chunk-ranked"
     )
     assert retrieval_records[0]["retrieved_chunks"][0]["chunk_id"] == "chunk-expanded"
-    assert trace_index["entries"][0]["example_id"] == "dmv::one::turn_2"
-    assert trace_index["entries"][0]["trace_file"] == "dmv-one-turn-2.jsonl"
+    assert trace_index["entries"][0]["example_id"] == "kubernetes::one::turn_2"
+    assert trace_index["entries"][0]["trace_file"] == "kubernetes-one-turn-2.jsonl"
     assert trace_index["entries"][0]["graph_path"] == [
         "prepare_query",
         "retrieve_docs",
@@ -184,11 +184,11 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
     assert trace_index["entries"][0]["retrieved_count"] == 1
     assert (
         prediction_records[0]["trace_summary"]["trace_path"]
-        == "outputs/evals/runs/20260318-143000-dmv-smoke/traces/dmv-one-turn-2.jsonl"
+        == "outputs/evals/runs/20260318-143000-kubernetes-smoke/traces/kubernetes-one-turn-2.jsonl"
     )
     assert (output_dir / "traces" / trace_index["entries"][0]["trace_file"]).exists()
     assert len(manual_review_rows) == 1
-    assert manual_review_rows[0]["example_id"] == "dmv::one::turn_2"
+    assert manual_review_rows[0]["example_id"] == "kubernetes::one::turn_2"
     assert manual_review_rows[0]["failure_label"] == "wrong_doc"
     assert result["artifact_paths"]["manual_review"] == output_dir / "manual_review.csv"
     assert (
@@ -240,7 +240,7 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
 
     examples = [
         {
-            "example_id": "dmv::followup::turn_2",
+            "example_id": "kubernetes::followup::turn_2",
             "target_mode": "follow_up",
             "target_turn_id": 2,
             "latest_user_utterance": "Do you need my plate number too?",
@@ -249,7 +249,7 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
             "gold_span_ids": ["10"],
         },
         {
-            "example_id": "dmv::answer::turn_2",
+            "example_id": "kubernetes::answer::turn_2",
             "target_mode": "answer",
             "target_turn_id": 2,
             "latest_user_utterance": "What title documents do I need?",
@@ -260,7 +260,7 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
     ]
 
     def fake_run_graph(*, example, trace_path: Path, **kwargs):
-        if example["example_id"] == "dmv::followup::turn_2":
+        if example["example_id"] == "kubernetes::followup::turn_2":
             write_trace_event(
                 trace_path,
                 {
@@ -369,7 +369,7 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             notes="Test review export run",
@@ -388,17 +388,17 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
 
     assert len(rows) == 2
     assert {row["example_id"] for row in rows} == {
-        "dmv::followup::turn_2",
-        "dmv::answer::turn_2",
+        "kubernetes::followup::turn_2",
+        "kubernetes::answer::turn_2",
     }
     assert (
-        next(row for row in rows if row["example_id"] == "dmv::followup::turn_2")[
-            "failure_label"
-        ]
+        next(
+            row for row in rows if row["example_id"] == "kubernetes::followup::turn_2"
+        )["failure_label"]
         == ""
     )
     assert (
-        next(row for row in rows if row["example_id"] == "dmv::answer::turn_2")[
+        next(row for row in rows if row["example_id"] == "kubernetes::answer::turn_2")[
             "failure_label"
         ]
         == "wrong_doc"
@@ -424,7 +424,7 @@ def test_evaluate_examples_logs_progress_and_artifact_writes(
 
     examples = [
         {
-            "example_id": "dmv::one::turn_2",
+            "example_id": "kubernetes::one::turn_2",
             "target_mode": "answer",
             "target_turn_id": 2,
             "latest_user_utterance": "What should I bring?",
@@ -433,7 +433,7 @@ def test_evaluate_examples_logs_progress_and_artifact_writes(
             "gold_span_ids": ["1", "2"],
         },
         {
-            "example_id": "dmv::two::turn_2",
+            "example_id": "kubernetes::two::turn_2",
             "target_mode": "answer",
             "target_turn_id": 2,
             "latest_user_utterance": "Do I need the title too?",
@@ -483,7 +483,7 @@ def test_evaluate_examples_logs_progress_and_artifact_writes(
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             notes="Log progress test",
@@ -493,20 +493,22 @@ def test_evaluate_examples_logs_progress_and_artifact_writes(
         )
     )
 
-    assert result["run_id"] == "20260318-143000-dmv-smoke"
-    assert any("Starting eval run 20260318-143000-dmv-smoke" in line for line in logged)
+    assert result["run_id"] == "20260318-143000-kubernetes-smoke"
     assert any(
-        "Eval progress 1/2 example=dmv::one::turn_2" in line
-        or "Eval progress 1/2 example=dmv::two::turn_2" in line
+        "Starting eval run 20260318-143000-kubernetes-smoke" in line for line in logged
+    )
+    assert any(
+        "Eval progress 1/2 example=kubernetes::one::turn_2" in line
+        or "Eval progress 1/2 example=kubernetes::two::turn_2" in line
         for line in logged
     )
     assert any("Eval progress 2/2" in line for line in logged)
     assert any(
-        "Writing eval artifacts for run 20260318-143000-dmv-smoke" in line
+        "Writing eval artifacts for run 20260318-143000-kubernetes-smoke" in line
         for line in logged
     )
     assert any(
-        "Eval run 20260318-143000-dmv-smoke complete." in line for line in logged
+        "Eval run 20260318-143000-kubernetes-smoke complete." in line for line in logged
     )
 
 
@@ -571,7 +573,7 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
     settings = make_settings(project_root=tmp_path)
     examples = [
         {
-            "example_id": "dmv::first::turn_1",
+            "example_id": "kubernetes::first::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "first",
@@ -580,7 +582,7 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
             "gold_span_ids": ["span-1"],
         },
         {
-            "example_id": "dmv::second::turn_1",
+            "example_id": "kubernetes::second::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "second",
@@ -591,7 +593,7 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
     ]
 
     async def fake_run_graph(*, example, **kwargs):
-        if example["example_id"] == "dmv::first::turn_1":
+        if example["example_id"] == "kubernetes::first::turn_1":
             await asyncio.sleep(0.02)
         else:
             await asyncio.sleep(0.001)
@@ -614,7 +616,7 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             run_graph_func=fake_run_graph,
@@ -623,8 +625,8 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
     )
 
     assert [record["example_id"] for record in result["predictions"]] == [
-        "dmv::first::turn_1",
-        "dmv::second::turn_1",
+        "kubernetes::first::turn_1",
+        "kubernetes::second::turn_1",
     ]
 
 
@@ -635,7 +637,7 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
     settings = make_settings(project_root=tmp_path)
     examples = [
         {
-            "example_id": "dmv::ok::turn_1",
+            "example_id": "kubernetes::ok::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "ok",
@@ -644,7 +646,7 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
             "gold_span_ids": ["span-ok"],
         },
         {
-            "example_id": "dmv::boom::turn_1",
+            "example_id": "kubernetes::boom::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "boom",
@@ -655,7 +657,7 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
     ]
 
     async def flaky_run_graph(*, example, **kwargs):
-        if example["example_id"] == "dmv::boom::turn_1":
+        if example["example_id"] == "kubernetes::boom::turn_1":
             raise RuntimeError("vectorstore offline")
         return {
             "example_id": example["example_id"],
@@ -676,7 +678,7 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             run_graph_func=flaky_run_graph,
@@ -685,13 +687,13 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
     )
 
     assert [record["example_id"] for record in result["predictions"]] == [
-        "dmv::ok::turn_1",
-        "dmv::boom::turn_1",
+        "kubernetes::ok::turn_1",
+        "kubernetes::boom::turn_1",
     ]
     error_record = next(
         record
         for record in result["predictions"]
-        if record["example_id"] == "dmv::boom::turn_1"
+        if record["example_id"] == "kubernetes::boom::turn_1"
     )
     assert error_record["failure_label"] == "runtime_error"
     assert error_record["runtime_error"]["exception_type"] == "RuntimeError"
@@ -716,7 +718,7 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
     settings = make_settings(project_root=tmp_path)
     examples = [
         {
-            "example_id": "dmv::first::turn_1",
+            "example_id": "kubernetes::first::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "first",
@@ -725,7 +727,7 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
             "gold_span_ids": ["span-1"],
         },
         {
-            "example_id": "dmv::second::turn_1",
+            "example_id": "kubernetes::second::turn_1",
             "target_mode": "answer",
             "target_turn_id": 1,
             "latest_user_utterance": "second",
@@ -772,7 +774,7 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
         evaluate.evaluate_examples_async(
             examples,
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             split="validation",
             subset_name="smoke",
             run_graph_func=evaluate.run_graph_async,
@@ -900,6 +902,73 @@ def test_ndcg_at_k_with_graded_relevance() -> None:
         )
         == 1.0
     )
+
+
+def test_ndcg_at_k_caps_acceptable_and_repeated_sources() -> None:
+    """Smoke-10 regression: acceptable docs and repeats cannot add extra gain."""
+    ndcg = evaluate.ndcg_at_k(
+        ["concepts/workloads/controllers/deployment"],
+        ["tasks/run-application/update-deployment-rolling"],
+        [
+            {"doc_id": "concepts/workloads/controllers/deployment"},
+            {"doc_id": "concepts/workloads/controllers/deployment"},
+            {"doc_id": "tasks/run-application/update-deployment-rolling"},
+            {"doc_id": "concepts/workloads/controllers/deployment"},
+        ],
+        k=5,
+    )
+    assert ndcg == 1.0
+
+    duplicate_expected_ndcg = evaluate.ndcg_at_k(
+        [
+            "concepts/workloads/controllers/deployment",
+            "concepts/workloads/controllers/deployment",
+        ],
+        ["tasks/run-application/update-deployment-rolling"],
+        [
+            {"doc_id": "concepts/workloads/controllers/deployment"},
+            {"doc_id": "tasks/run-application/update-deployment-rolling"},
+        ],
+        k=5,
+    )
+    assert duplicate_expected_ndcg == 1.0
+
+
+def test_metric_invariants_stay_in_unit_interval() -> None:
+    retrieval_chunks = [
+        {"doc_id": "expected", "chunk_id": "chunk-expected", "span_ids": ["gold"]},
+        {"doc_id": "expected", "chunk_id": "chunk-expected-2", "span_ids": ["gold"]},
+        {
+            "doc_id": "acceptable",
+            "chunk_id": "chunk-acceptable",
+            "span_ids": ["alternate"],
+        },
+    ]
+    metrics = [
+        evaluate.hit_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
+        evaluate.precision_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
+        evaluate.graded_mrr_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
+        evaluate.ndcg_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
+        evaluate.citation_coverage(
+            ["gold"],
+            [{"chunk_id": "chunk-acceptable", "span_ids": ["alternate"]}],
+            acceptable_span_ids=["alternate"],
+        ),
+        evaluate.required_point_coverage(
+            [
+                [
+                    "scheduler cannot find a node",
+                    "scheduler couldn't find a node",
+                    "scheduler find a suitable node",
+                ]
+            ],
+            "The scheduler couldn’t find a node that satisfies the pod requirements.",
+        ),
+    ]
+
+    for metric in metrics:
+        assert metric is not None
+        assert 0.0 <= metric <= 1.0
 
 
 def test_required_point_coverage_full_partial_and_zero() -> None:
@@ -1905,6 +1974,143 @@ def test_smoke_services_alias_answer_reaches_full_required_point_coverage(
     assert services_pred["failure_label"] != "incomplete_answer"
     # Full success -> no failure label.
     assert services_pred["failure_label"] is None
+
+
+def test_smoke_failedscheduling_suitable_node_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    failedscheduling_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-failedscheduling::turn_2"
+    )
+    answer = (
+        "When a Pod stays Pending with a FailedScheduling event, check resource "
+        "availability and Pod resource requests, then add more nodes if resources "
+        "are exhausted. Addressing these points should help the scheduler find a "
+        "suitable node for the Pod."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/configuration/manage-resources-containers",
+            chunk_id="chunk-failedscheduling",
+            span_ids=[
+                "concepts/configuration/manage-resources-containers#my-pods-are-pending-with-event-message-failedscheduling"
+            ],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [failedscheduling_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke10_style_metric_invariants_on_mocked_predictions(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        expected_doc = example["expected_sources"][0]
+        acceptable_doc = next(iter(example.get("acceptable_sources", [])), expected_doc)
+        gold_span = example["gold_span_ids"][0]
+        acceptable_span = next(iter(example.get("acceptable_span_ids", [])), gold_span)
+        write_trace_event(
+            trace_path,
+            {"node": "prepare_query", "query": "smoke", "latency_ms": 1.0},
+        )
+        write_trace_event(
+            trace_path,
+            {
+                "node": "retrieve_docs",
+                "retrieval_attempts": 1,
+                "retrieval_ranked_count": 3,
+                "retrieved_count": 3,
+                "latency_ms": 2.0,
+            },
+        )
+        write_trace_event(
+            trace_path,
+            {
+                "node": "finalize",
+                "decision": "answer",
+                "total_latency_ms": 10.0,
+                "latency_ms": 0.5,
+            },
+        )
+        chunks = [
+            {
+                "doc_id": expected_doc,
+                "chunk_id": "chunk-expected",
+                "span_ids": [gold_span],
+            },
+            {
+                "doc_id": expected_doc,
+                "chunk_id": "chunk-expected-repeat",
+                "span_ids": [gold_span],
+            },
+            {
+                "doc_id": acceptable_doc,
+                "chunk_id": "chunk-acceptable",
+                "span_ids": [acceptable_span],
+            },
+        ]
+        return {
+            "decision": "answer",
+            "response_text": example["target_turn"]["utterance"],
+            "citations": [
+                {
+                    "doc_id": expected_doc,
+                    "chunk_id": "chunk-expected",
+                    "span_ids": [gold_span],
+                }
+            ],
+            "retrieval_ranked_chunks": chunks,
+            "retrieved_chunks": chunks,
+            "trace_summary": {
+                "retrieval_attempts": 1,
+                "graph_path": ["prepare_query", "retrieve_docs", "finalize"],
+                "latency_ms": 10.0,
+                "trace_path": str(trace_path),
+                "final_query": "smoke",
+            },
+            "latest_user_utterance": example["latest_user_utterance"],
+        }
+
+    result = _kube_smoke_run(
+        examples,
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    assert len(result["predictions"]) == 10
+    metric_names = (
+        "hit_at_k",
+        "precision_at_k",
+        "graded_mrr_at_k",
+        "ndcg_at_k",
+        "citation_coverage",
+        "required_points_covered",
+    )
+    for prediction in result["predictions"]:
+        for metric_name in metric_names:
+            value = prediction["metrics"][metric_name]
+            assert value is not None
+            assert 0.0 <= value <= 1.0
+    assert result["metrics"]["rag"]["answer"]["ndcg_at_k"] == 1.0
 
 
 def test_smoke_deployments_wrong_retrieval_still_retrieval_miss(

@@ -17,8 +17,8 @@ from support_graph.types import Domain
 def _make_settings() -> Settings:
     return Settings(
         dataset=DatasetSettings(
-            root=Path("/tmp/project/multidoc2dial"),
-            enabled_domains=(Domain.DMV,),
+            root=Path("/tmp/project/raw/kubernetes/current"),
+            enabled_domains=(Domain.KUBERNETES,),
         ),
         paths=PathSettings(
             project_root=Path("/tmp/project"),
@@ -54,9 +54,11 @@ def _make_settings() -> Settings:
             langsmith_project="grounded-support-rag",
             langsmith_api_key="ls-key",
             langsmith_endpoint="https://api.smith.langchain.com",
-            domain=Domain.DMV,
-            collection_name="support_graph_dmv",
-            chunk_artifact_path=Path("/tmp/project/data/derived/chunks/dmv.jsonl"),
+            domain=Domain.KUBERNETES,
+            collection_name="support_graph_kubernetes",
+            chunk_artifact_path=Path(
+                "/tmp/project/data/derived/chunks/kubernetes.jsonl"
+            ),
         ),
     )
 
@@ -66,12 +68,12 @@ def test_build_runtime_config_reuses_shared_runtime_fields() -> None:
 
     assert settings.runtime.chat_model == "google/gemini-2.5-flash-preview"
 
-    config = build_runtime_config(settings, "va")
+    config = build_runtime_config(settings, "kubernetes")
 
-    assert config.domain == Domain.VA
-    assert config.collection_name == "support_graph_va"
+    assert config.domain == Domain.KUBERNETES
+    assert config.collection_name == "support_graph_kubernetes"
     assert config.chunk_artifact_path == Path(
-        "/tmp/project/data/derived/chunks/va.jsonl"
+        "/tmp/project/data/derived/chunks/kubernetes.jsonl"
     )
     assert config.retrieval_top_k == 7
     assert config.llm_timeout_seconds == 30.0
@@ -89,12 +91,12 @@ def test_runtime_for_applies_typed_experiment_overrides() -> None:
         experiment_options={"query_mode": "structured"},
     )
 
-    config = settings.runtime_for("va", experiment)
+    config = settings.runtime_for("kubernetes", experiment)
 
-    assert config.domain == Domain.VA
-    assert config.collection_name == "support_graph_va"
+    assert config.domain == Domain.KUBERNETES
+    assert config.collection_name == "support_graph_kubernetes"
     assert config.chunk_artifact_path == Path(
-        "/tmp/project/data/derived/chunks/va.jsonl"
+        "/tmp/project/data/derived/chunks/kubernetes.jsonl"
     )
     assert config.retrieval_rerank is False
     assert config.content_only_reasoning is False
@@ -102,4 +104,4 @@ def test_runtime_for_applies_typed_experiment_overrides() -> None:
     assert config.experiment_variant == "structured-query"
     assert config.experiment_options == {"query_mode": "structured"}
     assert settings.runtime.retrieval_rerank is True
-    assert settings.runtime.domain == Domain.DMV
+    assert settings.runtime.domain == Domain.KUBERNETES

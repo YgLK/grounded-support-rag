@@ -34,14 +34,14 @@ def make_settings(repo_root: Path):
         project_root: Path | None = None,
         missing_fields: list[str] | None = None,
         has_index: bool = True,
-        enabled_domains: tuple[str, ...] = ("dmv",),
+        enabled_domains: tuple[str, ...] = ("kubernetes",),
         overrides: dict | None = None,
     ) -> SimpleNamespace:
         root = Path(project_root) if project_root is not None else repo_root
-        domain = enabled_domains[0] if enabled_domains else "dmv"
+        domain = enabled_domains[0] if enabled_domains else "kubernetes"
         parsed_domain = parse_domain(domain)
         parsed_domains = tuple(parse_domain(value) for value in enabled_domains) or (
-            Domain.DMV,
+            Domain.KUBERNETES,
         )
         missing = list(missing_fields or [])
         runtime_payload = {
@@ -86,7 +86,7 @@ def make_settings(repo_root: Path):
                 examples_dir=root / "data/derived/examples",
             ),
             "dataset": SimpleNamespace(
-                root=root / "multidoc2dial",
+                root=root / "raw/kubernetes/current",
                 enabled_domains=parsed_domains,
             ),
             "runtime": None,
@@ -157,17 +157,17 @@ def make_settings(repo_root: Path):
 @pytest.fixture
 def runtime_example() -> dict:
     return {
-        "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
-        "domain": "dmv",
+        "example_id": "kubernetes::pods::turn_2",
+        "domain": "kubernetes",
         "conversation": [
             {
                 "turn_id": 1,
                 "role": "user",
-                "utterance": "My insurance ended so what should I do?",
+                "utterance": "What is a Kubernetes Pod?",
             },
         ],
         "latest_user_turn_id": 1,
-        "latest_user_utterance": "My insurance ended so what should I do?",
+        "latest_user_utterance": "What is a Kubernetes Pod?",
     }
 
 
@@ -175,8 +175,8 @@ def runtime_example() -> dict:
 def make_runtime_config():
     def factory(**overrides) -> RuntimeConfig:
         payload = {
-            "domain": "dmv",
-            "collection_name": "support_graph_dmv",
+            "domain": "kubernetes",
+            "collection_name": "support_graph_kubernetes",
             "chat_provider_type": Provider.OPENROUTER,
             "embedding_provider_type": Provider.OPENROUTER,
             "retrieval_top_k": 5,

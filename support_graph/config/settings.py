@@ -80,8 +80,10 @@ class _FrozenModel(BaseModel):
 
 
 class DatasetFileConfig(_FrozenModel):
-    root: str = "multidoc2dial"
-    enabled_domains: list[str] = Field(default_factory=lambda: [Domain.DMV.value])
+    root: str = "raw/kubernetes/current"
+    enabled_domains: list[str] = Field(
+        default_factory=lambda: [Domain.KUBERNETES.value]
+    )
 
 
 class PathsFileConfig(_FrozenModel):
@@ -183,7 +185,7 @@ class Settings:
 
         derived_dir = project_root / "data/derived"
         enabled_domains = parse_domains(file_config.dataset.enabled_domains) or (
-            Domain.DMV,
+            Domain.KUBERNETES,
         )
         selected_domain = enabled_domains[0]
         runtime_kwargs = file_config.runtime.model_dump(mode="python")
@@ -193,7 +195,7 @@ class Settings:
                 root=_resolve_path(
                     file_config.dataset.root,
                     project_root=project_root,
-                    default=project_root / "multidoc2dial",
+                    default=project_root / "raw/kubernetes/current",
                 ),
                 enabled_domains=enabled_domains,
             ),

@@ -1,4 +1,4 @@
-"""Targeted experiment runner for DMV Smoke-10."""
+"""Targeted experiment runner for Smoke-10."""
 
 from __future__ import annotations
 
@@ -358,7 +358,7 @@ def write_experiment_summary(
         related_run_ids.append(frozen_result["run_id"])
 
     lines = [
-        f"# DMV Smoke-{limit} Experiment Summary",
+        f"# {domain} Smoke-{limit} Experiment Summary",
         "",
         "Scope",
         f"- Domain: {domain}",
@@ -451,7 +451,7 @@ def write_experiment_summary(
 async def run_smoke10_experiment_async(
     *,
     settings: Any,
-    domain: DomainLike = Domain.DMV,
+    domain: DomainLike = Domain.KUBERNETES,
     split: DatasetSplitLike = DatasetSplit.VALIDATION,
     limit: int = 10,
     run_graph_func: Any | None = None,

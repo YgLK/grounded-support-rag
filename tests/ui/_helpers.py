@@ -14,11 +14,11 @@ from support_graph.artifacts import (
 from support_graph.runtime.traces import write_trace_event
 
 
-RUN_ID = "20260318-143000-dmv-smoke"
+RUN_ID = "20260318-143000-kubernetes-smoke"
 SECOND_RUN_ID = "20260317-090000-medicaid-frozen_experiment"
-EXAMPLE_ID = "dmv::one::turn_2"
-SECOND_EXAMPLE_ID = "dmv::two::turn_4"
-REPORT_ID = "20260318-143000-dmv-smoke10-experiment-summary"
+EXAMPLE_ID = "kubernetes::one::turn_2"
+SECOND_EXAMPLE_ID = "kubernetes::two::turn_4"
+REPORT_ID = "20260318-143000-kubernetes-smoke10-experiment-summary"
 STANDALONE_RUN_ID = "run-7df0f6c3fb11"
 
 
@@ -41,15 +41,15 @@ def build_example_artifact(
     settings,
     *,
     example_id: str = EXAMPLE_ID,
-    latest_user_utterance: str = "What title form do I need?",
+    latest_user_utterance: str = "What deployment status do I need?",
 ) -> Path:
-    path = settings.paths.examples_dir / "dmv_validation.jsonl"
+    path = settings.paths.examples_dir / "kubernetes_validation.jsonl"
     write_jsonl(
         path,
         [
             {
                 "example_id": example_id,
-                "domain": "dmv",
+                "domain": "kubernetes",
                 "conversation": [
                     {
                         "turn_id": 1,
@@ -250,7 +250,7 @@ def build_eval_run_artifact(
     *,
     run_id: str = RUN_ID,
     created_at: str = "2026-03-18T14:30:00+00:00",
-    domain: str = "dmv",
+    domain: str = "kubernetes",
     split: str = "validation",
     eval_subset: str = "smoke",
     subset_label: str = "Smoke 25",
@@ -269,7 +269,7 @@ def build_eval_run_artifact(
         {
             "run_id": run_id,
             "created_at": created_at,
-            "dataset_root": "multidoc2dial",
+            "dataset_root": "raw/kubernetes/current",
             "domains": [domain],
             "split": split,
             "eval_subset": eval_subset,
@@ -365,17 +365,17 @@ def build_eval_run_artifact(
             _prediction_record(
                 EXAMPLE_ID,
                 first_trace_path,
-                latest_user_utterance="What title form do I need?",
-                target_text="Bring your title form.",
-                final_query="title form dmv",
+                latest_user_utterance="What deployment status do I need?",
+                target_text="Bring your deployment status.",
+                final_query="deployment status kubernetes",
                 failure_label="wrong_doc",
             ),
             _prediction_record(
                 SECOND_EXAMPLE_ID,
                 second_trace_path,
-                latest_user_utterance="How do I replace my registration?",
-                target_text="Complete the replacement registration request.",
-                final_query="replace registration dmv",
+                latest_user_utterance="How do I replace my deployment?",
+                target_text="Restart the Deployment rollout.",
+                final_query="restart deployment kubernetes",
                 failure_label=None,
             ),
         ],
@@ -386,9 +386,9 @@ def build_eval_run_artifact(
             _prediction_record(
                 EXAMPLE_ID,
                 first_trace_path,
-                latest_user_utterance="What title form do I need?",
-                target_text="Bring your title form.",
-                final_query="title form dmv",
+                latest_user_utterance="What deployment status do I need?",
+                target_text="Bring your deployment status.",
+                final_query="deployment status kubernetes",
                 failure_label="wrong_doc",
             )
         ],
@@ -398,16 +398,16 @@ def build_eval_run_artifact(
         [
             _retrieval_record(
                 EXAMPLE_ID,
-                latest_user_utterance="What title form do I need?",
-                target_text="Bring your title form.",
-                final_query="title form dmv",
+                latest_user_utterance="What deployment status do I need?",
+                target_text="Bring your deployment status.",
+                final_query="deployment status kubernetes",
                 failure_label="wrong_doc",
             ),
             _retrieval_record(
                 SECOND_EXAMPLE_ID,
-                latest_user_utterance="How do I replace my registration?",
-                target_text="Complete the replacement registration request.",
-                final_query="replace registration dmv",
+                latest_user_utterance="How do I replace my deployment?",
+                target_text="Restart the Deployment rollout.",
+                final_query="restart deployment kubernetes",
                 failure_label=None,
             ),
         ],
@@ -427,7 +427,7 @@ def build_eval_run_artifact(
                         "finalize",
                     ],
                     "retrieval_attempts": 1,
-                    "final_query": "title form dmv",
+                    "final_query": "deployment status kubernetes",
                     "decision": "answer",
                     "failure_label": "wrong_doc",
                     "total_latency_ms": 120.0,
@@ -448,7 +448,7 @@ def build_eval_run_artifact(
                         "finalize",
                     ],
                     "retrieval_attempts": 1,
-                    "final_query": "replace registration dmv",
+                    "final_query": "restart deployment kubernetes",
                     "decision": "answer",
                     "failure_label": None,
                     "total_latency_ms": 120.0,
@@ -496,11 +496,11 @@ def build_eval_run_artifact(
             "target_mode": "answer",
             "decision": "answer",
             "failure_label": "wrong_doc",
-            "latest_user_utterance": "What title form do I need?",
-            "response_text": "Bring your title form.",
+            "latest_user_utterance": "What deployment status do I need?",
+            "response_text": "Bring your deployment status.",
             "gold_doc_ids": "doc-a",
             "gold_span_ids": "1,2",
-            "final_query": "title form dmv",
+            "final_query": "deployment status kubernetes",
             "retrieval_attempts": "1",
             "retrieval_ranked_chunk_ids": "chunk-ranked",
             "retrieved_chunk_ids": "chunk-expanded",
@@ -520,12 +520,12 @@ def build_eval_run_artifact(
 
     _write_trace(
         artifacts.trace_path(trace_file),
-        final_query="title form dmv",
+        final_query="deployment status kubernetes",
         decision="answer",
     )
     _write_trace(
         artifacts.trace_path(second_trace_file),
-        final_query="replace registration dmv",
+        final_query="restart deployment kubernetes",
         decision="answer",
     )
 
@@ -545,7 +545,7 @@ def build_eval_report_artifact(
             "report_type": "experiment_summary",
             "title": "Smoke-10 Experiment Summary",
             "related_run_ids": [RUN_ID],
-            "domain": "dmv",
+            "domain": "kubernetes",
             "split": "validation",
             "subset_label": "Smoke 25",
             "notes": "Compare control vs experiment variants.",
@@ -570,7 +570,7 @@ def build_standalone_run_artifact(
             "run_id": run_id,
             "created_at": created_at,
             "example_id": EXAMPLE_ID,
-            "domain": "dmv",
+            "domain": "kubernetes",
             "provider": {
                 "type": "ollama",
                 "chat_model": "qwen3:8b-q4_K_M",
@@ -585,9 +585,9 @@ def build_standalone_run_artifact(
         artifacts.result,
         {
             "example_id": EXAMPLE_ID,
-            "latest_user_utterance": "What title form do I need?",
+            "latest_user_utterance": "What deployment status do I need?",
             "decision": "answer",
-            "response_text": "Bring your title form.",
+            "response_text": "Bring your deployment status.",
             "citations": [
                 {
                     "doc_id": "doc-a",
@@ -609,7 +609,7 @@ def build_standalone_run_artifact(
             },
             "trace_summary": {
                 "retrieval_attempts": 1,
-                "final_query": "title form dmv",
+                "final_query": "deployment status kubernetes",
                 "graph_path": [
                     "prepare_query",
                     "retrieve_docs",
@@ -625,4 +625,6 @@ def build_standalone_run_artifact(
             },
         },
     )
-    _write_trace(artifacts.trace, final_query="title form dmv", decision="answer")
+    _write_trace(
+        artifacts.trace, final_query="deployment status kubernetes", decision="answer"
+    )

@@ -9,7 +9,7 @@ from support_graph.types import DatasetSplit, Domain, EvalSubset
 
 
 def test_shared_enums_expose_supported_values_without_duplicate_constants() -> None:
-    assert Domain.values() == ("dmv", "kubernetes", "ssa", "studentaid", "va")
+    assert Domain.values() == ("kubernetes",)
     assert DatasetSplit.value_set() == frozenset({"train", "validation", "test"})
     assert EvalSubset.value_set() == frozenset(
         {"smoke", "frozen_experiment", "full_validation"}

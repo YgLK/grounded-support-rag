@@ -78,8 +78,8 @@ class RuntimeConfig:
     langsmith_project: str | None = None
     langsmith_api_key: str | None = None
     langsmith_endpoint: str | None = None
-    domain: Domain = Domain.DMV
-    collection_name: str = "support_graph_dmv"
+    domain: Domain = Domain.KUBERNETES
+    collection_name: str = "support_graph_kubernetes"
     retrieval_rerank: bool = DEFAULT_RETRIEVAL_RERANK
     content_only_reasoning: bool = DEFAULT_CONTENT_ONLY_REASONING
     neighbor_expansion: bool = DEFAULT_NEIGHBOR_EXPANSION

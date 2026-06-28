@@ -38,7 +38,7 @@ def test_api_routes_expose_artifact_explorer_and_eval_views(
     filtered = client.get(
         "/api/evals",
         params={
-            "domain": "dmv",
+            "domain": "kubernetes",
             "subset": "Smoke 25",
             "provider": "ollama",
             "chat_model": "ollama-chat",
@@ -67,8 +67,14 @@ def test_api_routes_expose_artifact_explorer_and_eval_views(
     assert example_detail.status_code == 200
     example_payload = example_detail.json()
     assert example_payload["prediction"]["example_id"] == EXAMPLE_ID
-    assert example_payload["trace_index_entry"]["trace_file"] == "dmv-one-turn-2.jsonl"
-    assert example_payload["trace_summary"]["final_query"] == "title form dmv"
+    assert (
+        example_payload["trace_index_entry"]["trace_file"]
+        == "kubernetes-one-turn-2.jsonl"
+    )
+    assert (
+        example_payload["trace_summary"]["final_query"]
+        == "deployment status kubernetes"
+    )
 
 
 def test_api_routes_expose_standalone_run_and_report_details(
@@ -85,7 +91,7 @@ def test_api_routes_expose_standalone_run_and_report_details(
     assert run_response.status_code == 200
     run_payload = run_response.json()
     assert run_payload["summary"]["decision"] == "answer"
-    assert run_payload["trace_summary"]["final_query"] == "title form dmv"
+    assert run_payload["trace_summary"]["final_query"] == "deployment status kubernetes"
     assert (
         run_payload["artifact_paths"]["trace"]
         == f"outputs/runs/{STANDALONE_RUN_ID}/trace.jsonl"
@@ -116,8 +122,8 @@ def test_api_returns_404_for_missing_and_409_for_incomplete_artifacts(
         {
             "run_id": "broken-run",
             "created_at": "2026-03-18T14:30:00+00:00",
-            "dataset_root": "multidoc2dial",
-            "domains": ["dmv"],
+            "dataset_root": "raw/kubernetes/current",
+            "domains": ["kubernetes"],
             "split": "validation",
             "eval_subset": "smoke",
             "subset_label": "Smoke 25",
@@ -161,7 +167,7 @@ def test_api_returns_404_for_missing_and_409_for_incomplete_artifacts(
             "run_id": "run-broken",
             "created_at": "2026-03-18T14:30:00+00:00",
             "example_id": EXAMPLE_ID,
-            "domain": "dmv",
+            "domain": "kubernetes",
             "provider": {
                 "type": "ollama",
                 "chat_model": "qwen3",
@@ -175,9 +181,9 @@ def test_api_returns_404_for_missing_and_409_for_incomplete_artifacts(
         incomplete_standalone_dir / "result.json",
         {
             "example_id": EXAMPLE_ID,
-            "latest_user_utterance": "What title form do I need?",
+            "latest_user_utterance": "What deployment status do I need?",
             "decision": "answer",
-            "response_text": "Bring your title form.",
+            "response_text": "Bring your deployment status.",
             "citations": [],
             "confidence_label": "high",
             "retrieval_ranked_chunks": [],
@@ -189,7 +195,7 @@ def test_api_returns_404_for_missing_and_409_for_incomplete_artifacts(
             },
             "trace_summary": {
                 "retrieval_attempts": 1,
-                "final_query": "title form dmv",
+                "final_query": "deployment status kubernetes",
                 "graph_path": ["prepare_query", "retrieve_docs", "finalize"],
                 "trace_path": "outputs/runs/run-broken/trace.jsonl",
             },
@@ -262,7 +268,7 @@ def test_htmx_routes_return_partial_fragments(
     home_partial = client.get(
         "/",
         headers={"HX-Request": "true"},
-        params={"domain": "dmv"},
+        params={"domain": "kubernetes"},
     )
     assert home_partial.status_code == 200
     assert "<html" not in home_partial.text

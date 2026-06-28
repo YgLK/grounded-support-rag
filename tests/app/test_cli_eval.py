@@ -32,7 +32,7 @@ def test_eval_cli_reports_missing_config_and_next_step(
         raising=False,
     )
 
-    exit_code = cli.main(["eval", "--split", "validation", "--domain", "dmv"])
+    exit_code = cli.main(["eval", "--split", "validation", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 1
@@ -59,7 +59,7 @@ def test_eval_cli_reports_missing_index(monkeypatch, capsys, make_settings) -> N
         raising=False,
     )
 
-    exit_code = cli.main(["eval", "--split", "validation", "--domain", "dmv"])
+    exit_code = cli.main(["eval", "--split", "validation", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 1
@@ -92,7 +92,7 @@ def test_eval_cli_reports_index_unavailable_when_row_count_check_fails(
         raising=False,
     )
 
-    exit_code = cli.main(["eval", "--split", "validation", "--domain", "dmv"])
+    exit_code = cli.main(["eval", "--split", "validation", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 1
@@ -120,10 +120,10 @@ def test_eval_cli_default_hierarchy_shows_metrics_failures_and_artifacts(
         cli,
         "evaluate_split_async",
         lambda **kwargs: {
-            "run_id": "20260318-143000-dmv-smoke",
-            "subset_label": "dmv validation / smoke",
+            "run_id": "20260318-143000-kubernetes-smoke",
+            "subset_label": "kubernetes validation / smoke",
             "output_dir": Path(
-                "/Users/yglk/coding/grounded-support-rag/outputs/evals/runs/20260318-143000-dmv-smoke"
+                "/Users/yglk/coding/grounded-support-rag/outputs/evals/runs/20260318-143000-kubernetes-smoke"
             ),
             "metrics": {
                 "retrieval": {
@@ -149,7 +149,7 @@ def test_eval_cli_default_hierarchy_shows_metrics_failures_and_artifacts(
         raising=False,
     )
 
-    exit_code = cli.main(["eval", "--split", "validation", "--domain", "dmv"])
+    exit_code = cli.main(["eval", "--split", "validation", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 0
@@ -193,10 +193,10 @@ def test_eval_cli_marks_unavailable_rank_metrics_as_na(
         cli,
         "evaluate_split_async",
         lambda **kwargs: {
-            "run_id": "20260318-143000-dmv-smoke",
-            "subset_label": "dmv validation / smoke",
+            "run_id": "20260318-143000-kubernetes-smoke",
+            "subset_label": "kubernetes validation / smoke",
             "output_dir": Path(
-                "/Users/yglk/coding/grounded-support-rag/outputs/evals/runs/20260318-143000-dmv-smoke"
+                "/Users/yglk/coding/grounded-support-rag/outputs/evals/runs/20260318-143000-kubernetes-smoke"
             ),
             "retrieval_top_k": 5,
             "metrics": {
@@ -223,7 +223,7 @@ def test_eval_cli_marks_unavailable_rank_metrics_as_na(
         raising=False,
     )
 
-    exit_code = cli.main(["eval", "--split", "validation", "--domain", "dmv"])
+    exit_code = cli.main(["eval", "--split", "validation", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 0

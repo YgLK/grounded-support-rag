@@ -36,12 +36,9 @@ from support_graph.artifacts import build_standalone_run_id, standalone_run_arti
 from support_graph.config.runtime import ConfigValidationError, RuntimeConfig
 from support_graph.config.settings import Settings
 from support_graph.data.chunks import build_chunks, write_chunks_jsonl
-from support_graph.data.dataset import load_dialogues, load_documents
+from support_graph.data.documents import load_documents
 from support_graph.data.eval_subsets import build_subset, write_subset_jsonl
-from support_graph.data.examples import build_turn_examples, write_examples_jsonl
-from support_graph.data.examples import (
-    load_example_record as load_example_record_from_paths,
-)
+from support_graph.data.eval_subsets import load_subset_jsonl
 from support_graph.data.kubernetes import fetch_kubernetes_docs
 from support_graph.evaluation.experiment import run_smoke10_experiment_async
 from support_graph.evaluation.benchmark import (
@@ -61,7 +58,7 @@ from support_graph.retrieval.index import (
 )
 from support_graph.runtime.graph import run_graph_async
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
-from support_graph.types import DatasetSplit, DomainLike
+from support_graph.types import DomainLike
 
 
 logger = get_logger(__name__)
@@ -266,28 +263,32 @@ def load_example_record(
     settings: Settings,
     domain: DomainLike | None = None,
 ) -> dict:
-    """Load a single example record by ID, creating it on-demand if missing."""
+    """Load a single example record by ID from committed/derived artifacts."""
     candidate_paths = []
     if domain is not None:
         candidate_paths.append(
             settings.paths.examples_dir / f"{domain}_validation.jsonl"
         )
+        candidate_paths.extend(
+            sorted(
+                (settings.paths.project_root / "data/eval_subsets" / str(domain)).glob(
+                    "*.jsonl"
+                )
+            )
+        )
     candidate_paths.extend(sorted(settings.paths.examples_dir.glob("*.jsonl")))
+    candidate_paths.extend(
+        sorted((settings.paths.project_root / "data/eval_subsets").glob("*.jsonl"))
+    )
+    candidate_paths.extend(
+        sorted((settings.paths.project_root / "data/eval_subsets").glob("*/*.jsonl"))
+    )
     existing_paths = [path for path in candidate_paths if path.exists()]
-    if not existing_paths:
-        selected_domain = domain or settings.selected_domain()
-        dialogues = load_dialogues(
-            settings.dataset.root,
-            split=DatasetSplit.VALIDATION,
-            domains=[selected_domain],
-        )
-        examples = build_turn_examples(dialogues)
-        output_path = (
-            settings.paths.examples_dir / f"{selected_domain}_validation.jsonl"
-        )
-        write_examples_jsonl(examples, output_path)
-        existing_paths = [output_path]
-    return load_example_record_from_paths(example_id, existing_paths)
+    for path in existing_paths:
+        for record in load_subset_jsonl(path):
+            if record["example_id"] == example_id:
+                return record
+    raise FileNotFoundError(f"Example not found: {example_id}")
 
 
 def _log_graph_event(event: dict) -> None:
@@ -408,54 +409,9 @@ def _fetch_kubernetes_docs(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_examples(args: argparse.Namespace) -> int:
-    """CLI handler for the 'build-examples' command."""
-    settings = _load_settings(args)
-    domain = settings.selected_domain(args.domain)
-    logger.info("Building examples for domain=%s split=%s", domain, args.split)
-    dialogues = load_dialogues(
-        settings.dataset.root,
-        split=args.split,
-        domains=[domain],
-    )
-    logger.info(
-        "Loaded %s dialogues for domain=%s split=%s",
-        len(dialogues),
-        domain,
-        args.split,
-    )
-    examples = build_turn_examples(dialogues)
-    output_path = (
-        Path(args.output)
-        if args.output
-        else settings.paths.examples_dir / f"{domain}_{args.split}.jsonl"
-    )
-    write_examples_jsonl(examples, output_path)
-    logger.info("Wrote %s examples to %s", len(examples), output_path)
-    print_lines(
-        [
-            "SupportGraph Build Examples",
-            f"Domain: {domain}",
-            f"Split: {args.split}",
-            f"Dialogues: {len(dialogues)}",
-            f"Examples: {len(examples)}",
-            f"Artifact: {output_path}",
-        ]
-    )
-    return 0
-
-
 def _build_subsets(args: argparse.Namespace) -> int:
-    """CLI handler for the 'build-subsets' command."""
-    settings = _load_settings(args)
-    domain = settings.selected_domain(args.domain)
-    logger.info("Building eval subsets for domain=%s split=%s", domain, args.split)
-    dialogues = load_dialogues(
-        settings.dataset.root,
-        split=args.split,
-        domains=[domain],
-    )
-    examples = build_turn_examples(dialogues)
+    """CLI handler for building deterministic subsets from an examples JSONL."""
+    examples = load_jsonl(Path(args.examples_file))
     smoke_examples = build_subset(
         examples,
         size=args.smoke_size,
@@ -468,11 +424,7 @@ def _build_subsets(args: argparse.Namespace) -> int:
         target_mode="answer",
         salt="frozen_experiment",
     )
-    output_dir = (
-        Path(args.output_dir)
-        if args.output_dir
-        else settings.paths.project_root / "data/eval_subsets"
-    )
+    output_dir = Path(args.output_dir) if args.output_dir else Path("data/eval_subsets")
     smoke_path = output_dir / "smoke.jsonl"
     frozen_path = output_dir / "frozen_experiment.jsonl"
     logger.info(
@@ -486,8 +438,7 @@ def _build_subsets(args: argparse.Namespace) -> int:
     print_lines(
         [
             "SupportGraph Build Subsets",
-            f"Domain: {domain}",
-            f"Split: {args.split}",
+            f"Examples File: {args.examples_file}",
             f"Answer Examples: {_answer_example_count(examples)}",
             f"Smoke: {len(smoke_examples)} -> {smoke_path}",
             f"Frozen Experiment: {len(frozen_examples)} -> {frozen_path}",
@@ -902,7 +853,6 @@ def build_parser() -> argparse.ArgumentParser:
         CliHandlers(
             fetch_kubernetes_docs=_fetch_kubernetes_docs,
             build_chunks=_build_chunks,
-            build_examples=_build_examples,
             build_subsets=_build_subsets,
             benchmark_embeddings=_benchmark_embeddings,
             index_docs=_index_docs,

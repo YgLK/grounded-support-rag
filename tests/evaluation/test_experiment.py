@@ -110,7 +110,7 @@ def test_write_experiment_summary_creates_markdown_note(
 
     report = experiment.write_experiment_summary(
         settings=settings,
-        domain="dmv",
+        domain="kubernetes",
         split="validation",
         limit=10,
         results=[control, improved],
@@ -119,7 +119,9 @@ def test_write_experiment_summary_creates_markdown_note(
 
     path = report["artifact_paths"]["report"]
     content = path.read_text(encoding="utf-8")
-    assert report["report_id"] == "20260318-150000-dmv-smoke10-experiment-summary"
+    assert (
+        report["report_id"] == "20260318-150000-kubernetes-smoke10-experiment-summary"
+    )
     assert path.name == "report.md"
     assert "Metric Table" in content
     assert "Structured Query + Rerank + Neighbors" in content

@@ -35,7 +35,7 @@ def test_run_cli_reports_missing_config_and_next_step(
     )
 
     exit_code = cli.main(
-        ["run", "--example-id", "dmv::1409501a35697e0ce68561e29577b90a::turn_2"]
+        ["run", "--example-id", "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"]
     )
     output = capsys.readouterr().out.splitlines()
 
@@ -67,20 +67,23 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
 
     def fake_run_graph(*args, **kwargs):
         return {
-            "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
+            "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
             "decision": "clarify",
-            "response_text": "Could you clarify whether your insurance just lapsed or was formally cancelled?",
+            "response_text": "Could you clarify whether the rollout stalled or the pods are crash-looping?",
             "citations": [
                 {
-                    "doc_id": "Top 5 DMV Mistakes and How to Avoid Them#3_0",
-                    "chunk_id": "dmv::Top 5 DMV Mistakes and How to Avoid Them#3_0::sec::24::sub::0",
+                    "doc_id": "concepts/workloads/controllers/deployment",
+                    "chunk_id": (
+                        "kubernetes::concepts/workloads/controllers/deployment"
+                        "::sec::deployment-status::sub::0"
+                    ),
                     "span_ids": ["24", "25", "26"],
                 }
             ],
             "confidence_label": "high",
             "trace_summary": {
                 "retrieval_attempts": 1,
-                "final_query": "insurance ended dmv",
+                "final_query": "deployment rollout stalled",
                 "graph_path": [
                     "prepare_query",
                     "retrieve_docs",
@@ -89,7 +92,7 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
                     "finalize",
                 ],
             },
-            "latest_user_utterance": "My insurance ended so what should i do",
+            "latest_user_utterance": "My Deployment rollout stalled so what should I do",
         }
 
     monkeypatch.setattr(cli, "run_graph_async", fake_run_graph, raising=False)
@@ -97,13 +100,13 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
         cli,
         "load_example_record",
         lambda *args, **kwargs: {
-            "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2"
+            "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"
         },
         raising=False,
     )
 
     exit_code = cli.main(
-        ["run", "--example-id", "dmv::1409501a35697e0ce68561e29577b90a::turn_2"]
+        ["run", "--example-id", "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"]
     )
     output = capsys.readouterr().out.splitlines()
 
@@ -115,7 +118,7 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
     assert any(line.startswith("User:") for line in output)
     assert "Decision: clarify" in output
     assert "Response" in output
-    assert any("insurance just lapsed" in line for line in output)
+    assert any("rollout stalled" in line for line in output)
     assert "Citations" in output
     assert "Next" in output
     assert any(
@@ -151,8 +154,8 @@ def test_run_cli_reports_index_unavailable_when_row_count_check_fails(
         cli,
         "load_example_record",
         lambda *args, **kwargs: {
-            "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
-            "domain": "dmv",
+            "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
+            "domain": "kubernetes",
         },
         raising=False,
     )
@@ -169,7 +172,7 @@ def test_run_cli_reports_index_unavailable_when_row_count_check_fails(
     )
 
     exit_code = cli.main(
-        ["run", "--example-id", "dmv::1409501a35697e0ce68561e29577b90a::turn_2"]
+        ["run", "--example-id", "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"]
     )
     output = capsys.readouterr().out.splitlines()
 
@@ -197,9 +200,9 @@ def test_run_cli_emits_pipeline_progress_logs(
         cli,
         "load_example_record",
         lambda *args, **kwargs: {
-            "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
-            "domain": "dmv",
-            "latest_user_utterance": "My insurance ended so what should i do",
+            "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
+            "domain": "kubernetes",
+            "latest_user_utterance": "My Deployment rollout stalled so what should I do",
         },
         raising=False,
     )
@@ -219,15 +222,15 @@ def test_run_cli_emits_pipeline_progress_logs(
             {
                 "kind": "query_ready",
                 "run_id": "run-test",
-                "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
-                "query": "insurance ended dmv",
+                "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
+                "query": "deployment rollout stalled",
             }
         )
         sink(
             {
                 "kind": "retrieval_complete",
                 "run_id": "run-test",
-                "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
+                "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
                 "retrieval_attempts": 1,
                 "retrieval_ranked_chunks": [{"chunk_id": "chunk-1"}],
                 "retrieved_chunks": [{"chunk_id": "chunk-1"}],
@@ -237,7 +240,7 @@ def test_run_cli_emits_pipeline_progress_logs(
             {
                 "kind": "evidence_graded",
                 "run_id": "run-test",
-                "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
+                "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
                 "evidence_grade": {"verdict": "sufficient"},
             }
         )
@@ -245,15 +248,15 @@ def test_run_cli_emits_pipeline_progress_logs(
             {
                 "kind": "response_completed",
                 "run_id": "run-test",
-                "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
+                "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
                 "decision": "answer",
                 "citations": [{"chunk_id": "chunk-1"}],
             }
         )
         return {
-            "example_id": "dmv::1409501a35697e0ce68561e29577b90a::turn_2",
+            "example_id": "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2",
             "decision": "answer",
-            "response_text": "Restore coverage immediately.",
+            "response_text": "Inspect rollout status and Deployment conditions.",
             "citations": [
                 {
                     "doc_id": "doc",
@@ -264,7 +267,7 @@ def test_run_cli_emits_pipeline_progress_logs(
             "confidence_label": "high",
             "trace_summary": {
                 "retrieval_attempts": 1,
-                "final_query": "insurance ended dmv",
+                "final_query": "deployment rollout stalled",
                 "graph_path": [
                     "prepare_query",
                     "retrieve_docs",
@@ -273,23 +276,23 @@ def test_run_cli_emits_pipeline_progress_logs(
                     "finalize",
                 ],
             },
-            "latest_user_utterance": "My insurance ended so what should i do",
+            "latest_user_utterance": "My Deployment rollout stalled so what should I do",
         }
 
     monkeypatch.setattr(cli, "run_graph_async", fake_run_graph, raising=False)
 
     exit_code = cli.main(
-        ["run", "--example-id", "dmv::1409501a35697e0ce68561e29577b90a::turn_2"]
+        ["run", "--example-id", "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"]
     )
     _ = capsys.readouterr()
 
     assert exit_code == 0
     assert any(
-        "Loading example dmv::1409501a35697e0ce68561e29577b90a::turn_2" in line
+        "Loading example kubernetes::1409501a35697e0ce68561e29577b90a::turn_2" in line
         for line in logged
     )
     assert any(
-        "Running graph for example=dmv::1409501a35697e0ce68561e29577b90a::turn_2"
+        "Running graph for example=kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"
         in line
         for line in logged
     )
@@ -297,7 +300,7 @@ def test_run_cli_emits_pipeline_progress_logs(
     assert any("retrieval attempt 1" in line for line in logged)
     assert any("evidence verdict" in line for line in logged)
     assert any(
-        "completed for dmv::1409501a35697e0ce68561e29577b90a::turn_2 with decision=answer"
+        "completed for kubernetes::1409501a35697e0ce68561e29577b90a::turn_2 with decision=answer"
         in line
         for line in logged
     )
@@ -321,7 +324,7 @@ def test_main_writes_command_logs_to_file(
     )
 
     exit_code = cli.main(
-        ["run", "--example-id", "dmv::1409501a35697e0ce68561e29577b90a::turn_2"]
+        ["run", "--example-id", "kubernetes::1409501a35697e0ce68561e29577b90a::turn_2"]
     )
 
     assert exit_code == 1

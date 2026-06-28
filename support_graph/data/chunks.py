@@ -1,4 +1,4 @@
-"""Section-aware retrieval chunk builder for MultiDoc2Dial."""
+"""Section-aware retrieval chunk builder."""
 
 from __future__ import annotations
 

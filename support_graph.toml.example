@@ -3,10 +3,9 @@
 # Secrets belong in `.env`, not here.
 
 [dataset]
-# Use `raw/kubernetes/current` with enabled_domains = ["kubernetes"] after
-# running `grounded-support-rag fetch-kubernetes-docs`.
-root = "multidoc2dial"
-enabled_domains = ["dmv"]
+# Run `grounded-support-rag fetch-kubernetes-docs` before building chunks.
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"

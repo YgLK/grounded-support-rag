@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from support_graph.data.dataset import load_dialogues, load_documents
+from support_graph.data.documents import load_documents
 from support_graph.data.kubernetes import (
     KUBERNETES_DOCS_SUBPATH,
     fetch_kubernetes_docs,
@@ -100,11 +100,6 @@ def test_load_documents_dispatches_kubernetes_domain(tmp_path: Path) -> None:
         documents[0]["doc_id"]
         == "tasks/run-application/run-stateless-application-deployment"
     )
-
-
-def test_load_dialogues_rejects_kubernetes_domain(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="curated eval subsets"):
-        load_dialogues(tmp_path, split="validation", domains=["kubernetes"])
 
 
 def test_fetch_kubernetes_docs_uses_sparse_checkout_and_writes_manifest(

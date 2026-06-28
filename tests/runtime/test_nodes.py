@@ -38,27 +38,27 @@ def _runtime(*, chat_model: object, llm_timeout_seconds: float = 60.0) -> Runtim
 
 def _state(*, verdict: str = "partial") -> dict:
     return {
-        "example_id": "dmv::ex::turn_1",
-        "domain": "dmv",
+        "example_id": "kubernetes::ex::turn_1",
+        "domain": "kubernetes",
         "conversation": [
-            {"role": "user", "utterance": "My insurance ended so what should I do?"}
+            {"role": "user", "utterance": "My deployment stalled so what should I do?"}
         ],
-        "latest_user_utterance": "My insurance ended so what should I do?",
+        "latest_user_utterance": "My deployment stalled so what should I do?",
         "retrieved_chunks": [
             {
-                "chunk_id": "dmv::doc::sec::2::sub::0",
+                "chunk_id": "kubernetes::doc::sec::2::sub::0",
                 "doc_id": "doc",
                 "section_id": "2",
-                "section_title": "Insurance lapse guidance",
+                "section_title": "Deployment rollout guidance",
                 "span_ids": ["2", "3"],
-                "text": "Restore coverage immediately to avoid suspension.",
+                "text": "Restore coverage immediately to avoid unavailable replicas.",
                 "token_count": 12,
             }
         ],
         "evidence_grade": {
             "verdict": verdict,
             "reason": "needs review",
-            "missing_information": ["insurance status"] if verdict == "partial" else [],
+            "missing_information": ["rollout status"] if verdict == "partial" else [],
         },
     }
 
@@ -67,12 +67,12 @@ def test_query_example_from_state_uses_domain_field() -> None:
     query_example = nodes._query_example_from_state(_state())
 
     assert query_example == {
-        "domain": "dmv",
+        "domain": "kubernetes",
         "conversation": [
-            {"role": "user", "utterance": "My insurance ended so what should I do?"}
+            {"role": "user", "utterance": "My deployment stalled so what should I do?"}
         ],
         "latest_user_turn_id": None,
-        "latest_user_utterance": "My insurance ended so what should I do?",
+        "latest_user_utterance": "My deployment stalled so what should I do?",
     }
 
 
@@ -95,7 +95,7 @@ def test_ainvoke_structured_prompt_rejects_non_mapping_results() -> None:
                 runtime=_runtime(chat_model=FakeChatModel()),
                 prompt=FakePrompt(),
                 schema=nodes.ResponseModel,
-                payload={"latest_user_utterance": "insurance ended"},
+                payload={"latest_user_utterance": "deployment stalled"},
             )
         )
 
@@ -165,7 +165,7 @@ def test_ainvoke_structured_prompt_raises_timeout_without_retrying() -> None:
                 runtime=_runtime(chat_model=chat_model, llm_timeout_seconds=0.001),
                 prompt=FakePrompt(),
                 schema=nodes.ResponseModel,
-                payload={"latest_user_utterance": "insurance ended"},
+                payload={"latest_user_utterance": "deployment stalled"},
             )
         )
 
@@ -195,7 +195,7 @@ def test_generate_response_falls_back_when_structured_output_fails(
 
     fallback = fallback_metadata(result)
     assert result["decision"] == "answer"
-    assert result["citation_chunk_ids"] == ["dmv::doc::sec::2::sub::0"]
+    assert result["citation_chunk_ids"] == ["kubernetes::doc::sec::2::sub::0"]
     assert fallback is not None
     assert fallback["node"] == "generate_response"
     assert fallback["exception_type"] == "TypeError"
@@ -245,7 +245,7 @@ def test_resolve_without_answer_falls_back_when_structured_output_fails(
 
     fallback = fallback_metadata(result)
     assert result["decision"] == "clarify"
-    assert result["citation_chunk_ids"] == ["dmv::doc::sec::2::sub::0"]
+    assert result["citation_chunk_ids"] == ["kubernetes::doc::sec::2::sub::0"]
     assert fallback is not None
     assert fallback["node"] == "resolve_without_answer"
     assert fallback["exception_type"] == "RuntimeError"

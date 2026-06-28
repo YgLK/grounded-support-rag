@@ -15,7 +15,7 @@ def _format_next_steps_guidance(result: dict) -> list[str]:
     decision = result.get("decision")
     match decision:
         case "answer":
-            return ["Grounded answer produced from retrieved DMV documentation."]
+            return ["Grounded answer produced from retrieved documentation."]
         case "clarify":
             return [
                 "Ask one concrete missing-condition question.",

@@ -11,7 +11,7 @@ from support_graph.retrieval import index
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-CHUNK_ARTIFACT = REPO_ROOT / "data" / "derived" / "chunks" / "dmv.jsonl"
+CHUNK_ARTIFACT = REPO_ROOT / "data" / "derived" / "chunks" / "kubernetes.jsonl"
 
 
 def _resolve_callable(*names: str):
@@ -41,8 +41,8 @@ def test_load_chunk_records_reads_jsonl_round_trip(tmp_path: Path) -> None:
 
     records = [
         {
-            "chunk_id": "dmv::doc::sec::1::sub::0",
-            "domain": "dmv",
+            "chunk_id": "kubernetes::doc::sec::1::sub::0",
+            "domain": "kubernetes",
             "doc_id": "doc",
             "doc_title": "Doc",
             "section_id": "1",
@@ -80,8 +80,8 @@ def test_validate_index_config_requires_postgres_and_models() -> None:
         chat_model=None,
         embedding_model=None,
         embedding_client=None,
-        domain="dmv",
-        collection_name="support_graph_dmv",
+        domain="kubernetes",
+        collection_name="support_graph_kubernetes",
         chunk_artifact_path=None,
     )
 
@@ -119,8 +119,8 @@ def test_index_documents_converts_chunks_to_documents_and_forwards_to_vectorstor
         assert Path(path) == CHUNK_ARTIFACT
         return [
             {
-                "chunk_id": "dmv::doc::sec::1::sub::0",
-                "domain": "dmv",
+                "chunk_id": "kubernetes::doc::sec::1::sub::0",
+                "domain": "kubernetes",
                 "doc_id": "doc",
                 "doc_title": "Doc",
                 "section_id": "1",
@@ -149,8 +149,8 @@ def test_index_documents_converts_chunks_to_documents_and_forwards_to_vectorstor
         chat_model="ignored-for-indexing",
         embedding_model="fake-embedding-model",
         embedding_client=None,
-        collection_name="support_graph_dmv",
-        domain="dmv",
+        collection_name="support_graph_kubernetes",
+        domain="kubernetes",
         chunk_artifact_path=CHUNK_ARTIFACT,
     )
 
@@ -160,7 +160,10 @@ def test_index_documents_converts_chunks_to_documents_and_forwards_to_vectorstor
         pytest.xfail("Phase 2 index_documents is still a placeholder.")
 
     assert captured["documents"][0].page_content == "alpha beta"
-    assert captured["documents"][0].metadata["chunk_id"] == "dmv::doc::sec::1::sub::0"
+    assert (
+        captured["documents"][0].metadata["chunk_id"]
+        == "kubernetes::doc::sec::1::sub::0"
+    )
     assert captured["documents"][0].metadata["doc_id"] == "doc"
     assert captured["embedding"] == "fake-embedding-model"
     assert result == {

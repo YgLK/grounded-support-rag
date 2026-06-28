@@ -15,7 +15,7 @@ def test_summarize_trace_events_collects_queries_latencies_and_retry_counts() ->
     events = [
         {
             "node": "prepare_query",
-            "query": "Domain: dmv",
+            "query": "Domain: kubernetes",
             "latency_ms": 1.0,
         },
         {
@@ -37,7 +37,7 @@ def test_summarize_trace_events_collects_queries_latencies_and_retry_counts() ->
         },
         {
             "node": "refine_query",
-            "refined_query": "Domain: dmv\nMissing condition: insurance status",
+            "refined_query": "Domain: kubernetes\nMissing condition: rollout status",
             "latency_ms": 4.0,
         },
         {
@@ -72,7 +72,7 @@ def test_summarize_trace_events_collects_queries_latencies_and_retry_counts() ->
         "finalize",
     ]
     assert summary["retrieval_attempts"] == 2
-    assert summary["final_query"].endswith("Missing condition: insurance status")
+    assert summary["final_query"].endswith("Missing condition: rollout status")
     assert summary["decision"] == "answer"
     assert summary["evidence_grade"] == {"verdict": "partial"}
     assert summary["total_latency_ms"] == 20.0

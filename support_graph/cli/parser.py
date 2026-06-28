@@ -21,7 +21,6 @@ Subparsers = argparse._SubParsersAction
 class CliHandlers:
     fetch_kubernetes_docs: CommandHandler
     build_chunks: CommandHandler
-    build_examples: CommandHandler
     build_subsets: CommandHandler
     benchmark_embeddings: CommandHandler
     index_docs: CommandHandler
@@ -93,48 +92,15 @@ def _register_fetch_kubernetes_docs(
     fetch_parser.set_defaults(func=handlers.fetch_kubernetes_docs)
 
 
-def _register_build_examples(subparsers: Subparsers, handlers: CliHandlers) -> None:
-    """Register the 'build-examples' command.
-
-    This command converts raw dialogues into turn-level examples that can be
-    used for evaluation or single-run execution.
-    """
-    build_examples_parser = subparsers.add_parser(
-        "build-examples", help="Build turn-level examples."
-    )
-    build_examples_parser.add_argument(
-        "--domain",
-        default=None,
-        choices=DOMAIN_CHOICES,
-        help="Domain to build. Defaults to the configured MVP domain.",
-    )
-    build_examples_parser.add_argument(
-        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
-    )
-    build_examples_parser.add_argument(
-        "--output", default=None, help="Optional JSONL output path."
-    )
-    build_examples_parser.set_defaults(func=handlers.build_examples)
-
-
 def _register_build_subsets(subparsers: Subparsers, handlers: CliHandlers) -> None:
-    """Register the 'build-subsets' command.
-
-    This command creates deterministic, salted subsets from the full evaluation
-    set, such as 'smoke' for quick checks and 'frozen_experiment' for stable
-    comparisons.
-    """
+    """Register the 'build-subsets' command."""
     build_subsets_parser = subparsers.add_parser(
         "build-subsets", help="Build deterministic eval subsets."
     )
     build_subsets_parser.add_argument(
-        "--domain",
-        default=None,
-        choices=DOMAIN_CHOICES,
-        help="Domain to build. Defaults to the configured MVP domain.",
-    )
-    build_subsets_parser.add_argument(
-        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
+        "--examples-file",
+        required=True,
+        help="Input examples JSONL file.",
     )
     build_subsets_parser.add_argument("--smoke-size", type=int, default=25)
     build_subsets_parser.add_argument("--frozen-size", type=int, default=200)
@@ -272,7 +238,7 @@ def _register_experiment(subparsers: Subparsers, handlers: CliHandlers) -> None:
     """
     experiment_parser = subparsers.add_parser(
         "experiment-smoke10",
-        help="Run the DMV Smoke-10 experiment variants and write a comparison note.",
+        help="Run Smoke-10 experiment variants and write a comparison note.",
     )
     experiment_parser.add_argument(
         "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
@@ -347,7 +313,6 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
     command_registrars: tuple[Callable[[Subparsers, CliHandlers], None], ...] = (
         _register_fetch_kubernetes_docs,
         _register_build_chunks,
-        _register_build_examples,
         _register_build_subsets,
         _register_benchmark_embeddings,
         _register_index_docs,

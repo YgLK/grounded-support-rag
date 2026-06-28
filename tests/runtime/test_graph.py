@@ -16,8 +16,8 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
     make_runtime_config,
 ) -> None:
     call_log: list[str] = []
-    title_chunk_id = "dmv::doc::sec::t_1::sub::0"
-    content_chunk_id = "dmv::doc::sec::2::sub::0"
+    title_chunk_id = "kubernetes::doc::sec::t_1::sub::0"
+    content_chunk_id = "kubernetes::doc::sec::2::sub::0"
 
     def fake_route_query(*args, **kwargs):
         call_log.append("route_query")
@@ -25,7 +25,7 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
 
     def fake_prepare_query(*args, **kwargs):
         call_log.append("prepare_query")
-        return "insurance ended dmv"
+        return "deployment stalled kubernetes"
 
     def fake_retrieve_docs(*args, **kwargs):
         call_log.append("retrieve_docs")
@@ -35,9 +35,9 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
                 "chunk_id": title_chunk_id,
                 "doc_id": "doc",
                 "section_id": "t_1",
-                "section_title": "What happens if my insurance ends?",
+                "section_title": "What happens if my rollout ends?",
                 "span_ids": ["1"],
-                "text": "What happens if my insurance ends?",
+                "text": "What happens if my rollout ends?",
                 "token_count": 7,
                 "score": 0.20,
             },
@@ -46,9 +46,9 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
                 "chunk_id": content_chunk_id,
                 "doc_id": "doc",
                 "section_id": "2",
-                "section_title": "Insurance lapse guidance",
+                "section_title": "Deployment rollout guidance",
                 "span_ids": ["2", "3"],
-                "text": "Restore coverage immediately to avoid a registration suspension.",
+                "text": "Restore coverage immediately to avoid a deployment unavailable replicas.",
                 "token_count": 12,
                 "score": 0.21,
             },
@@ -66,7 +66,7 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
         call_log.append("generate_response")
         return {
             "decision": "answer",
-            "response_text": "Restore coverage immediately to avoid a registration suspension.",
+            "response_text": "Restore coverage immediately to avoid a deployment unavailable replicas.",
             "citation_chunk_ids": [content_chunk_id],
             "confidence_label": "high",
         }
@@ -130,10 +130,10 @@ def test_run_graph_emits_ranked_and_expanded_chunk_lists(
 
 def test_expand_neighbor_sections_includes_previous_and_next_numeric_sections() -> None:
     anchor = {
-        "chunk_id": "dmv::doc::sec::5::sub::0",
+        "chunk_id": "kubernetes::doc::sec::5::sub::0",
         "doc_id": "doc",
         "section_id": "5",
-        "section_title": "Suspension",
+        "section_title": "Unavailable replicas",
         "span_ids": ["5"],
         "text": "Section 5",
         "token_count": 20,
@@ -141,7 +141,7 @@ def test_expand_neighbor_sections_includes_previous_and_next_numeric_sections() 
     chunk_records_by_doc = {
         "doc": [
             {
-                "chunk_id": "dmv::doc::sec::4::sub::0",
+                "chunk_id": "kubernetes::doc::sec::4::sub::0",
                 "doc_id": "doc",
                 "section_id": "4",
                 "section_title": "Notice",
@@ -152,10 +152,10 @@ def test_expand_neighbor_sections_includes_previous_and_next_numeric_sections() 
                 "start_sec": 4,
             },
             {
-                "chunk_id": "dmv::doc::sec::5::sub::0",
+                "chunk_id": "kubernetes::doc::sec::5::sub::0",
                 "doc_id": "doc",
                 "section_id": "5",
-                "section_title": "Suspension",
+                "section_title": "Unavailable replicas",
                 "span_ids": ["5"],
                 "text": "Section 5",
                 "token_count": 20,
@@ -163,7 +163,7 @@ def test_expand_neighbor_sections_includes_previous_and_next_numeric_sections() 
                 "start_sec": 5,
             },
             {
-                "chunk_id": "dmv::doc::sec::6::sub::0",
+                "chunk_id": "kubernetes::doc::sec::6::sub::0",
                 "doc_id": "doc",
                 "section_id": "6",
                 "section_title": "Reinstatement",
@@ -179,9 +179,9 @@ def test_expand_neighbor_sections_includes_previous_and_next_numeric_sections() 
     expanded = graph.expand_neighbor_sections([anchor], chunk_records_by_doc)
 
     assert [chunk["chunk_id"] for chunk in expanded] == [
-        "dmv::doc::sec::4::sub::0",
-        "dmv::doc::sec::5::sub::0",
-        "dmv::doc::sec::6::sub::0",
+        "kubernetes::doc::sec::4::sub::0",
+        "kubernetes::doc::sec::5::sub::0",
+        "kubernetes::doc::sec::6::sub::0",
     ]
 
 
@@ -189,7 +189,7 @@ def test_expand_neighbor_sections_ignores_title_anchors_dedupes_and_caps_at_eigh
     None
 ):
     title_anchor = {
-        "chunk_id": "dmv::doc::sec::t_4::sub::0",
+        "chunk_id": "kubernetes::doc::sec::t_4::sub::0",
         "doc_id": "doc",
         "section_id": "t_4",
         "section_title": "Question heading",
@@ -199,7 +199,7 @@ def test_expand_neighbor_sections_ignores_title_anchors_dedupes_and_caps_at_eigh
     }
     anchors = [
         {
-            "chunk_id": f"dmv::doc::sec::{section}::sub::0",
+            "chunk_id": f"kubernetes::doc::sec::{section}::sub::0",
             "doc_id": "doc",
             "section_id": str(section),
             "section_title": f"Section {section}",
@@ -212,7 +212,7 @@ def test_expand_neighbor_sections_ignores_title_anchors_dedupes_and_caps_at_eigh
     chunk_records_by_doc = {
         "doc": [
             {
-                "chunk_id": f"dmv::doc::sec::{section}::sub::0",
+                "chunk_id": f"kubernetes::doc::sec::{section}::sub::0",
                 "doc_id": "doc",
                 "section_id": str(section),
                 "section_title": f"Section {section}",
@@ -234,8 +234,8 @@ def test_expand_neighbor_sections_ignores_title_anchors_dedupes_and_caps_at_eigh
     assert [chunk["chunk_id"] for chunk in title_only] == [title_anchor["chunk_id"]]
     assert len(expanded) == 8
     assert len({chunk["chunk_id"] for chunk in expanded}) == 8
-    assert expanded[0]["chunk_id"] == "dmv::doc::sec::2::sub::0"
-    assert expanded[-1]["chunk_id"] == "dmv::doc::sec::9::sub::0"
+    assert expanded[0]["chunk_id"] == "kubernetes::doc::sec::2::sub::0"
+    assert expanded[-1]["chunk_id"] == "kubernetes::doc::sec::9::sub::0"
 
 
 def test_run_graph_retries_once_before_resolving(
@@ -250,25 +250,25 @@ def test_run_graph_retries_once_before_resolving(
             {
                 "verdict": "partial",
                 "reason": "need one detail",
-                "missing_information": ["insurance status"],
+                "missing_information": ["rollout status"],
             },
             {
                 "verdict": "insufficient",
                 "reason": "still missing detail",
-                "missing_information": ["insurance status"],
+                "missing_information": ["rollout status"],
             },
         ]
     )
 
     def fake_prepare_query(*args, **kwargs):
         call_log.append("prepare_query")
-        return "insurance ended dmv"
+        return "deployment stalled kubernetes"
 
     def fake_retrieve_docs(*args, **kwargs):
         call_log.append("retrieve_docs")
         return [
             {
-                "chunk_id": "dmv::chunk::1",
+                "chunk_id": "kubernetes::chunk::1",
                 "doc_id": "doc",
                 "section_id": "1",
                 "span_ids": ["1"],
@@ -282,7 +282,7 @@ def test_run_graph_retries_once_before_resolving(
 
     def fake_refine_query(*args, **kwargs):
         call_log.append("refine_query")
-        return "insurance ended dmv\nMissing condition: insurance status"
+        return "deployment stalled kubernetes\nMissing condition: rollout status"
 
     def fake_finalize(*args, **kwargs):
         call_log.append("finalize")
@@ -355,12 +355,12 @@ def test_run_graph_logs_and_traces_llm_fallbacks(
         lambda *args, **kwargs: [
             {
                 "rank": 1,
-                "chunk_id": "dmv::doc::sec::2::sub::0",
+                "chunk_id": "kubernetes::doc::sec::2::sub::0",
                 "doc_id": "doc",
                 "section_id": "2",
-                "section_title": "Insurance lapse guidance",
+                "section_title": "Deployment rollout guidance",
                 "span_ids": ["2", "3"],
-                "text": "Restore coverage immediately to avoid suspension.",
+                "text": "Restore coverage immediately to avoid unavailable replicas.",
                 "token_count": 12,
                 "score": 0.2,
             }
@@ -381,9 +381,10 @@ def test_run_graph_logs_and_traces_llm_fallbacks(
 
     assert result["decision"] == "answer"
     assert (
-        result["response_text"] == "Restore coverage immediately to avoid suspension."
+        result["response_text"]
+        == "Restore coverage immediately to avoid unavailable replicas."
     )
-    assert result["citations"][0]["chunk_id"] == "dmv::doc::sec::2::sub::0"
+    assert result["citations"][0]["chunk_id"] == "kubernetes::doc::sec::2::sub::0"
     assert result["trace_summary"]["fallback_count"] == 2
     assert result["trace_summary"]["fallback_nodes"] == [
         "grade_evidence",
@@ -410,12 +411,12 @@ def test_astream_graph_events_emits_milestones_and_response_deltas(
     runtime_example: dict,
     make_runtime_config,
 ) -> None:
-    content_chunk_id = "dmv::doc::sec::2::sub::0"
+    content_chunk_id = "kubernetes::doc::sec::2::sub::0"
 
     monkeypatch.setattr(
         graph,
         "prepare_query",
-        lambda *args, **kwargs: "insurance ended dmv",
+        lambda *args, **kwargs: "deployment stalled kubernetes",
         raising=False,
     )
     monkeypatch.setattr(
@@ -427,9 +428,9 @@ def test_astream_graph_events_emits_milestones_and_response_deltas(
                 "chunk_id": content_chunk_id,
                 "doc_id": "doc",
                 "section_id": "2",
-                "section_title": "Insurance lapse guidance",
+                "section_title": "Deployment rollout guidance",
                 "span_ids": ["2", "3"],
-                "text": "Restore coverage immediately to avoid suspension.",
+                "text": "Restore coverage immediately to avoid unavailable replicas.",
                 "token_count": 12,
                 "score": 0.2,
             }
@@ -450,7 +451,7 @@ def test_astream_graph_events_emits_milestones_and_response_deltas(
     class FakeStreamChatModel:
         async def astream(self, messages):
             flattened = "\n".join(str(message.content) for message in messages)
-            assert "Insurance lapse guidance" in flattened
+            assert "Deployment rollout guidance" in flattened
             for delta in ("Restore ", "coverage ", "immediately."):
                 yield SimpleNamespace(content=delta)
 

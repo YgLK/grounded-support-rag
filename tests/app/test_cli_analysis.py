@@ -100,7 +100,8 @@ def test_trace_show_cli_prints_trace_summary_for_one_example(
     run_dir.mkdir(parents=True)
     trace_path = run_dir / "traces" / "ex-1.jsonl"
     write_trace_event(
-        trace_path, {"node": "prepare_query", "query": "Domain: dmv", "latency_ms": 1.0}
+        trace_path,
+        {"node": "prepare_query", "query": "Domain: kubernetes", "latency_ms": 1.0},
     )
     write_trace_event(
         trace_path,
@@ -172,7 +173,7 @@ def test_trace_show_cli_prints_trace_summary_for_one_example(
 
     assert exit_code == 0
     assert output[0] == "SupportGraph Trace Show"
-    assert any(line.startswith("Final Query: Domain: dmv") for line in output)
+    assert any(line.startswith("Final Query: Domain: kubernetes") for line in output)
     assert any(line == "Attempts: 1" for line in output)
     assert any(
         "prepare_query -> retrieve_docs -> grade_evidence -> resolve_without_answer -> finalize"

@@ -42,16 +42,17 @@ After RAG triad rubric cleanup:
 
 After hybrid retrieval/rerank fix and Smoke-10 expansion:
 
-- Eval run: `20260628-231545-kubernetes-smoke`
+- Eval run: `20260628-233824-kubernetes-smoke`
 - Smoke subset: 10 answer examples, including 7 troubleshooting scenarios
 - Doc Recall@1: 0.700
 - Doc Recall@3: 1.000
 - Doc Recall@5: 1.000
 - Span Recall@5: 1.000
-- MRR@5: 0.800
-- Citation coverage: 1.000
-- Required points covered: 0.783
-- Failure labels: `incomplete_answer` 6
+- MRR@5: 0.833
+- Citation coverage: 0.900
+- Required points covered: 0.808
+- NDCG@5: 0.993, max per-example NDCG: 1.000
+- Failure labels: `incomplete_answer` 5
 - Remaining gap: generation often gives useful but partial troubleshooting answers
 - Index rebuild: not needed
 
@@ -100,4 +101,4 @@ The new smoke summary explains whether failures are retrieval, grounding, releva
 
 The Kubernetes smoke set now covers `pods`, `deployments`, `services`, plus troubleshooting prompts for `CrashLoopBackOff`, `ImagePullBackOff`, `FailedScheduling`, stuck Deployment rollouts, Service DNS, PVC pending, and kubectl connectivity. The data test verifies all declared gold/acceptable doc IDs and span IDs exist in `data/derived/chunks/kubernetes.jsonl`.
 
-The first adjusted Smoke-10 run with `support_graph.kubernetes.toml` produced retrieval-stable metrics: Doc Recall@3 `1.000`, Span Recall@5 `1.000`, and Citation Coverage `1.000`. The only failure bucket is `incomplete_answer`, making Kubernetes the clearest project story: corpus ingestion, artifact-driven retrieval debugging, hybrid retrieval/rerank repair, and RAG-triad failure review now all show up in one current baseline.
+The current Smoke-10 run with `support_graph.kubernetes.toml` produced retrieval-stable metrics: Doc Recall@3 `1.000`, Span Recall@5 `1.000`, and graded Hit@5 `1.000`. NDCG is now bounded (`0.993` average, `1.000` max), after deduplicating repeated doc IDs and preventing acceptable alternates from adding gain beyond the expected-source ideal. The only failure bucket is `incomplete_answer`; remaining failures are generation completeness or abstain issues, not retrieval misses.

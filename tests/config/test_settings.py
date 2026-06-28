@@ -23,8 +23,8 @@ def _write_settings_toml(
         content
         or """
 [dataset]
-root = "multidoc2dial"
-enabled_domains = ["dmv"]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"
@@ -97,18 +97,18 @@ def test_settings_load_resolves_repo_root_and_relative_paths_from_repo_root(
 
     assert settings.paths.project_root == repo_root
     assert settings.paths.config_path == settings_path
-    assert settings.dataset.root == repo_root / "multidoc2dial"
+    assert settings.dataset.root == repo_root / "raw/kubernetes/current"
     assert settings.runtime.chat_provider_type is Provider.OPENROUTER
     assert settings.runtime.embedding_provider_type is Provider.OPENROUTER
     assert settings.runtime.ollama_base_url == "http://localhost:11434"
     assert settings.runtime.openrouter_base_url == "https://openrouter.ai/api/v1"
     assert settings.runtime.retrieval_top_k == 5
     assert settings.runtime.retrieval_candidate_k == 12
-    assert settings.runtime.domain is Domain.DMV
-    assert settings.runtime.collection_name == "support_graph_dmv"
+    assert settings.runtime.domain is Domain.KUBERNETES
+    assert settings.runtime.collection_name == "support_graph_kubernetes"
     assert (
         settings.runtime.chunk_artifact_path
-        == repo_root / "data/derived/chunks/dmv.jsonl"
+        == repo_root / "data/derived/chunks/kubernetes.jsonl"
     )
     assert settings.paths.runs_dir == repo_root / "outputs/runs"
     assert settings.paths.eval_runs_dir == repo_root / "outputs/evals/runs"
@@ -116,10 +116,12 @@ def test_settings_load_resolves_repo_root_and_relative_paths_from_repo_root(
     assert settings.paths.log_dir == repo_root / "logs"
     assert settings.paths.log_level == "INFO"
     assert (
-        settings.chunk_artifact_path("dmv")
-        == repo_root / "data/derived/chunks/dmv.jsonl"
+        settings.chunk_artifact_path("kubernetes")
+        == repo_root / "data/derived/chunks/kubernetes.jsonl"
     )
-    assert (settings.paths.project_root / "data/eval_subsets/smoke.jsonl").exists()
+    assert (
+        settings.paths.project_root / "data/eval_subsets/kubernetes/smoke.jsonl"
+    ).exists()
 
 
 def test_settings_load_reads_toml_and_secret_values(tmp_path: Path) -> None:
@@ -127,8 +129,8 @@ def test_settings_load_reads_toml_and_secret_values(tmp_path: Path) -> None:
         tmp_path / "providers.toml",
         content="""
 [dataset]
-root = "multidoc2dial"
-enabled_domains = ["dmv"]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"
@@ -194,8 +196,8 @@ endpoint = "https://api.smith.langchain.com"
     assert settings.runtime.langsmith_api_key == "langsmith-key"
     assert settings.runtime.langsmith_endpoint == "https://api.smith.langchain.com"
 
-    assert settings.runtime.domain is Domain.DMV
-    assert settings.runtime.collection_name == "support_graph_dmv"
+    assert settings.runtime.domain is Domain.KUBERNETES
+    assert settings.runtime.collection_name == "support_graph_kubernetes"
 
 
 def test_runtime_validation_requires_openrouter_key_when_provider_is_openrouter() -> (
@@ -203,8 +205,8 @@ def test_runtime_validation_requires_openrouter_key_when_provider_is_openrouter(
 ):
     settings = Settings(
         dataset=DatasetSettings(
-            root=Path("/tmp/project/multidoc2dial"),
-            enabled_domains=(Domain.DMV,),
+            root=Path("/tmp/project/raw/kubernetes/current"),
+            enabled_domains=(Domain.KUBERNETES,),
         ),
         paths=PathSettings(
             project_root=Path("/tmp/project"),
@@ -240,9 +242,11 @@ def test_runtime_validation_requires_openrouter_key_when_provider_is_openrouter(
             langsmith_project=None,
             langsmith_api_key=None,
             langsmith_endpoint=None,
-            domain=Domain.DMV,
-            collection_name="support_graph_dmv",
-            chunk_artifact_path=Path("/tmp/project/data/derived/chunks/dmv.jsonl"),
+            domain=Domain.KUBERNETES,
+            collection_name="support_graph_kubernetes",
+            chunk_artifact_path=Path(
+                "/tmp/project/data/derived/chunks/kubernetes.jsonl"
+            ),
         ),
     )
 
@@ -261,8 +265,8 @@ def test_settings_parse_enabled_domains_into_shared_enum_values(
         tmp_path / "domains.toml",
         content="""
 [dataset]
-root = "multidoc2dial"
-enabled_domains = ["dmv", "va", "dmv"]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes", "kubernetes"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"
@@ -288,8 +292,8 @@ project = "grounded-support-rag"
 
     settings = Settings.load(settings_path)
 
-    assert settings.dataset.enabled_domains == (Domain.DMV, Domain.VA)
-    assert settings.runtime.domain is Domain.DMV
+    assert settings.dataset.enabled_domains == (Domain.KUBERNETES,)
+    assert settings.runtime.domain is Domain.KUBERNETES
 
 
 def test_settings_reject_unknown_enabled_domain(tmp_path: Path) -> None:
@@ -297,8 +301,8 @@ def test_settings_reject_unknown_enabled_domain(tmp_path: Path) -> None:
         tmp_path / "domains.toml",
         content="""
 [dataset]
-root = "multidoc2dial"
-enabled_domains = ["dmv", "unknown"]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes", "unknown"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"
@@ -331,8 +335,8 @@ def test_settings_resolve_log_dir_from_toml(tmp_path: Path, repo_root: Path) -> 
         tmp_path / "logging.toml",
         content="""
 [dataset]
-root = "multidoc2dial"
-enabled_domains = ["dmv"]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes"]
 
 [paths]
 eval_runs_dir = "outputs/evals/runs"

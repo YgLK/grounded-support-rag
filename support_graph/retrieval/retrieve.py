@@ -294,7 +294,7 @@ def build_metadata_filter(
     - Deduplicates and handles single vs. multiple (`$in`) `doc_id` filters
 
     Args:
-        domain: Domain string to filter by (e.g., 'dmv').
+        domain: Domain string to filter by (e.g., 'kubernetes').
         doc_ids: Optional document ID or list of permissible document IDs.
 
     Returns:

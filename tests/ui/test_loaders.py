@@ -29,7 +29,7 @@ def test_loader_lists_eval_runs_with_domain_subset_and_provider_filters(
 
     loader = WorkbenchArtifactLoader(settings)
     items = loader.list_eval_runs(
-        domain="dmv",
+        domain="kubernetes",
         subset="Smoke 25",
         provider="ollama",
     ).items
@@ -51,8 +51,8 @@ def test_loader_builds_example_detail_from_prediction_retrieval_and_trace_index(
 
     assert detail.prediction.example_id == EXAMPLE_ID
     assert detail.retrieval_example is not None
-    assert detail.retrieval_example.final_query == "title form dmv"
-    assert detail.trace_index_entry.trace_file == "dmv-one-turn-2.jsonl"
-    assert detail.trace_summary.final_query == "title form dmv"
+    assert detail.retrieval_example.final_query == "deployment status kubernetes"
+    assert detail.trace_index_entry.trace_file == "kubernetes-one-turn-2.jsonl"
+    assert detail.trace_summary.final_query == "deployment status kubernetes"
     assert detail.trace_summary.decision == "answer"
-    assert detail.artifact_paths["trace"].endswith("/dmv-one-turn-2.jsonl")
+    assert detail.artifact_paths["trace"].endswith("/kubernetes-one-turn-2.jsonl")

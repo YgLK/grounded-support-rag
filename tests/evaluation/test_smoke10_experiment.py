@@ -14,8 +14,8 @@ def _smoke10_examples() -> list[dict]:
     for index in range(10):
         examples.append(
             {
-                "example_id": f"dmv::smoke::{index}",
-                "domain": "dmv",
+                "example_id": f"kubernetes::smoke::{index}",
+                "domain": "kubernetes",
                 "target_mode": "answer",
                 "target_turn_id": index + 1,
                 "turns_before_target": [
@@ -66,7 +66,7 @@ def _run_graph_variant(*, example: dict, config: Any, **kwargs) -> dict:
             {
                 "rank": 1,
                 "chunk_id": f"{variant}::{example['example_id']}::ranked",
-                "domain": "dmv",
+                "domain": "kubernetes",
                 "doc_id": ranked_doc_id,
                 "doc_title": ranked_doc_id,
                 "section_id": "1",
@@ -82,7 +82,7 @@ def _run_graph_variant(*, example: dict, config: Any, **kwargs) -> dict:
             {
                 "rank": 1,
                 "chunk_id": f"{variant}::{example['example_id']}::expanded",
-                "domain": "dmv",
+                "domain": "kubernetes",
                 "doc_id": retrieved_doc_id,
                 "doc_title": retrieved_doc_id,
                 "section_id": "1",
@@ -126,27 +126,29 @@ def test_smoke10_variant_run_ids_and_artifact_paths(
     result = asyncio.run(
         experiment.run_smoke10_experiment_async(
             settings=settings,
-            domain="dmv",
+            domain="kubernetes",
             limit=10,
             run_graph_func=_run_graph_variant,
             now=fixed_now,
         )
     )
 
-    assert result["report_id"] == "20260318-143000-dmv-smoke10-experiment-summary"
+    assert (
+        result["report_id"] == "20260318-143000-kubernetes-smoke10-experiment-summary"
+    )
     assert (
         result["report_artifact_paths"]["manifest"]
         == tmp_path
-        / "outputs/evals/reports/20260318-143000-dmv-smoke10-experiment-summary/manifest.json"
+        / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/manifest.json"
     )
     assert (
         result["report_artifact_paths"]["report"]
         == tmp_path
-        / "outputs/evals/reports/20260318-143000-dmv-smoke10-experiment-summary/report.md"
+        / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/report.md"
     )
     assert len(result["results"]) == 4
     for item in result["results"]:
-        expected_run_id = f"20260318-143000-dmv-smoke10-{item['variant']['id']}"
+        expected_run_id = f"20260318-143000-kubernetes-smoke10-{item['variant']['id']}"
         expected_dir = tmp_path / "outputs/evals/runs" / expected_run_id
         assert item["run_id"] == expected_run_id
         assert item["output_dir"] == expected_dir
@@ -250,7 +252,7 @@ def test_experiment_cli_output_hierarchy(
         cli,
         "run_smoke10_experiment_async",
         lambda **kwargs: {
-            "domain": "dmv",
+            "domain": "kubernetes",
             "limit": 10,
             "results": [
                 {
@@ -285,15 +287,15 @@ def test_experiment_cli_output_hierarchy(
             "frozen_result": None,
             "report_artifact_paths": {
                 "manifest": tmp_path
-                / "outputs/evals/reports/20260318-143000-dmv-smoke10-experiment-summary/manifest.json",
+                / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/manifest.json",
                 "report": tmp_path
-                / "outputs/evals/reports/20260318-143000-dmv-smoke10-experiment-summary/report.md",
+                / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/report.md",
             },
         },
         raising=False,
     )
 
-    exit_code = cli.main(["experiment-smoke10", "--domain", "dmv"])
+    exit_code = cli.main(["experiment-smoke10", "--domain", "kubernetes"])
     output = capsys.readouterr().out.splitlines()
 
     assert exit_code == 0

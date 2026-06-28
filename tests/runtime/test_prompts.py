@@ -12,5 +12,5 @@ def test_v2_prompts_are_domain_neutral() -> None:
         ]
     )
 
-    assert "DMV" not in rendered
-    assert "licenses, rules, or fees" not in rendered
+    assert "Kubernetes" not in rendered
+    assert "deployments, rules, or fees" not in rendered

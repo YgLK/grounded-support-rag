@@ -30,11 +30,7 @@ class ChoiceStrEnum(StrEnum):
 
 
 class Domain(ChoiceStrEnum):
-    DMV = "dmv"
     KUBERNETES = "kubernetes"
-    SSA = "ssa"
-    STUDENTAID = "studentaid"
-    VA = "va"
 
 
 class DatasetSplit(ChoiceStrEnum):
@@ -60,7 +56,7 @@ RequiredPoint: TypeAlias = str | list[str]
 
 
 class Reference(TypedDict):
-    """Reference to a document span in MultiDoc2Dial."""
+    """Reference to a document span."""
 
     label: str
     id_sp: str
@@ -75,14 +71,6 @@ class DialogueTurn(TypedDict):
     da: str
     utterance: str
     references: list[Reference]
-
-
-class Dialogue(TypedDict):
-    """A complete dialogue with domain and turns."""
-
-    domain: str
-    dial_id: str
-    turns: list[DialogueTurn]
 
 
 class DocumentSpan(TypedDict):
@@ -137,8 +125,7 @@ class RAGEvalFields(TypedDict, total=False):
 
     When present, these supersede the legacy gold_doc_ids/gold_span_ids/target_turn
     gating for retrieval and answer scoring. When absent, the harness falls back to
-    the legacy exact gold-doc/gold-span/text-match behavior so existing DMV evals
-    keep working unchanged.
+    the legacy exact gold-doc/gold-span/text-match behavior.
     """
 
     expected_sources: list[str]
@@ -361,7 +348,6 @@ __all__ = [
     "Citation",
     "DatasetSplit",
     "DatasetSplitLike",
-    "Dialogue",
     "DialogueTurn",
     "Document",
     "DocumentSpan",
