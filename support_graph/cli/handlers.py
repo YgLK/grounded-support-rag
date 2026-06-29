@@ -837,11 +837,12 @@ def _trace_show(args: argparse.Namespace) -> int:
 
 def _serve_ui(args: argparse.Namespace) -> int:
     """CLI handler for the 'ui' command."""
-    from support_graph.ui import create_app
+    from support_graph.ui import create_app, build_loader
     import uvicorn
 
+    settings = _load_settings(args)
     uvicorn.run(
-        create_app(),
+        create_app(loader=build_loader(settings)),
         host=args.host,
         port=args.port,
     )

@@ -18,6 +18,11 @@ FailureLabel = Literal[
     "wrong_doc",
     "missed_history",
     "right_doc_wrong_section",
+    "right_source_wrong_section",
+    "retrieval_miss",
+    "unfaithful_answer",
+    "irrelevant_answer",
+    "incomplete_answer",
     "weak_citations",
     "unsupported_answer",
     "runtime_error",
@@ -58,6 +63,12 @@ class GraphConfig(StrictModel):
     decision_policy_version: str
 
 
+class RagEvalConfig(StrictModel):
+    enabled: bool
+    judge_enabled: bool
+    answer_types: list[str] = Field(default_factory=list)
+
+
 class CitationRecord(StrictModel):
     doc_id: str
     chunk_id: str
@@ -84,6 +95,8 @@ class ChunkRecordView(StrictModel):
     vector_distance: float | None = None
     text_overlap_count: int | None = None
     title_overlap_count: int | None = None
+    path_overlap_count: int | None = None
+    retrieval_source: str | None = None
     rerank_score: float | None = None
 
 
@@ -111,6 +124,12 @@ class TraceSummary(StrictModel):
     observability: dict[str, object] | None = None
 
 
+class AnswerCorrectnessMetrics(StrictModel):
+    required_points_covered: float | None = None
+    forbidden_claims_present: float | None = None
+    reference_similarity: dict[str, float | None] | None = None
+
+
 class PerExampleMetrics(StrictModel):
     doc_recall_at_1: float | None
     doc_recall_at_3: float | None
@@ -125,6 +144,16 @@ class PerExampleMetrics(StrictModel):
     citation_coverage: float | None
     citations_valid: float
     end_to_end_success: float
+    context_relevance: float | None = None
+    faithfulness: float | None = None
+    answer_relevance: float | None = None
+    answer_correctness: AnswerCorrectnessMetrics | None = None
+    required_points_covered: float | None = None
+    forbidden_claims_present: float | None = None
+    hit_at_k: float | None = None
+    precision_at_k: float | None = None
+    graded_mrr_at_k: float | None = None
+    ndcg_at_k: float | None = None
 
 
 class RuntimeErrorInfo(StrictModel):
@@ -145,6 +174,7 @@ class EvalRunManifest(StrictModel):
     chunking: ChunkingConfig
     retrieval: RetrievalConfig
     graph: GraphConfig
+    rag_eval: RagEvalConfig | None = None
     prompt_version: str
     notes: str
     ablation: dict[str, object] | None = None
@@ -172,6 +202,7 @@ class EvalCounts(StrictModel):
     examples: int
     answer_examples: int
     follow_up_examples: int
+    rag_examples: int = 0
 
 
 class EvalGenerationMetrics(StrictModel):
@@ -182,6 +213,24 @@ class EvalRetrievalBreakdown(StrictModel):
     answer: EvalRetrievalMetrics
     follow_up: EvalRetrievalMetrics
     overall: EvalRetrievalMetrics
+
+
+class EvalRagMetrics(StrictModel):
+    context_relevance: float | None = None
+    faithfulness: float | None = None
+    answer_relevance: float | None = None
+    required_points_covered: float | None = None
+    forbidden_claims_present: float | None = None
+    hit_at_k: float | None = None
+    precision_at_k: float | None = None
+    graded_mrr_at_k: float | None = None
+    ndcg_at_k: float | None = None
+    examples: int | None = None
+
+
+class EvalRagMetricsBreakdown(StrictModel):
+    answer: EvalRagMetrics = Field(default_factory=EvalRagMetrics)
+    overall: EvalRagMetrics = Field(default_factory=EvalRagMetrics)
 
 
 class DecisionDistribution(StrictModel):
@@ -199,6 +248,7 @@ class EvalRunMetrics(StrictModel):
     counts: EvalCounts
     retrieval: EvalRetrievalBreakdown
     generation: EvalGenerationMetrics
+    rag: EvalRagMetricsBreakdown = Field(default_factory=EvalRagMetricsBreakdown)
     decision_distribution: DecisionDistribution
     latency_ms: EvalLatencyMetrics
     failure_counts: dict[str, int] = Field(default_factory=dict)
@@ -227,6 +277,12 @@ class PredictionRecord(StrictModel):
     latest_user_utterance: str | None
     gold_doc_ids: list[str] = Field(default_factory=list)
     gold_span_ids: list[str] = Field(default_factory=list)
+    acceptable_span_ids: list[str] | None = None
+    expected_sources: list[str] = Field(default_factory=list)
+    acceptable_sources: list[str] = Field(default_factory=list)
+    required_points: list[object] = Field(default_factory=list)
+    forbidden_claims: list[object] = Field(default_factory=list)
+    answer_type: str | None = None
     target_text: str
     decision: Decision
     response_text: str

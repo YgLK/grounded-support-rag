@@ -20,7 +20,12 @@ def test_ui_cli_serves_workbench_with_local_defaults(
     import support_graph.ui as ui
     import uvicorn
 
-    monkeypatch.setattr(ui, "create_app", lambda: "workbench-app", raising=False)
+    monkeypatch.setattr(
+        ui, "build_loader", lambda settings=None: "fake-loader", raising=False
+    )
+    monkeypatch.setattr(
+        ui, "create_app", lambda loader=None: "workbench-app", raising=False
+    )
 
     def fake_run(app, *, host, port):
         captured["app"] = app

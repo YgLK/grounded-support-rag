@@ -81,12 +81,28 @@ Required local config:
 - `.env`: if using OpenRouter for chat or embeddings, set `SUPPORT_GRAPH_OPENROUTER_API_KEY`
 - `support_graph.toml`: choose provider combination under `[runtime]`
 
-Then run the pipeline:
+Fast path with the committed DB dump (skips corpus fetch + indexing):
+
+```bash
+docker compose up -d postgres
+cat support_graph.pg.dump | docker compose exec -T postgres pg_restore -U postgres -d support_graph --clean --if-exists
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
+```
+
+Full rebuild path (fetch + chunk + index from a fresh docs snapshot):
 
 ```bash
 uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
 uv run grounded-support-rag build-chunks --domain kubernetes
 uv run grounded-support-rag index-docs --domain kubernetes
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
-uv run grounded-support-rag ui --host 127.0.0.1 --port 8008
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
+```
+
+Inspect a run from the command line:
+
+```bash
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml review-failures --run-id <run-id>
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml trace-show --run-id <run-id> --example-id <example-id>
 ```
