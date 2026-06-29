@@ -19,3 +19,6 @@
 
 ## [2026-06-29] ingest | Kubernetes Smoke-10 Metric Alignment
 - Updated: Kubernetes Baseline
+
+## [2026-06-29] ingest | Kubernetes Smoke-10 Generation Variance
+- Updated: Kubernetes Baseline
