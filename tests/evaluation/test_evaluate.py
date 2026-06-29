@@ -1976,6 +1976,76 @@ def test_smoke_services_alias_answer_reaches_full_required_point_coverage(
     assert services_pred["failure_label"] is None
 
 
+def test_smoke_deployment_application_instances_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    dep_example = next(
+        ex for ex in examples if ex["example_id"] == "kubernetes::deployments::turn_2"
+    )
+    answer = (
+        "A Kubernetes Deployment manages the Pods that run your application. "
+        "It creates, updates, and scales application instances during rollouts."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/controllers/deployment",
+            chunk_id="chunk-deployment",
+            span_ids=["concepts/workloads/controllers/deployment#complete-deployment"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [dep_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_deployment_pods_run_containers_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    dep_example = next(
+        ex for ex in examples if ex["example_id"] == "kubernetes::deployments::turn_2"
+    )
+    answer = (
+        "A Kubernetes Deployment manages the lifecycle of your application's Pods. "
+        "It creates, updates, and scales the Pods that run your containers during rollouts."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/controllers/deployment",
+            chunk_id="chunk-deployment",
+            span_ids=["concepts/workloads/controllers/deployment#complete-deployment"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [dep_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
 def test_smoke_failedscheduling_suitable_node_alias_not_incomplete(
     tmp_path: Path,
     make_settings,
@@ -2007,6 +2077,240 @@ def test_smoke_failedscheduling_suitable_node_alias_not_incomplete(
 
     result = _kube_smoke_run(
         [failedscheduling_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_crashloopbackoff_inspect_events_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    crashloop_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-crashloopbackoff::turn_2"
+    )
+    answer = (
+        "Start by checking the container state for CrashLoopBackOff and looking "
+        "at logs. Then inspect events with kubectl describe pod and fix the "
+        "configuration issue causing repeated container failures."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/pods/pod-lifecycle",
+            chunk_id="chunk-crashloop",
+            span_ids=[
+                "concepts/workloads/pods/pod-lifecycle#how-pods-handle-problems-with-containers-container-restarts"
+            ],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [crashloop_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_deployment_rollout_resolve_issue_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    rollout_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-deployment-rollout::turn_2"
+    )
+    answer = (
+        "Check rollout status and Deployment conditions, then review quota, "
+        "readiness probe failures, and image pull errors. Use those findings to "
+        "diagnose and resolve the issue."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/controllers/deployment",
+            chunk_id="chunk-rollout",
+            span_ids=["concepts/workloads/controllers/deployment#failed-deployment"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [rollout_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_imagepullbackoff_singular_secret_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    imagepull_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-imagepullbackoff::turn_2"
+    )
+    answer = (
+        "ImagePullBackOff means Kubernetes could not pull the container image "
+        "and is backing off. Check the image name and registry access, including "
+        "whether a private image is missing an imagePullSecret."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/containers/images",
+            chunk_id="chunk-imagepull",
+            span_ids=["concepts/containers/images#imagepullbackoff"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [imagepull_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_deployment_rollout_diagnose_issues_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    rollout_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-deployment-rollout::turn_2"
+    )
+    answer = (
+        "Use rollout status and Deployment conditions, then check common failure "
+        "reasons such as quota and image pull errors. These troubleshooting "
+        "steps help diagnose issues with the stuck rollout."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/controllers/deployment",
+            chunk_id="chunk-rollout",
+            span_ids=["concepts/workloads/controllers/deployment#failed-deployment"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [rollout_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_deployment_rollout_status_fields_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    rollout_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"] == "kubernetes::troubleshooting-deployment-rollout::turn_2"
+    )
+    answer = (
+        "Use rollout status and Deployment conditions, then check common failure "
+        "reasons such as quota and readiness probe failures. The initial commands "
+        "and status fields show what to inspect when the rollout is stuck."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="concepts/workloads/controllers/deployment",
+            chunk_id="chunk-rollout",
+            span_ids=["concepts/workloads/controllers/deployment#failed-deployment"],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [rollout_example],
+        make_settings=make_settings,
+        tmp_path=tmp_path,
+        run_graph_func=fake_run_graph,
+    )
+    pred = result["predictions"][0]
+    assert pred["metrics"]["required_points_covered"] == 1.0
+    assert pred["failure_label"] != "incomplete_answer"
+    assert pred["failure_label"] is None
+
+
+def test_smoke_kubectl_connectivity_host_port_alias_not_incomplete(
+    tmp_path: Path,
+    make_settings,
+) -> None:
+    examples = _load_smoke_examples()
+    kubectl_example = next(
+        ex
+        for ex in examples
+        if ex["example_id"]
+        == "kubernetes::troubleshooting-kubectl-connectivity::turn_2"
+    )
+    answer = (
+        "Check kubectl version compatibility, confirm kubeconfig contains the "
+        "correct current context, then test connectivity with kubectl cluster-info. "
+        "A server was refused error points at host port or kubeconfig problems. "
+        "Also verify any authentication helper is installed and configured."
+    )
+
+    def fake_run_graph(*, example, trace_path: Path, **kwargs):
+        return _kube_trace_and_result(
+            example,
+            doc_id="tasks/debug/debug-cluster/troubleshoot-kubectl",
+            chunk_id="chunk-kubectl",
+            span_ids=[
+                "tasks/debug/debug-cluster/troubleshoot-kubectl#verify-kubectl-setup"
+            ],
+            response=answer,
+            trace_path=trace_path,
+        )
+
+    result = _kube_smoke_run(
+        [kubectl_example],
         make_settings=make_settings,
         tmp_path=tmp_path,
         run_graph_func=fake_run_graph,

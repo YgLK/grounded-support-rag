@@ -13,3 +13,9 @@
 
 ## [2026-06-28] ingest | Kubernetes Smoke-10 Retrieval Baseline
 - Updated: Kubernetes Baseline
+
+## [2026-06-29] ingest | Kubernetes Smoke-10 Completeness Cleanup
+- Updated: Kubernetes Baseline
+
+## [2026-06-29] ingest | Kubernetes Smoke-10 Metric Alignment
+- Updated: Kubernetes Baseline

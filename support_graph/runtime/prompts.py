@@ -161,9 +161,11 @@ def _v2_prompt_set() -> PromptSet:
                     "system",
                     "You are an expert documentation grader. Your task is to determine if the retrieved context is sufficient to answer a user's question SAFELY and ACCURATELY.\n\n"
                     "Verdicts:\n"
-                    "- sufficient: The context contains the direct answer or a clear conditional next step.\n"
+                    "- sufficient: The context contains the direct answer, a clear conditional next step, or enough facts for a bounded troubleshooting checklist.\n"
                     "- partial: The context is highly relevant but is missing ONE specific detail to be certain.\n"
                     "- insufficient: The context is irrelevant or lacks any substantive facts to help the user.\n\n"
+                    "For troubleshooting questions, mark sufficient when the context provides relevant checks, causes, fields, commands, or status details that can guide the first investigation, even if it does not name every possible cause. "
+                    "For 'what should I check' questions, do not require an explicit troubleshooting checklist; field names, object relationships, binding/provisioning details, and status details are enough for a bounded checklist.\n\n"
                     "Strict Rule: Do not use your own knowledge. Only grade based on the provided <context> tags.",
                 ),
                 (
@@ -183,7 +185,7 @@ def _v2_prompt_set() -> PromptSet:
                     "1. ONLY use information from the provided <context> tags.\n"
                     "2. If the context does not contain the answer, you MUST abstain or clarify.\n"
                     "3. NEVER use your internal knowledge about the world if it is not in the context.\n"
-                    "4. If the context is 'sufficient', provide a direct, helpful answer.\n"
+                    "4. If the context is 'sufficient', provide a direct, helpful answer that synthesizes the relevant checks and actions from the context.\n"
                     "5. If the context is 'partial', ask for the specific missing piece of information.\n\n"
                     "Output Requirements:\n"
                     "- Do not use inline citations like [1] or [Chunk ID].\n"

@@ -1,6 +1,8 @@
-# Grounded-support-RAG
+# SupportGraph
 
-Grounded-support-RAG is a retrieval-augmented support assistant for grounded Kubernetes troubleshooting and multi-document support knowledge bases. It turns source content into indexed evidence, runs a LangGraph pipeline that retrieves and grades relevant context for each user turn, and produces grounded answers with citations, traces, and offline evaluation artifacts for debugging and model comparison.
+SupportGraph is a local-first, evaluation-first RAG assistant for grounded Kubernetes troubleshooting. It turns a pinned `kubernetes/website` docs snapshot into indexed evidence, runs a LangGraph pipeline that retrieves and grades relevant context for each user turn, and returns grounded answers with citations, traces, and reproducible offline evaluation artifacts for debugging and model comparison. The CLI is `grounded-support-rag`.
+
+The system is a production-shaped modular monolith, not a production-ready SaaS: it is built to demonstrate a defensible LLM systems story (retrieval, grounding, evaluation, observability) without the auth, tenancy, retention, and SLO machinery real production traffic would require. Deferred production gaps are listed in `ROADMAP.md` (P4).
 
 ## Scope
 
@@ -42,6 +44,12 @@ flowchart TD
     I --> J([END])
 ```
 
+## Why This Stack
+
+- **LangGraph** models retrieval as a stateful workflow: route the turn, prepare a query, retrieve, grade evidence, retry with query refinement, and fall back to `clarify` / `abstain` when evidence is insufficient. One graph makes routing, grading, retries, and fallback decisions inspectable in traces instead of hiding them in ad hoc prompt chains.
+- **Postgres + pgvector** keeps retrieval grounded in a pinned Kubernetes docs corpus. Answers cite retrieved chunks only, so quality is bounded by what the index returns rather than parametric memory, and the index is reproducible from a fetched docs ref.
+- **Offline evaluation** catches regressions before claims: retrieval metrics (Doc Recall@1/3/5, Span Recall@5, MRR@5), generation metrics (ROUGE-L, F1), grounding/citation metrics (Citation Coverage, required-points coverage), and a manual failure-review CSV separate retrieval, grounding, citation, and answer-completeness failures.
+- **What the current failure teaches:** the one remaining `weak_citations` case is a PVC Pending answer that is well-grounded and cites acceptable storage docs (`storage-classes`, `csi-storage-capacity`, `persistent-volume-claim`), but legacy citation coverage still expects the gold `concepts/storage/dynamic-provisioning` doc/span that was not retrieved. It shows that strict gold-span citation metrics can undercount acceptable grounded answers, and motivates a citation-repair follow-up rather than a retrieval change.
 
 ## Evaluation Snapshot
 
@@ -49,9 +57,10 @@ Current flagship run: Kubernetes Smoke-10 troubleshooting baseline (`10` example
 
 - Chat: `openrouter / openai/gpt-oss-120b:nitro`
 - Embeddings: `openrouter / openai/text-embedding-3-small`
-- `Doc Recall@1 0.700`, `Doc Recall@3 1.000`, `Span Recall@5 1.000`, `MRR@5 0.833`
-- `ROUGE-L 0.172`, `F1 0.225`, `Citation Coverage 0.900`
-- Failure bucket: `incomplete_answer` only (`5` examples); retrieval misses cleared
+- Latest run: `20260629-002315-kubernetes-smoke`
+- `Doc Recall@1 0.700`, `Doc Recall@3 0.900`, `Span Recall@5 1.000`, `MRR@5 0.800`
+- `ROUGE-L 0.161`, `F1 0.204`, `Citation Coverage 0.900`
+- Failure bucket: `weak_citations` only (`1` PVC example); `incomplete_answer` cleared
 
 The Kubernetes baseline is intentionally artifact-heavy: each eval writes traces, prediction records, retrieval examples, manual-review CSVs, and a summary that separates retrieval, grounding, citation, and answer-completeness failures.
 

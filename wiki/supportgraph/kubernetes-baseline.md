@@ -1,11 +1,11 @@
 # Kubernetes Baseline
 
-> Sources: SupportGraph local eval artifacts, 2026-06-28
-> Raw: [Kubernetes Baseline Eval](../../raw/supportgraph/2026-06-28-kubernetes-baseline-eval.md); [Kubernetes Normalized Smoke Eval](../../raw/supportgraph/2026-06-28-kubernetes-normalized-smoke-eval.md); [Kubernetes Smoke Eval Cleanup](../../raw/supportgraph/2026-06-28-kubernetes-smoke-eval-cleanup.md); [Kubernetes Smoke-10 Retrieval Baseline](../../raw/supportgraph/2026-06-28-kubernetes-smoke10-retrieval-baseline.md)
+> Sources: SupportGraph local eval artifacts, 2026-06-28; 2026-06-29
+> Raw: [Kubernetes Baseline Eval](../../raw/supportgraph/2026-06-28-kubernetes-baseline-eval.md); [Kubernetes Normalized Smoke Eval](../../raw/supportgraph/2026-06-28-kubernetes-normalized-smoke-eval.md); [Kubernetes Smoke Eval Cleanup](../../raw/supportgraph/2026-06-28-kubernetes-smoke-eval-cleanup.md); [Kubernetes Smoke-10 Retrieval Baseline](../../raw/supportgraph/2026-06-28-kubernetes-smoke10-retrieval-baseline.md); [Kubernetes Smoke-10 Completeness Cleanup](../../raw/supportgraph/2026-06-29-kubernetes-smoke10-completeness-cleanup.md)
 
 ## Overview
 
-The first end-to-end Kubernetes baseline ran against a pinned `kubernetes/website` docs snapshot, built a full 10,379-chunk index, and completed the 3-example Kubernetes smoke eval. A follow-up run after normalizing Hugo `_index.md` pages to website-style doc IDs improved document recall, confirming that the Pods failure was partly corpus-ID plumbing rather than pure retrieval quality. The current flagship baseline is a 10-example Kubernetes troubleshooting smoke eval. Retrieval is now stable: all examples hit expected or acceptable docs by top 3 and spans by top 5. Remaining failures are answer-coverage gaps, not retrieval misses.
+The first end-to-end Kubernetes baseline ran against a pinned `kubernetes/website` docs snapshot, built a full 10,379-chunk index, and completed the 3-example Kubernetes smoke eval. A follow-up run after normalizing Hugo `_index.md` pages to website-style doc IDs improved document recall, confirming that the Pods failure was partly corpus-ID plumbing rather than pure retrieval quality. The current flagship baseline is a 10-example Kubernetes troubleshooting smoke eval. Required-point answer completeness now clears on the live smoke run. The remaining failure is a PVC Pending `weak_citations` case caused by legacy citation coverage not crediting acceptable storage docs/spans.
 
 ## Baseline Run
 
@@ -56,6 +56,24 @@ After hybrid retrieval/rerank fix and Smoke-10 expansion:
 - Remaining gap: generation often gives useful but partial troubleshooting answers
 - Index rebuild: not needed
 
+After answer-completeness cleanup:
+
+- Eval run: `20260629-002315-kubernetes-smoke`
+- Smoke subset: 10 answer examples
+- Doc Recall@1: 0.700
+- Doc Recall@3: 0.900
+- Doc Recall@5: 0.900
+- Span Recall@5: 1.000
+- MRR@5: 0.800
+- Hit@5: 1.000
+- ROUGE-L: 0.161
+- Token F1: 0.204
+- Citation coverage: 0.900
+- Required points covered: 1.000
+- Failure labels: `weak_citations` 1
+- `incomplete_answer`: 0
+- Remaining gap: PVC Pending cites acceptable storage docs/spans, but legacy citation coverage still expects the gold dynamic-provisioning span/doc
+
 Original baseline:
 
 - Doc Recall@3: 0.333
@@ -101,4 +119,8 @@ The new smoke summary explains whether failures are retrieval, grounding, releva
 
 The Kubernetes smoke set now covers `pods`, `deployments`, `services`, plus troubleshooting prompts for `CrashLoopBackOff`, `ImagePullBackOff`, `FailedScheduling`, stuck Deployment rollouts, Service DNS, PVC pending, and kubectl connectivity. The data test verifies all declared gold/acceptable doc IDs and span IDs exist in `data/derived/chunks/kubernetes.jsonl`.
 
-The current Smoke-10 run with `support_graph.kubernetes.toml` produced retrieval-stable metrics: Doc Recall@3 `1.000`, Span Recall@5 `1.000`, and graded Hit@5 `1.000`. NDCG is now bounded (`0.993` average, `1.000` max), after deduplicating repeated doc IDs and preventing acceptable alternates from adding gain beyond the expected-source ideal. The only failure bucket is `incomplete_answer`; remaining failures are generation completeness or abstain issues, not retrieval misses.
+The earlier Smoke-10 run with `support_graph.kubernetes.toml` produced retrieval-stable metrics: Doc Recall@3 `1.000`, Span Recall@5 `1.000`, and graded Hit@5 `1.000`. NDCG is now bounded (`0.993` average, `1.000` max), after deduplicating repeated doc IDs and preventing acceptable alternates from adding gain beyond the expected-source ideal.
+
+The 2026-06-29 completeness cleanup reviewed the five `incomplete_answer` failures and found mostly strict alias/scope mismatches in deterministic required-point grading, plus one prompt issue where PVC Pending evidence was treated as insufficient because it was field/status evidence rather than an explicit troubleshooting checklist. Narrow aliases now cover observed equivalent wording for Deployments, CrashLoopBackOff, ImagePullBackOff, FailedScheduling, rollout, and kubectl connectivity; the v2 evidence grader now permits bounded troubleshooting checklists from grounded field/status evidence.
+
+The verified run `20260629-002315-kubernetes-smoke` has no `incomplete_answer` failures. Required-point coverage is `1.000`, Span Recall@5 remains `1.000`, and graded Hit@5 remains `1.000`. Legacy Doc Recall@3/5 is `0.900` because PVC Pending retrieves acceptable storage docs but not the expected dynamic-provisioning doc. The only remaining failure is `weak_citations`, not answer completeness.
