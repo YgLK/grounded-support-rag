@@ -672,7 +672,11 @@ def load_eval_examples(
     subset: EvalSubsetLike,
 ) -> tuple[list[Example], str]:
     resolved_subset = parse_eval_subset(subset)
-    if resolved_subset in {EvalSubset.SMOKE, EvalSubset.FROZEN_EXPERIMENT}:
+    if resolved_subset in {
+        EvalSubset.SMOKE,
+        EvalSubset.EXPANDED,
+        EvalSubset.FROZEN_EXPERIMENT,
+    }:
         path = _eval_subset_path(settings, domain, resolved_subset)
         return load_subset_jsonl(path), str(resolved_subset)
     examples = _load_or_build_examples(settings, domain, split)

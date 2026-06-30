@@ -30,6 +30,11 @@ class CliHandlers:
     review_failures: CommandHandler
     trace_show: CommandHandler
     serve_ui: CommandHandler
+    draft_eval_examples: CommandHandler
+    validate_eval_examples: CommandHandler
+    promote_eval_examples: CommandHandler
+    eval_variance: CommandHandler
+    model_ab_compatibility: CommandHandler
 
 
 def _add_global_options(parser: argparse.ArgumentParser) -> None:
@@ -309,6 +314,225 @@ def _register_ui(subparsers: Subparsers, handlers: CliHandlers) -> None:
     ui_parser.set_defaults(func=handlers.serve_ui)
 
 
+def _register_draft_eval_examples(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
+    """Register the 'draft-eval-examples' command.
+
+    Drafts corpus-grounded eval example candidates by running real retrieval
+    against the live index and asking the chat model to draft grounded labels.
+    Output is appended idempotently to a candidates file for human review.
+    """
+    parser = subparsers.add_parser(
+        "draft-eval-examples",
+        help="Draft corpus-grounded eval example candidates for review.",
+    )
+    parser.add_argument(
+        "--seed-file",
+        required=True,
+        help="JSONL seed file with seed_id, question, answer_type rows.",
+    )
+    parser.add_argument(
+        "--domain",
+        default=None,
+        choices=DOMAIN_CHOICES,
+        help="Domain to draft for. Defaults to the configured MVP domain.",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Candidates JSONL output path. Defaults to "
+            "data/eval_subsets/<domain>/_candidates/expanded.candidates.jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=5, help="Final retrieval top-k per seed."
+    )
+    parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=12,
+        help="Pre-rerank candidate pool size per seed.",
+    )
+    parser.set_defaults(func=handlers.draft_eval_examples)
+
+
+def _register_validate_eval_examples(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
+    """Register the 'validate-eval-examples' command.
+
+    Validates a curated eval subset against the pinned chunk corpus: checks
+    that declared doc/span IDs exist, required-point alias groups are grounded
+    in source span text, no duplicate example_ids, and answer_type is valid.
+    """
+    parser = subparsers.add_parser(
+        "validate-eval-examples",
+        help="Validate a curated eval subset against the pinned chunk corpus.",
+    )
+    parser.add_argument(
+        "--examples-file",
+        required=True,
+        help="JSONL examples file to validate (candidates or final subset).",
+    )
+    parser.add_argument(
+        "--chunk-file",
+        default=None,
+        help=(
+            "Chunk corpus JSONL to validate against. Defaults to "
+            "data/derived/chunks/<domain>.jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--domain",
+        default=None,
+        choices=DOMAIN_CHOICES,
+        help="Domain. Defaults to the configured MVP domain.",
+    )
+    parser.add_argument(
+        "--require-rag-fields",
+        action="store_true",
+        default=True,
+        help="Require RAG eval fields (required_points, etc.). Default on.",
+    )
+    parser.set_defaults(func=handlers.validate_eval_examples)
+
+
+def _register_promote_eval_examples(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
+    """Register the 'promote-eval-examples' command.
+
+    Merges verified candidate rows into the final expanded subset file,
+    keeping existing rows and appending new example_ids. Runs the validator
+    first and refuses to promote if errors are found.
+    """
+    parser = subparsers.add_parser(
+        "promote-eval-examples",
+        help="Promote verified eval candidates into the final expanded subset.",
+    )
+    parser.add_argument(
+        "--candidates-file",
+        required=True,
+        help="JSONL candidates file (edited/verified by a human).",
+    )
+    parser.add_argument(
+        "--target-file",
+        default=None,
+        help=(
+            "Final subset JSONL to merge into. Defaults to "
+            "data/eval_subsets/<domain>/expanded.jsonl."
+        ),
+    )
+    parser.add_argument(
+        "--domain",
+        default=None,
+        choices=DOMAIN_CHOICES,
+        help="Domain. Defaults to the configured MVP domain.",
+    )
+    parser.add_argument(
+        "--chunk-file",
+        default=None,
+        help="Chunk corpus JSONL for the promotion validation gate.",
+    )
+    parser.set_defaults(func=handlers.promote_eval_examples)
+
+
+def _register_eval_variance(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'eval-variance' command.
+
+    Runs the eval harness repeatedly on the same subset/config/index and
+    produces a variance attribution report (sampling noise vs generation
+    non-determinism), asserting retrieval is deterministic across runs.
+    """
+    parser = subparsers.add_parser(
+        "eval-variance",
+        help="Run a repeated-run variance attribution study.",
+    )
+    parser.add_argument(
+        "--subset",
+        default=EvalSubset.EXPANDED,
+        choices=EVAL_SUBSET_CHOICES,
+        help="Eval subset to repeat over. Defaults to expanded.",
+    )
+    parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
+    parser.add_argument(
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=3,
+        help="Number of repeated runs (K). Default 3 (pilot).",
+    )
+    parser.add_argument(
+        "--desired-half-width",
+        type=float,
+        default=0.05,
+        help="Target CI half-width for the recommended-K computation.",
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=1,
+        help="Maximum number of examples to evaluate concurrently per run.",
+    )
+    parser.add_argument(
+        "--notes", default=None, help="Optional run note stored in the manifest."
+    )
+    parser.set_defaults(func=handlers.eval_variance)
+
+
+def _register_model_ab_compatibility(
+    subparsers: Subparsers, handlers: CliHandlers
+) -> None:
+    """Register the 'model-ab-compatibility' command.
+
+    Blocking prerequisite for a model A/B comparison: confirms a candidate
+    chat model supports structured output (json_schema) by running a small
+    smoke eval and asserting the fallback-event count is ~0.
+    """
+    parser = subparsers.add_parser(
+        "model-ab-compatibility",
+        help="Gate a candidate chat model on structured-output support.",
+    )
+    parser.add_argument(
+        "--candidate-chat-model",
+        required=True,
+        help="Candidate OpenRouter chat model slug to gate.",
+    )
+    parser.add_argument("--domain", default=None, choices=DOMAIN_CHOICES)
+    parser.add_argument(
+        "--split", default=DatasetSplit.VALIDATION, choices=SPLIT_CHOICES
+    )
+    parser.add_argument(
+        "--subset",
+        default=EvalSubset.SMOKE,
+        choices=EVAL_SUBSET_CHOICES,
+        help="Subset to draw gate examples from. Defaults to smoke.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="Number of examples to run for the gate. Default 3.",
+    )
+    parser.add_argument(
+        "--fallback-tolerance",
+        type=int,
+        default=0,
+        help="Max fallback events allowed to still pass. Default 0.",
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=1,
+        help="Maximum number of examples to evaluate concurrently.",
+    )
+    parser.set_defaults(func=handlers.model_ab_compatibility)
+
+
 def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
     command_registrars: tuple[Callable[[Subparsers, CliHandlers], None], ...] = (
         _register_fetch_kubernetes_docs,
@@ -322,6 +546,11 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
         _register_review_failures,
         _register_trace_show,
         _register_ui,
+        _register_draft_eval_examples,
+        _register_validate_eval_examples,
+        _register_promote_eval_examples,
+        _register_eval_variance,
+        _register_model_ab_compatibility,
     )
     for register_command in command_registrars:
         register_command(subparsers, handlers)

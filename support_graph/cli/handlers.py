@@ -45,7 +45,28 @@ from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
     load_benchmark_chunk_records,
 )
-from support_graph.evaluation.evaluate import evaluate_split_async
+from support_graph.evaluation.authoring import (
+    build_default_chat_draft,
+    draft_examples,
+    load_seed_topics,
+    append_candidate_rows,
+)
+from support_graph.evaluation.eval_examples import (
+    build_chunk_index,
+    load_examples,
+    promote_examples,
+    validate_examples,
+)
+from support_graph.evaluation.evaluate import (
+    build_eval_config,
+    evaluate_split_async,
+    load_eval_examples,
+)
+from support_graph.evaluation.variance import (
+    run_variance_study_async,
+    write_variance_report,
+)
+from support_graph.evaluation.model_ab import run_compatibility_gate_async
 from support_graph.logging_utils import configure_logging, get_logger
 from support_graph.providers import (
     chat_provider as resolved_chat_provider,
@@ -849,6 +870,374 @@ def _serve_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_chunk_file(
+    settings: Settings, domain: DomainLike, chunk_file: str | None
+) -> Path:
+    if chunk_file:
+        return Path(chunk_file)
+    return settings.paths.chunks_dir / f"{settings.selected_domain(domain)}.jsonl"
+
+
+def _draft_eval_examples(args: argparse.Namespace) -> int:
+    """CLI handler for the 'draft-eval-examples' command."""
+    settings = _load_settings(args)
+    try:
+        settings.runtime.validate_for_run()
+    except ConfigValidationError as exc:
+        return _print_config_validation_error(
+            title="SupportGraph Draft Eval Examples",
+            settings=settings,
+            error=exc,
+        )
+    domain = settings.selected_domain(args.domain)
+    postgres_dsn = settings.runtime.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for drafting.")
+    if not _ensure_index_ready(
+        title="SupportGraph Draft Eval Examples",
+        postgres_dsn=postgres_dsn,
+        collection_name=settings.collection_name(domain),
+        domain=domain,
+    ):
+        return 1
+
+    seeds = load_seed_topics(args.seed_file)
+    if not seeds:
+        print_lines(
+            [
+                "SupportGraph Draft Eval Examples",
+                "State: empty-seed-file",
+                "No seed topics found.",
+                f"Seed File: {args.seed_file}",
+            ]
+        )
+        return 1
+    output_path = (
+        Path(args.output)
+        if args.output
+        else settings.paths.project_root
+        / "data/eval_subsets"
+        / str(domain)
+        / "_candidates"
+        / "expanded.candidates.jsonl"
+    )
+    run_config = _run_config(settings, domain)
+    logger.info(
+        "Drafting %s eval candidates for domain=%s output=%s",
+        len(seeds),
+        domain,
+        output_path,
+    )
+    from support_graph.runtime.nodes import build_chat_model
+
+    chat_model = build_chat_model(run_config)
+    chat_draft = build_default_chat_draft(chat_model)
+    results = cast(
+        list,
+        run_async_boundary(
+            draft_examples(
+                seeds,
+                config=run_config,
+                chat_draft=chat_draft,
+                top_k=args.top_k,
+                candidate_k=args.candidate_k,
+            )
+        ),
+    )
+    appended = append_candidate_rows(results, output_path)
+    print_lines(
+        [
+            "SupportGraph Draft Eval Examples",
+            f"Domain: {domain}",
+            f"Seeds: {len(seeds)}",
+            f"Drafted: {len(results)}",
+            f"Candidates File: {output_path}",
+            f"Total Candidates (after append): {len(appended)}",
+            "Next",
+            f"Review and edit {relative_path(output_path, settings.paths.project_root)}, "
+            "then run validate-eval-examples and promote-eval-examples.",
+        ]
+    )
+    return 0
+
+
+def _validate_eval_examples(args: argparse.Namespace) -> int:
+    """CLI handler for the 'validate-eval-examples' command."""
+    settings = _load_settings(args)
+    domain = settings.selected_domain(args.domain)
+    chunk_path = _resolve_chunk_file(settings, domain, args.chunk_file)
+    if not chunk_path.exists():
+        print_lines(
+            [
+                "SupportGraph Validate Eval Examples",
+                "State: chunk-file-missing",
+                "Chunk file missing",
+                f"No chunk corpus found at {relative_path(chunk_path, settings.paths.project_root)}.",
+                "Next",
+                f"Run: uv run grounded-support-rag build-chunks --domain {domain}",
+            ]
+        )
+        return 1
+    examples = load_examples(args.examples_file)
+    chunk_records = load_subset_jsonl(chunk_path)
+    chunk_index = build_chunk_index(chunk_records)
+    report = validate_examples(
+        examples, chunk_index, require_rag_fields=args.require_rag_fields
+    )
+    lines = [
+        "SupportGraph Validate Eval Examples",
+        f"Examples: {report.example_count}",
+        f"Errors: {len(report.errors)}",
+        f"Warnings: {len(report.warnings)}",
+        f"Duplicate IDs: {', '.join(report.duplicate_ids) or 'none'}",
+        "Answer Type Distribution",
+    ]
+    for answer_type, count in report.answer_type_distribution.items():
+        lines.append(f"- {answer_type}: {count}")
+    if report.issues:
+        lines.append("Issues")
+        lines.extend(report.issue_lines())
+    lines.append("State: valid" if report.ok else "State: invalid")
+    print_lines(lines)
+    return 0 if report.ok else 1
+
+
+def _promote_eval_examples(args: argparse.Namespace) -> int:
+    """CLI handler for the 'promote-eval-examples' command."""
+    settings = _load_settings(args)
+    domain = settings.selected_domain(args.domain)
+    chunk_path = _resolve_chunk_file(settings, domain, args.chunk_file)
+    if not chunk_path.exists():
+        print_lines(
+            [
+                "SupportGraph Promote Eval Examples",
+                "State: chunk-file-missing",
+                "Chunk file missing",
+                f"No chunk corpus found at {relative_path(chunk_path, settings.paths.project_root)}.",
+            ]
+        )
+        return 1
+    candidates = load_examples(args.candidates_file)
+    chunk_records = load_subset_jsonl(chunk_path)
+    chunk_index = build_chunk_index(chunk_records)
+    report = validate_examples(candidates, chunk_index)
+    if not report.ok:
+        print_lines(
+            [
+                "SupportGraph Promote Eval Examples",
+                "State: validation-failed",
+                "Promotion refused: candidate file has validation errors.",
+                *report.issue_lines(),
+                "Next",
+                "Fix the errors in the candidates file, then re-run promote-eval-examples.",
+            ]
+        )
+        return 1
+    target_path = (
+        Path(args.target_file)
+        if args.target_file
+        else settings.paths.project_root
+        / "data/eval_subsets"
+        / str(domain)
+        / "expanded.jsonl"
+    )
+    existing = load_examples(target_path) if target_path.exists() else []
+    merged = promote_examples(candidates, target_path=target_path, existing=existing)
+    print_lines(
+        [
+            "SupportGraph Promote Eval Examples",
+            f"Domain: {domain}",
+            f"Candidates: {len(candidates)}",
+            f"Existing: {len(existing)}",
+            f"Merged: {len(merged)}",
+            f"Target File: {relative_path(target_path, settings.paths.project_root)}",
+            "Next",
+            f"Run: uv run grounded-support-rag eval --subset expanded --domain {domain}",
+        ]
+    )
+    return 0
+
+
+def _eval_variance(args: argparse.Namespace) -> int:
+    """CLI handler for the 'eval-variance' command."""
+    settings = _load_settings(args)
+    try:
+        settings.runtime.validate_for_run()
+    except ConfigValidationError as exc:
+        return _print_config_validation_error(
+            title="SupportGraph Eval Variance",
+            settings=settings,
+            error=exc,
+        )
+    domain = settings.selected_domain(args.domain)
+    postgres_dsn = settings.runtime.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for variance study.")
+    if not _ensure_index_ready(
+        title="SupportGraph Eval Variance",
+        postgres_dsn=postgres_dsn,
+        collection_name=settings.collection_name(domain),
+        domain=domain,
+    ):
+        return 1
+
+    examples, subset_name = load_eval_examples(
+        settings, domain, args.split, args.subset
+    )
+    if not examples:
+        print_lines(
+            [
+                "SupportGraph Eval Variance",
+                "State: empty-subset",
+                "No examples found for subset.",
+                f"Subset: {args.subset}",
+            ]
+        )
+        return 1
+    config = build_eval_config(settings, domain)
+    logger.info(
+        "Running variance study domain=%s subset=%s examples=%s repeat=%s",
+        domain,
+        args.subset,
+        len(examples),
+        args.repeat,
+    )
+    report = cast(
+        object,
+        run_async_boundary(
+            run_variance_study_async(
+                settings=settings,
+                domain=domain,
+                split=args.split,
+                subset=subset_name,
+                examples=examples,
+                config=config,
+                repeat=args.repeat,
+                notes=args.notes,
+                max_concurrency=args.max_concurrency,
+                desired_half_width=args.desired_half_width,
+            )
+        ),
+    )
+    result = write_variance_report(
+        settings=settings,
+        domain=domain,
+        subset=subset_name,
+        repeat=args.repeat,
+        report=report,  # type: ignore[arg-type]
+    )
+    variance_report = result["report"]  # type: ignore[index]
+    lines = [
+        "SupportGraph Eval Variance",
+        f"Domain: {domain}",
+        f"Subset: {subset_name}",
+        f"Examples: {len(examples)}",
+        f"Repeat (K): {args.repeat}",
+        f"Retrieval Deterministic: {variance_report.retrieval_deterministic}",  # type: ignore[attr-defined]
+        f"Recommended K: {variance_report.recommended_k}",  # type: ignore[attr-defined]
+        f"Report: {relative_path(result['artifact_paths']['report'], settings.paths.project_root)}",  # type: ignore[index]
+    ]
+    if not variance_report.retrieval_deterministic:  # type: ignore[attr-defined]
+        lines.append(
+            "WARNING: retrieval was non-deterministic; attribution is invalid."
+        )
+    print_lines(lines)
+    return 0 if variance_report.retrieval_deterministic else 1  # type: ignore[attr-defined]
+
+
+def _model_ab_compatibility(args: argparse.Namespace) -> int:
+    """CLI handler for the 'model-ab-compatibility' command."""
+    settings = _load_settings(args)
+    try:
+        settings.runtime.validate_for_run()
+    except ConfigValidationError as exc:
+        return _print_config_validation_error(
+            title="SupportGraph Model A/B Compatibility",
+            settings=settings,
+            error=exc,
+        )
+    domain = settings.selected_domain(args.domain)
+    postgres_dsn = settings.runtime.postgres_dsn
+    if postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for compatibility gate.")
+    if not _ensure_index_ready(
+        title="SupportGraph Model A/B Compatibility",
+        postgres_dsn=postgres_dsn,
+        collection_name=settings.collection_name(domain),
+        domain=domain,
+    ):
+        return 1
+
+    examples, _ = load_eval_examples(settings, domain, args.split, args.subset)
+    if not examples:
+        print_lines(
+            [
+                "SupportGraph Model A/B Compatibility",
+                "State: empty-subset",
+                "No examples found for subset.",
+                f"Subset: {args.subset}",
+            ]
+        )
+        return 1
+    base_config = build_eval_config(settings, domain)
+    logger.info(
+        "Running compatibility gate domain=%s candidate_chat_model=%s limit=%s",
+        domain,
+        args.candidate_chat_model,
+        args.limit,
+    )
+    gate = cast(
+        object,
+        run_async_boundary(
+            run_compatibility_gate_async(
+                settings=settings,
+                domain=domain,
+                split=args.split,
+                examples=examples,
+                candidate_chat_model=args.candidate_chat_model,
+                base_config=base_config,
+                limit=args.limit,
+                max_concurrency=args.max_concurrency,
+                fallback_tolerance=args.fallback_tolerance,
+            )
+        ),
+    )
+    lines = [
+        "SupportGraph Model A/B Compatibility",
+        f"Domain: {domain}",
+        f"Candidate Chat Model: {gate.chat_model}",  # type: ignore[attr-defined]
+        f"Passed: {gate.passed}",  # type: ignore[attr-defined]
+        f"Total Fallbacks: {gate.total_fallbacks}",  # type: ignore[attr-defined]
+        f"Runtime Errors: {gate.runtime_error_count}",  # type: ignore[attr-defined]
+        f"Fallback Nodes: {', '.join(gate.fallback_nodes) or 'none'}",  # type: ignore[attr-defined]
+        f"Gate Run: {gate.run_id}",  # type: ignore[attr-defined]
+        gate.reason,  # type: ignore[attr-defined]
+    ]
+    if not gate.passed:  # type: ignore[attr-defined]
+        lines.extend(
+            [
+                "Next",
+                (
+                    "Do not A/B until json_schema structured output works. "
+                    "Consider a tool_calling/json_object fallback method."
+                ),
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Next",
+                (
+                    "Run eval-variance per arm with --config-file overrides setting "
+                    "runtime.chat_model for each arm; compare quality, variance, "
+                    "latency, and cost."
+                ),
+            ]
+        )
+    print_lines(lines)
+    return 0 if gate.passed else 1  # type: ignore[attr-defined]
+
+
 def build_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         CliHandlers(
@@ -863,6 +1252,11 @@ def build_parser() -> argparse.ArgumentParser:
             review_failures=_review_failures,
             trace_show=_trace_show,
             serve_ui=_serve_ui,
+            draft_eval_examples=_draft_eval_examples,
+            validate_eval_examples=_validate_eval_examples,
+            promote_eval_examples=_promote_eval_examples,
+            eval_variance=_eval_variance,
+            model_ab_compatibility=_model_ab_compatibility,
         )
     )
 

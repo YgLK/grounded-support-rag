@@ -88,6 +88,14 @@ class RuntimeConfig:
     experiment_variant: str | None = None
     experiment_options: dict[str, Any] = field(default_factory=dict)
     embedding_client: Any | None = None
+    # Determinism-diagnostic knobs. Defaults preserve today's behavior
+    # (temperature 0, no seed, OpenRouter floating routing). These exist to
+    # run a diagnostic determinism sweep, not as something the product relies
+    # on for correctness.
+    chat_temperature: float = 0.0
+    chat_seed: int | None = None
+    openrouter_provider_order: tuple[str, ...] | None = None
+    openrouter_allow_fallbacks: bool | None = None
 
     def validate_for_index(self) -> None:
         self._validate(scope="index", needs_chat_model=False)

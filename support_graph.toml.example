@@ -47,6 +47,14 @@ llm_max_retries = 3
 llm_retry_base_delay_seconds = 0.5
 llm_retry_max_delay_seconds = 4.0
 
+# Determinism-diagnostic knobs. Defaults preserve today's behavior
+# (temperature 0, no seed, OpenRouter floating routing). Use only for the
+# diagnostic determinism sweep; the product relies on robustness, not a pinned RNG.
+# chat_temperature = 0.0
+# chat_seed = 12345
+# openrouter_provider_order = ["OpenAI"]
+# openrouter_allow_fallbacks = false
+
 [observability.langsmith]
 tracing_enabled = false
 project = "grounded-support-rag"

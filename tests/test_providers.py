@@ -12,7 +12,7 @@ def test_shared_enums_expose_supported_values_without_duplicate_constants() -> N
     assert Domain.values() == ("kubernetes",)
     assert DatasetSplit.value_set() == frozenset({"train", "validation", "test"})
     assert EvalSubset.value_set() == frozenset(
-        {"smoke", "frozen_experiment", "full_validation"}
+        {"smoke", "expanded", "frozen_experiment", "full_validation"}
     )
     assert providers.Provider.values() == ("ollama", "openrouter")
 

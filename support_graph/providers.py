@@ -43,6 +43,10 @@ class ProviderConfigLike(Protocol):
     chat_model: str | None
     embedding_model: str | None
     embedding_client: Any | None
+    chat_temperature: float
+    chat_seed: int | None
+    openrouter_provider_order: tuple[str, ...] | None
+    openrouter_allow_fallbacks: bool | None
 
 
 def normalize_provider_type(value: str | Provider | None) -> Provider:
@@ -98,26 +102,56 @@ def _without_none(kwargs: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in kwargs.items() if value is not None}
 
 
+def _openrouter_routing_extra_body(
+    config: ProviderConfigLike,
+) -> dict[str, Any] | None:
+    """Build the OpenRouter provider-routing extra body, or None if unset.
+
+    OpenRouter accepts ``provider.order`` (a list of provider names to try in
+    order) and ``provider.allow_fallback`` (bool) in the request body. We pass
+    them through langchain-openai's ``extra_body`` so a run can pin a single
+    provider instead of using the ``:nitro`` load-balancer.
+    """
+    provider_body: dict[str, Any] = {}
+    order = getattr(config, "openrouter_provider_order", None)
+    if order:
+        provider_body["order"] = list(order)
+    allow_fallbacks = getattr(config, "openrouter_allow_fallbacks", None)
+    if allow_fallbacks is not None:
+        provider_body["allow_fallback"] = bool(allow_fallbacks)
+    if not provider_body:
+        return None
+    return {"provider": provider_body}
+
+
 def _chat_provider_kwargs(
     config: ProviderConfigLike,
     provider: Provider,
 ) -> dict[str, Any]:
+    temperature = float(getattr(config, "chat_temperature", 0.0))
+    seed = getattr(config, "chat_seed", None)
     match provider:
         case Provider.OLLAMA:
             return _without_none(
                 {
-                    "temperature": 0,
+                    "temperature": temperature,
                     "base_url": config.ollama_base_url,
+                    "seed": seed,
                 }
             )
         case Provider.OPENROUTER:
-            return _without_none(
+            kwargs: dict[str, Any] = _without_none(
                 {
-                    "temperature": 0,
+                    "temperature": temperature,
                     "api_key": config.openrouter_api_key,
                     "base_url": config.openrouter_base_url,
+                    "seed": seed,
                 }
             )
+            extra_body = _openrouter_routing_extra_body(config)
+            if extra_body is not None:
+                kwargs["extra_body"] = extra_body
+            return kwargs
 
 
 def _embedding_provider_kwargs(

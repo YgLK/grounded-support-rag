@@ -110,6 +110,11 @@ class RuntimeFileConfig(_FrozenModel):
     llm_max_retries: int = 3
     llm_retry_base_delay_seconds: float = 0.5
     llm_retry_max_delay_seconds: float = 4.0
+    # Determinism-diagnostic knobs (defaults preserve today's behavior).
+    chat_temperature: float = 0.0
+    chat_seed: int | None = None
+    openrouter_provider_order: list[str] | None = None
+    openrouter_allow_fallbacks: bool | None = None
 
 
 class LangSmithFileConfig(_FrozenModel):
@@ -189,6 +194,9 @@ class Settings:
         )
         selected_domain = enabled_domains[0]
         runtime_kwargs = file_config.runtime.model_dump(mode="python")
+        provider_order = runtime_kwargs.get("openrouter_provider_order")
+        if provider_order:
+            runtime_kwargs["openrouter_provider_order"] = tuple(provider_order)
 
         return cls(
             dataset=DatasetSettings(
