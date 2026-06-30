@@ -35,6 +35,7 @@ class CliHandlers:
     promote_eval_examples: CommandHandler
     eval_variance: CommandHandler
     model_ab_compatibility: CommandHandler
+    doctor: CommandHandler
 
 
 def _add_global_options(parser: argparse.ArgumentParser) -> None:
@@ -533,6 +534,32 @@ def _register_model_ab_compatibility(
     parser.set_defaults(func=handlers.model_ab_compatibility)
 
 
+def _register_doctor(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    """Register the 'doctor' command.
+
+    A local demo preflight: checks runtime config, local chunk/corpus
+    artifacts, pgvector index availability, and optional eval artifact
+    completeness. Does not run evals, call LLMs, fetch docs, or mutate
+    artifacts. Prints exact next commands.
+    """
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Local demo preflight: check config, files, index, eval artifacts.",
+    )
+    doctor_parser.add_argument(
+        "--domain",
+        default=None,
+        choices=DOMAIN_CHOICES,
+        help="Domain to check. Defaults to the configured MVP domain.",
+    )
+    doctor_parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional eval run-id whose artifact completeness should be verified.",
+    )
+    doctor_parser.set_defaults(func=handlers.doctor)
+
+
 def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
     command_registrars: tuple[Callable[[Subparsers, CliHandlers], None], ...] = (
         _register_fetch_kubernetes_docs,
@@ -551,6 +578,7 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
         _register_promote_eval_examples,
         _register_eval_variance,
         _register_model_ab_compatibility,
+        _register_doctor,
     )
     for register_command in command_registrars:
         register_command(subparsers, handlers)

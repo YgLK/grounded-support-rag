@@ -86,6 +86,7 @@ Fast path with the committed DB dump (skips corpus fetch + indexing):
 ```bash
 docker compose up -d postgres
 cat support_graph.pg.dump | docker compose exec -T postgres pg_restore -U postgres -d support_graph --clean --if-exists
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml doctor --domain kubernetes
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
 ```

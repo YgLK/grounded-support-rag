@@ -1238,6 +1238,137 @@ def _model_ab_compatibility(args: argparse.Namespace) -> int:
     return 0 if gate.passed else 1  # type: ignore[attr-defined]
 
 
+def _global_cli_opts(args: argparse.Namespace) -> str:
+    """Build the global --config-file/--secrets-file prefix to reuse in
+    suggested commands, preserving the same setup the user invoked doctor with.
+    """
+    parts: list[str] = []
+    config_file = getattr(args, "config_file", None)
+    secrets_file = getattr(args, "secrets_file", None)
+    if config_file:
+        parts.append(f"--config-file {config_file}")
+    if secrets_file:
+        parts.append(f"--secrets-file {secrets_file}")
+    return " ".join(parts)
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    """CLI handler for the 'doctor' command.
+
+    A local demo preflight. Does not run evals, call LLMs, fetch docs, or
+    mutate artifacts. Checks runtime config, local chunk/corpus artifacts,
+    pgvector index availability, and optional eval artifact completeness,
+    then prints exact next commands.
+    """
+    settings = _load_settings(args)
+    domain = settings.selected_domain(args.domain)
+    title = "SupportGraph Doctor"
+
+    # Preserve the global config/secrets options the user passed so the
+    # suggested remediation commands target the same setup doctor inspected
+    # (config file, dataset root, providers, secrets) instead of falling back
+    # to the default support_graph.toml.
+    global_opts = _global_cli_opts(args)
+
+    config_status = "ok"
+    config_missing: list[str] = []
+    try:
+        settings.runtime.validate_for_run()
+    except ConfigValidationError as exc:
+        config_status = "missing"
+        config_missing = list(exc.missing_fields)
+
+    run_config = _run_config(settings, domain)
+    postgres_dsn = run_config.postgres_dsn
+    collection_name = run_config.collection_name
+
+    index_status = "skipped"
+    index_error: str | None = None
+    if config_status == "ok":
+        if postgres_dsn is None:
+            index_status = "unavailable"
+            index_error = "Missing postgres_dsn for doctor."
+        else:
+            row_count, row_count_error = _checked_collection_row_count(
+                postgres_dsn,
+                collection_name,
+            )
+            if row_count is None:
+                index_status = "unavailable"
+                index_error = row_count_error or "Unknown pgvector inspection error."
+            elif row_count == 0:
+                index_status = "missing"
+            else:
+                index_status = "ok"
+
+    chunk_path = settings.chunk_artifact_path(domain)
+    chunks_status = "present" if chunk_path.exists() else "missing"
+    corpus_path = settings.dataset.root
+    corpus_status = "present" if corpus_path.exists() else "missing"
+
+    eval_artifacts_status = "not-checked"
+    eval_artifacts_ok = True
+    if args.run_id is not None:
+        output_dir = run_output_dir(settings, args.run_id)
+        if not output_dir.exists() or not eval_run_is_complete(output_dir):
+            eval_artifacts_status = "missing"
+            eval_artifacts_ok = False
+        else:
+            eval_artifacts_status = "ok"
+
+    ready = config_status == "ok" and index_status == "ok" and eval_artifacts_ok
+    state = "ready" if ready else "needs-action"
+
+    lines = [
+        title,
+        f"Domain: {domain}",
+        f"Config: {config_status}",
+        f"Index: {index_status}",
+        f"Chunks: {chunks_status}",
+        f"Corpus: {corpus_status}",
+        f"Eval Artifacts: {eval_artifacts_status}",
+        f"State: {state}",
+    ]
+
+    next_lines: list[str] = []
+    prefix = "uv run grounded-support-rag"
+    if global_opts:
+        prefix = f"{prefix} {global_opts}"
+    if config_status == "missing":
+        next_lines.append(
+            "Inspect "
+            f"{relative_path(settings.paths.config_path, settings.paths.project_root)} and copy "
+            f".env.example to {relative_path(settings.paths.secrets_path, settings.paths.project_root)} "
+            f"(missing: {', '.join(config_missing)})."
+        )
+    if index_status == "unavailable":
+        next_lines.append(
+            f"Verify Postgres is reachable for collection {collection_name}"
+            + (f": {index_error}" if index_error else "")
+            + "."
+        )
+    if index_status == "missing":
+        next_lines.append(f"Run: {prefix} index-docs --domain {domain}")
+    if chunks_status == "missing":
+        next_lines.append(f"Run: {prefix} build-chunks --domain {domain}")
+    if corpus_status == "missing":
+        next_lines.append(f"Run: {prefix} fetch-kubernetes-docs --ref main")
+    if eval_artifacts_status == "missing":
+        next_lines.append(
+            f"Run: {prefix} eval --domain {domain} --subset smoke "
+            f"to regenerate eval artifacts for {args.run_id}."
+        )
+    if ready:
+        next_lines.append(f"Run: {prefix} eval --domain {domain} --subset smoke")
+
+    if next_lines:
+        lines.append("Next")
+        lines.extend(next_lines)
+
+    print_lines(lines)
+    return 0 if ready else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     return build_cli_parser(
         CliHandlers(
@@ -1257,6 +1388,7 @@ def build_parser() -> argparse.ArgumentParser:
             promote_eval_examples=_promote_eval_examples,
             eval_variance=_eval_variance,
             model_ab_compatibility=_model_ab_compatibility,
+            doctor=_doctor,
         )
     )
 

@@ -83,6 +83,14 @@ Checklist:
   uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
   ```
 
+- Run `doctor` before any live eval or UI demo to confirm config, local
+  artifacts, and the pgvector index are ready (no evals, LLM calls, or
+  mutations):
+
+  ```bash
+  uv run grounded-support-rag --config-file support_graph.kubernetes.toml doctor --domain kubernetes
+  ```
+
 Acceptance:
 
 - `docker compose ps postgres` shows Postgres healthy.
