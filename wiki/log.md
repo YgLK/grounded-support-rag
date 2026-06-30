@@ -22,3 +22,7 @@
 
 ## [2026-06-29] ingest | Kubernetes Smoke-10 Generation Variance
 - Updated: Kubernetes Baseline
+
+## [2026-06-30] ingest | Eval Expansion and Variance Attribution Tooling
+- Created: Eval Expansion and Variance Attribution Tooling
+- Updated: Knowledge Base Index
