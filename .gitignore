@@ -5,6 +5,9 @@ support_graph.toml
 .venv/
 __pycache__/
 *.pyc
+.DS_Store
+*.pg.dump
+todo/
 support_graph.egg-info/
 grounded_support_rag.egg-info/
 
