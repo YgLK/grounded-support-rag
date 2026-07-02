@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ from support_graph.evaluation.eval_examples import (
 )
 from support_graph.logging_utils import get_logger
 from support_graph.retrieval.retrieve import retrieve_chunks
-from support_graph.types import AnswerType
+from support_graph.types import AnswerType, NormalizedRetrievalHit
 
 __all__ = [
     "SeedTopic",
@@ -81,7 +81,9 @@ class SeedTopic:
         return cls(
             seed_id=str(payload["seed_id"]),
             question=str(payload["question"]),
-            answer_type=str(payload.get("answer_type") or "definition"),  # type: ignore[arg-type]
+            answer_type=cast(
+                AnswerType, str(payload.get("answer_type") or "definition")
+            ),
             domain=str(payload.get("domain") or "kubernetes"),
             expected_doc_id=payload.get("expected_doc_id"),
             notes=payload.get("notes"),
@@ -271,7 +273,7 @@ def _build_candidate(
 
 def _default_retriever(
     *, example: dict[str, Any], config: Any, top_k: int, candidate_k: int
-) -> list[dict[str, Any]]:
+) -> list[NormalizedRetrievalHit]:
     return retrieve_chunks(
         example=example,
         config=config,

@@ -9,11 +9,12 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from statistics import mean
-from typing import Any
+from typing import Any, cast
 
 from sacrebleu.metrics import BLEU
 
@@ -416,7 +417,7 @@ def forbidden_claims_hit(forbidden_claims: list[str], answer: str) -> float | No
     return hits / declared if declared else 0.0
 
 
-def has_rag_eval_fields(example: dict) -> bool:
+def has_rag_eval_fields(example: Mapping[str, Any]) -> bool:
     """True when an example declares any RAG-triad eval field."""
     return any(
         example.get(field)
@@ -459,12 +460,14 @@ class RAGTriadJudge:
         query: str,
         answer: str,
         context: str,
-        required_points: list[str],
+        required_points: list[RequiredPoint],
         forbidden_claims: list[str],
     ) -> dict | None:
         if not self.enabled:
             return None
         inner = self._inner
+        if inner is None:
+            return None
         faithfulness_result = await inner.faithfulness(context, answer)
         answer_relevance_result = await inner.answer_relevance(query, answer)
         context_relevance_result = await inner.context_relevance(query, context)
@@ -487,7 +490,9 @@ class RAGTriadJudge:
         }
 
 
-def _join_chunk_text(chunks: list[dict], *, limit: int = 1500) -> str:
+def _join_chunk_text(
+    chunks: Sequence[NormalizedRetrievalHit], *, limit: int = 1500
+) -> str:
     parts: list[str] = []
     total = 0
     for chunk in chunks:
@@ -545,7 +550,9 @@ def _retrieval_metric_available(retrieval_top_k: int | None, *, k: int) -> bool:
     return retrieval_top_k is None or int(retrieval_top_k) >= k
 
 
-def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
+def _failure_label(
+    example: Mapping[str, Any], prediction: dict, metrics: dict
+) -> str | None:
     target_mode = example.get("target_mode")
     decision = prediction.get("decision")
     if has_rag_eval_fields(example):
@@ -582,7 +589,9 @@ def _failure_label(example: dict, prediction: dict, metrics: dict) -> str | None
     raise ValueError(f"Unknown target_mode: {target_mode}")
 
 
-def _rag_failure_label(example: dict, prediction: dict, metrics: dict) -> str | None:
+def _rag_failure_label(
+    example: Mapping[str, Any], prediction: dict, metrics: dict
+) -> str | None:
     """Failure labels for RAG-triad examples.
 
     Splits the legacy ``unsupported_answer`` bucket into clearer labels:
@@ -644,7 +653,7 @@ def _load_or_build_examples(
     resolved_split = parse_dataset_split(split)
     path = settings.paths.examples_dir / f"{resolved_domain}_{resolved_split}.jsonl"
     if path.exists():
-        return load_subset_jsonl(path)
+        return cast(list[Example], load_subset_jsonl(path))
     raise FileNotFoundError(
         f"Full-validation examples artifact not found for {resolved_domain} {resolved_split}: {path}"
     )
@@ -678,7 +687,7 @@ def load_eval_examples(
         EvalSubset.FROZEN_EXPERIMENT,
     }:
         path = _eval_subset_path(settings, domain, resolved_subset)
-        return load_subset_jsonl(path), str(resolved_subset)
+        return cast(list[Example], load_subset_jsonl(path)), str(resolved_subset)
     examples = _load_or_build_examples(settings, domain, split)
     return examples, str(EvalSubset.FULL_VALIDATION)
 
@@ -708,20 +717,22 @@ def build_run_id(
     return "-".join(parts)
 
 
-def _prediction_retrieval_ranked_chunks(prediction: dict) -> list[dict]:
+def _prediction_retrieval_ranked_chunks(
+    prediction: dict,
+) -> list[NormalizedRetrievalHit]:
     if "retrieval_ranked_chunks" in prediction:
         return prediction["retrieval_ranked_chunks"]
     return prediction.get("retrieved_chunks", [])
 
 
-def _prediction_retrieved_chunks(prediction: dict) -> list[dict]:
+def _prediction_retrieved_chunks(prediction: dict) -> list[NormalizedRetrievalHit]:
     return prediction.get(
         "retrieved_chunks", _prediction_retrieval_ranked_chunks(prediction)
     )
 
 
 def _prediction_record(
-    example: dict,
+    example: Mapping[str, Any],
     prediction: dict,
     metrics: dict,
     *,
@@ -762,7 +773,7 @@ def _prediction_record(
 
 
 def _prediction_metrics(
-    example: dict,
+    example: Mapping[str, Any],
     prediction: dict,
     *,
     retrieval_top_k: int | None = None,
@@ -925,7 +936,7 @@ def _prediction_metrics(
     return metrics
 
 
-def _safe_mean(values: list[float | None]) -> float | None:
+def _safe_mean(values: Sequence[float | None]) -> float | None:
     present = [value for value in values if value is not None]
     if not present:
         return None
@@ -1283,7 +1294,7 @@ async def _maybe_await_result(value: Any) -> Any:
 
 
 def _runtime_error_record(
-    example: dict,
+    example: Mapping[str, Any],
     exc: Exception,
     *,
     trace_path: str,
@@ -1325,7 +1336,7 @@ def _runtime_error_record(
 
 
 async def evaluate_examples_async(
-    examples: list[dict],
+    examples: list[Example],
     *,
     settings: Any,
     domain: DomainLike,
@@ -1376,7 +1387,9 @@ async def evaluate_examples_async(
     progress_lock = asyncio.Lock()
     completed_count = 0
 
-    async def _log_prediction_progress(example: dict, record: dict) -> None:
+    async def _log_prediction_progress(
+        example: Mapping[str, Any], record: dict
+    ) -> None:
         nonlocal completed_count
         async with progress_lock:
             completed_count += 1
@@ -1392,11 +1405,11 @@ async def evaluate_examples_async(
 
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    def trace_path_for_example(example: dict) -> Path:
+    def trace_path_for_example(example: Mapping[str, Any]) -> Path:
         example_id = str(example["example_id"])
         return artifacts.trace_path(build_trace_file(example_id))
 
-    async def run_prediction(example: dict, *, trace_path: Path) -> dict:
+    async def run_prediction(example: Mapping[str, Any], *, trace_path: Path) -> dict:
         call_kwargs = {
             "example": example,
             "config": resolved_config,
@@ -1415,7 +1428,7 @@ async def evaluate_examples_async(
         )
         return {**prediction, "trace_summary": trace_summary}
 
-    async def evaluate_one(index: int, example: dict) -> tuple[int, dict]:
+    async def evaluate_one(index: int, example: Example) -> tuple[int, dict]:
         trace_path = trace_path_for_example(example)
         relative_trace_path = project_relative_path(
             trace_path, settings.paths.project_root

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -50,8 +51,8 @@ def _section_sort_key(section: dict) -> tuple:
 
 
 def _chunk_record(
-    document: dict[str, Any],
-    section: dict[str, Any],
+    document: Mapping[str, Any],
+    section: Mapping[str, Any],
     *,
     subchunk_index: int,
     text: str,
@@ -75,7 +76,7 @@ def _chunk_record(
     }
 
 
-def _group_sections(document: dict[str, Any]) -> list[dict[str, Any]]:
+def _group_sections(document: Mapping[str, Any]) -> list[dict[str, Any]]:
     section_map: dict[str, list[dict]] = defaultdict(list)
     heading_context_by_title: dict[str, list[str]] = {}
     for span in document["spans"]:
@@ -126,7 +127,7 @@ def _group_sections(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _emit_section_chunks(
-    document: dict[str, Any], section: dict[str, Any], max_tokens_per_chunk: int
+    document: Mapping[str, Any], section: dict[str, Any], max_tokens_per_chunk: int
 ) -> list[ChunkRecord]:
     spans = section["spans"]
     if not spans:
@@ -142,7 +143,7 @@ def _emit_section_chunks(
             )
         ]
 
-    chunks: list[dict] = []
+    chunks: list[ChunkRecord] = []
     current_spans: list[dict] = []
     current_token_count = 0
     subchunk_index = 0

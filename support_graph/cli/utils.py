@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import Awaitable
 from pathlib import Path
+from typing import Any, TypeVar, overload
 
 from support_graph.artifacts import EVAL_RUN_REQUIRED_FILES
 from support_graph.config.settings import Settings
@@ -74,7 +76,21 @@ def shorten(text: str, limit: int = 88) -> str:
     return f"{cleaned[: max(0, limit - 3)].rstrip()}..."
 
 
-def run_async_boundary(value: object) -> object:
+_T = TypeVar("_T")
+
+
+@overload
+def run_async_boundary(value: Awaitable[_T]) -> _T: ...
+@overload
+def run_async_boundary(value: _T) -> _T: ...
+
+
+def run_async_boundary(value: Any) -> Any:
+    """Run an awaitable to completion in a fresh event loop, or pass through.
+
+    Typed with overloads so callers keep their concrete return types after
+    wrapping either a coroutine (unwrapped to its result) or a plain value.
+    """
     if inspect.isawaitable(value):
         return asyncio.run(value)
     return value

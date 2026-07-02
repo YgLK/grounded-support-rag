@@ -17,7 +17,13 @@ from support_graph.evaluation.evaluate import (
     with_config_overrides,
 )
 from support_graph.runtime.graph import run_graph_async
-from support_graph.types import DatasetSplit, DatasetSplitLike, Domain, DomainLike
+from support_graph.types import (
+    DatasetSplit,
+    DatasetSplitLike,
+    Domain,
+    DomainLike,
+    Example,
+)
 
 
 VariantId = Literal[
@@ -174,7 +180,7 @@ def classify_variant(control: dict, candidate: dict) -> tuple[VariantStatus, str
 
 
 def _why_it_moved(candidate: dict, deltas: dict[str, float]) -> str:
-    variant_id = candidate["variant"]["id"]
+    variant_id: VariantId = candidate["variant"]["id"]
     positive = max(deltas.values(), default=0.0) > 0.0
 
     if variant_id == "control":
@@ -208,7 +214,7 @@ def _variant_manifest(variant: ExperimentVariant, *, scope: str) -> dict:
 async def _run_variant(
     *,
     settings: Any,
-    examples: list[dict],
+    examples: list[Example],
     domain: DomainLike,
     split: DatasetSplitLike,
     subset_name: str,
@@ -221,7 +227,7 @@ async def _run_variant(
     run_id_slug: str,
     subset_label: str,
     manifest_scope: str,
-) -> dict:
+) -> dict[str, Any]:
     config_overrides = dict(variant["config_overrides"])
     experiment = RuntimeExperimentOverrides(
         experiment_variant=experiment_variant,

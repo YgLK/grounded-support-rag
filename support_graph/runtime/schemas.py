@@ -72,19 +72,19 @@ class GraphStreamEvent(TypedDict, total=False):
     kind: GraphStreamEventKind
     node: str
     run_id: str
-    example_id: str
+    example_id: str | None
     query: str
     refined_query: str
-    query_context: dict
+    query_context: dict[str, Any]
     retrieval_attempts: int
     retrieval_ranked_chunks: list[dict]
     retrieved_chunks: list[dict]
     evidence_grade: dict
-    decision: Decision
-    response_text: str
+    decision: Decision | None
+    response_text: str | None
     delta: str
     citations: list[dict]
-    confidence_label: str
+    confidence_label: str | None
     trace_summary: dict
     fallback: FallbackTrace
     error: str
@@ -96,22 +96,22 @@ GraphEventSink = Callable[[GraphStreamEvent], Awaitable[None] | None]
 
 class GraphState(TypedDict, total=False):
     example: dict
-    example_id: str
+    example_id: str | None
     domain: str
     conversation: list[dict]
     latest_user_turn_id: int | None
     latest_user_utterance: str | None
-    query_context: dict
+    query_context: dict[str, Any]
     query: str
     refined_query: str
-    retrieval_ranked_chunks: list[dict]
-    retrieved_chunks: list[dict]
+    retrieval_ranked_chunks: list[dict[str, Any]]
+    retrieved_chunks: list[dict[str, Any]]
     retrieval_attempts: int
     evidence_grade: dict
-    decision: Decision
-    response_text: str
+    decision: Decision | None
+    response_text: str | None
     citations: list[dict]
-    confidence_label: str
+    confidence_label: str | None
     graph_path: list[str]
     final_query: str
     run_id: str
@@ -121,6 +121,7 @@ class GraphState(TypedDict, total=False):
     final_output: dict
     experiment_options: dict
     fallback_events: list[FallbackTrace]
+    total_latency_ms: float
 
 
 @dataclass(slots=True)

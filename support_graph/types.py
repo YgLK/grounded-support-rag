@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Iterable, Literal, Protocol, Self, TypeAlias, TypedDict
+from typing import (
+    Any,
+    Iterable,
+    Literal,
+    NotRequired,
+    Protocol,
+    Self,
+    TypeAlias,
+    TypedDict,
+)
 
 
 class ChoiceStrEnum(StrEnum):
@@ -186,6 +195,12 @@ class NormalizedRetrievalHit(TypedDict):
     text: str
     score: float | None
     vector_distance: float | None
+    # Optional fields populated by the retrieval pipeline and reranker.
+    retrieval_source: NotRequired[str]
+    text_overlap_count: NotRequired[int]
+    title_overlap_count: NotRequired[int]
+    path_overlap_count: NotRequired[int]
+    rerank_score: NotRequired[float]
 
 
 class Citation(TypedDict):

@@ -32,6 +32,7 @@ from support_graph.runtime.llm_policy import LLMCallTimeoutError, ainvoke_with_r
 from support_graph.runtime.observability import build_observability
 from support_graph.runtime.prompts import resolve_prompt_set
 from support_graph.runtime.schemas import (
+    Decision,
     EvidenceGradeModel,
     FallbackResponseModel,
     GraphState,
@@ -43,6 +44,10 @@ from support_graph.runtime.schemas import (
     attach_fallback_metadata,
 )
 from support_graph.runtime.traces import write_trace_event
+from support_graph.types import (
+    QueryContext,
+    RetrieverLike,
+)
 
 __all__ = [
     "_build_evidence_chunks",
@@ -101,7 +106,7 @@ def _response_started_event(
     state: GraphState,
     runtime: Runtime,
     node_name: str,
-    decision: str | None,
+    decision: Decision | None,
 ) -> GraphStreamEvent:
     return {
         "kind": "response_started",
@@ -172,16 +177,14 @@ async def _emit_buffered_response_preview(
         ),
     )
     for delta in _response_deltas(str(payload.get("response_text", ""))):
-        await _emit_graph_event(
-            runtime,
-            {
-                "kind": "response_delta",
-                "node": node_name,
-                "run_id": runtime.run_id,
-                "example_id": state.get("example_id"),
-                "delta": delta,
-            },
-        )
+        delta_event: GraphStreamEvent = {
+            "kind": "response_delta",
+            "node": node_name,
+            "run_id": runtime.run_id,
+            "example_id": state.get("example_id"),
+            "delta": delta,
+        }
+        await _emit_graph_event(runtime, delta_event)
 
 
 async def _emit_streaming_answer_preview(
@@ -405,7 +408,7 @@ def _heuristic_non_answer_response(state: GraphState) -> dict:
     raise ValueError(f"Unknown evidence verdict: {grade.get('verdict')}")
 
 
-def _query_example_from_state(state: GraphState) -> dict:
+def _query_example_from_state(state: GraphState) -> dict[str, Any]:
     return {
         "domain": state.get("domain"),
         "conversation": state.get("conversation", []),
@@ -414,7 +417,7 @@ def _query_example_from_state(state: GraphState) -> dict:
     }
 
 
-def _reasoning_chunks(state: GraphState) -> list[dict]:
+def _reasoning_chunks(state: GraphState) -> list[dict[str, Any]]:
     return list(state.get("retrieved_chunks", []))
 
 
@@ -462,7 +465,7 @@ def _content_only_chunks(chunks: list[dict]) -> list[dict]:
     return filtered or list(chunks)
 
 
-def _normalize_chunk_record(chunk: dict) -> dict:
+def _normalize_chunk_record(chunk: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "chunk_id": chunk.get("chunk_id"),
         "domain": chunk.get("domain"),
@@ -620,7 +623,9 @@ def _grounded_answer_from_chunk(chunk: dict) -> str:
     return f"{text}."
 
 
-def _normalize_citations(payload: dict, chunk_map: dict[str, dict]) -> list[dict]:
+def _normalize_citations(
+    payload: dict[str, Any], chunk_map: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     citations: list[dict] = []
     seen: set[str] = set()
 
@@ -653,8 +658,8 @@ def _normalize_citations(payload: dict, chunk_map: dict[str, dict]) -> list[dict
 
 
 def _build_evidence_chunks(
-    *, state: GraphState, runtime: Runtime, ranked_chunks: list[dict]
-) -> list[dict]:
+    *, state: GraphState, runtime: Runtime, ranked_chunks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     evidence_chunks = list(ranked_chunks)
     if _content_only_reasoning_enabled(state=state, runtime=runtime):
         evidence_chunks = _content_only_chunks(evidence_chunks)
@@ -692,7 +697,7 @@ async def route_query(*, state: GraphState, runtime: Runtime) -> dict:
         return {"intent": "document_query", "reason": f"Routing failed: {exc}"}
 
 
-def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
+def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict[str, Any]]:
     """Build the retrieval query string and context from conversation state.
 
     - Extracts contextual keywords from recent turns based on configured `query_mode`
@@ -701,7 +706,7 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
     """
     del runtime
     query_example = _query_example_from_state(state)
-    query_context = build_query_context(query_example)
+    query_context = cast(dict[str, Any], build_query_context(query_example))
     mode = _query_mode(state)
     match mode:
         case "legacy_transcript":
@@ -723,7 +728,7 @@ def prepare_query(*, state: GraphState, runtime: Runtime) -> tuple[str, dict]:
             ), query_context
 
 
-async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
+async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict[str, Any]]:
     """Execute vector and keyword search to find relevant documentation.
 
     - Dispatches to the underlying retrieval pipeline using the prepared query
@@ -734,11 +739,11 @@ async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
     query = state.get("refined_query") or state.get("query")
     if query is None:
         raise ValueError("Missing retrieval query.")
-    return await asyncio.to_thread(
+    hits = await asyncio.to_thread(
         retrieve_chunks,
         example=_query_example_from_state(state),
         vectorstore=runtime.vectorstore,
-        keyword_retriever=runtime.keyword_retriever,
+        keyword_retriever=cast(RetrieverLike | None, runtime.keyword_retriever),
         config=runtime.config,
         top_k=runtime.config.retrieval_top_k,
         candidate_k=int(
@@ -748,13 +753,14 @@ async def retrieve_docs(*, state: GraphState, runtime: Runtime) -> list[dict]:
             )
         ),
         query=query,
-        query_context=state.get("query_context"),
+        query_context=cast(QueryContext | None, state.get("query_context")),
         rerank=_experiment_bool(
             state,
             "retrieval_rerank",
             bool(runtime.config.retrieval_rerank),
         ),
     )
+    return cast(list[dict[str, Any]], hits)
 
 
 async def grade_evidence(*, state: GraphState, runtime: Runtime) -> dict:
@@ -966,7 +972,7 @@ async def resolve_without_answer(*, state: GraphState, runtime: Runtime) -> dict
         return payload
 
 
-def finalize(*, state: GraphState, payload: dict) -> dict:
+def finalize(*, state: GraphState, payload: dict[str, Any]) -> dict[str, Any]:
     """Enforce strict post-generation constraints on the final response.
 
     - Normalizes citation IDs and ensures they map to actual retrieved chunks
@@ -978,10 +984,10 @@ def finalize(*, state: GraphState, payload: dict) -> dict:
         "response_text": str(payload.get("response_text", "")).strip(),
     }
     best_chunk = _best_chunk_for_answer(state)
-    chunk_map = {
-        chunk.get("chunk_id"): chunk
+    chunk_map: dict[str, dict[str, Any]] = {
+        str(chunk_id): chunk
         for chunk in state.get("retrieved_chunks", [])
-        if chunk.get("chunk_id")
+        if (chunk_id := chunk.get("chunk_id"))
     }
     citations = _normalize_citations(payload, chunk_map)
     verdict = state.get("evidence_grade", {}).get("verdict")

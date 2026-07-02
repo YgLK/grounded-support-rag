@@ -101,7 +101,7 @@ def format_eval_output(result: dict, settings: Settings) -> list[str]:
     retrieval = result.get("metrics", {}).get("retrieval", {}).get("answer", {})
     generation = result.get("metrics", {}).get("generation", {}).get("answer", {})
     failure_counts = result.get("failure_counts", {})
-    output_dir = Path(result.get("output_dir"))
+    output_dir = Path(str(result.get("output_dir")))
     retrieval_top_k = result.get("retrieval_top_k", settings.runtime.retrieval_top_k)
 
     headline_metrics = {

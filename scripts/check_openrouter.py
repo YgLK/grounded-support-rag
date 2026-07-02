@@ -38,6 +38,10 @@ class ProviderCheckConfig:
     chat_model: str | None
     embedding_model: str | None
     embedding_client: Any | None = None
+    chat_temperature: float = 0.0
+    chat_seed: int | None = None
+    openrouter_provider_order: tuple[str, ...] | None = None
+    openrouter_allow_fallbacks: bool | None = None
 
 
 def _extract_text(response: Any) -> str:

@@ -30,7 +30,7 @@ from typing import Any, Callable
 from support_graph.artifacts import eval_report_artifacts
 from support_graph.evaluation.evaluate import evaluate_examples_async
 from support_graph.logging_utils import get_logger
-from support_graph.types import DatasetSplitLike, DomainLike
+from support_graph.types import DatasetSplitLike, DomainLike, Example
 
 __all__ = [
     "bootstrap_mean_ci",
@@ -294,7 +294,7 @@ async def run_variance_study_async(
     domain: DomainLike,
     split: DatasetSplitLike,
     subset: str,
-    examples: list[dict[str, Any]],
+    examples: list[Example],
     config: Any,
     repeat: int,
     notes: str | None = None,

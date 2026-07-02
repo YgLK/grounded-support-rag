@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from support_graph.types import Document
+from support_graph.types import Document, DocumentSpan
 
 KUBERNETES_WEBSITE_REPO = "https://github.com/kubernetes/website.git"
 KUBERNETES_DOCS_SUBPATH = Path("content/en/docs")
@@ -147,8 +147,8 @@ def _section_records(
     body: str,
     doc_id: str,
     fallback_title: str,
-) -> list[dict[str, Any]]:
-    sections: list[dict[str, Any]] = []
+) -> list[DocumentSpan]:
+    sections: list[DocumentSpan] = []
     current_title = fallback_title
     current_slug = "overview"
     current_lines: list[str] = []

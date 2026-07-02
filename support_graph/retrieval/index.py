@@ -37,12 +37,25 @@ class VectorStoreWithAddDocuments(Protocol):
 
 
 class IndexConfigLike(ProviderConfigLike, Protocol):
-    postgres_dsn: str | None
-    embedding_model: str | None
-    embedding_client: Any | None
-    domain: str
-    collection_name: str
-    chunk_artifact_path: Path | None
+    """Read-only protocol for index-building config objects."""
+
+    @property
+    def postgres_dsn(self) -> str | None: ...
+
+    @property
+    def embedding_model(self) -> str | None: ...
+
+    @property
+    def embedding_client(self) -> Any | None: ...
+
+    @property
+    def domain(self) -> str: ...
+
+    @property
+    def collection_name(self) -> str: ...
+
+    @property
+    def chunk_artifact_path(self) -> Path | None: ...
 
 
 def build_collection_name(domain: DomainLike) -> str:
@@ -177,13 +190,14 @@ def collection_row_count(connection: str, collection_name: str) -> int:
     ) as conn:
         with conn.cursor() as cur:
             cur.execute(query, (collection_name,))
-            return int(cur.fetchone()[0])
+            row = cur.fetchone()
+            return int(row[0]) if row is not None else 0
 
 
 def index_documents(
     config: IndexConfigLike,
     *,
-    chunk_records: list[dict] | None = None,
+    chunk_records: list[ChunkRecord] | None = None,
     vectorstore_cls: type[PGVector] | None = None,
     document_cls: type[Document] | None = None,
     embeddings: Any = None,
@@ -211,7 +225,7 @@ def index_documents(
     vector_ids = [build_vector_id(collection_name, chunk_id) for chunk_id in ids]
     resolved_vectorstore_cls = vectorstore_cls or PGVector
     connection = normalize_postgres_connection(config.postgres_dsn)
-    vectorstore_kwargs = {
+    vectorstore_kwargs: dict[str, Any] = {
         "connection": connection,
         "collection_name": collection_name,
         "use_jsonb": True,

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 from langchain_community.retrievers import BM25Retriever
 from langchain_postgres import PGVector
@@ -17,6 +18,7 @@ from support_graph.retrieval.index import (
     validate_index_config,
 )
 from support_graph.types import (
+    ChunkRecord,
     Example,
     NormalizedRetrievalHit,
     QueryContext,
@@ -40,7 +42,7 @@ __all__ = [
 QUERY_TOKEN_STOPWORDS = frozenset(get_stop_words("en"))
 
 
-def _conversation_from_example(example: dict[str, Any]) -> list[dict[str, Any]]:
+def _conversation_from_example(example: Mapping[str, Any]) -> list[dict[str, Any]]:
     if example.get("conversation"):
         return list(example.get("conversation", []))
     if example.get("turns_before_target"):
@@ -49,7 +51,7 @@ def _conversation_from_example(example: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _latest_user_utterance(
-    example: dict[str, Any], conversation: list[dict[str, Any]]
+    example: Mapping[str, Any], conversation: list[dict[str, Any]]
 ) -> str:
     latest = example.get("latest_user_utterance")
     if latest:
@@ -60,7 +62,7 @@ def _latest_user_utterance(
     return ""
 
 
-def _domain_from_example(example: dict[str, Any]) -> str:
+def _domain_from_example(example: Mapping[str, Any]) -> str:
     return str(example.get("domain") or "").strip()
 
 
@@ -81,7 +83,9 @@ def _normalized_text(text: str) -> str:
     return " ".join(_normalize_tokens(text))
 
 
-def _find_latest_user_index(example: dict, conversation: list[dict]) -> int | None:
+def _find_latest_user_index(
+    example: Mapping[str, Any], conversation: list[dict[str, Any]]
+) -> int | None:
     latest_turn_id = example.get("latest_user_turn_id")
     if latest_turn_id is not None:
         for index in range(len(conversation) - 1, -1, -1):
@@ -229,8 +233,9 @@ def build_query(
     del history_turn_limit
     context = build_query_context(example)
     if not include_history:
-        context = {
-            **context,
+        context: QueryContext = {
+            "domain": context["domain"],
+            "latest_user_need": context["latest_user_need"],
             "last_agent_question": "",
             "carry_forward_context": [],
         }
@@ -267,7 +272,9 @@ def build_legacy_query(
     return "\n".join(parts).strip()
 
 
-def query_context_tokens(context: QueryContext) -> set[str]:
+def query_context_tokens(context: QueryContext | None) -> set[str]:
+    if context is None:
+        return set()
     values: list[str] = []
     if context["domain"]:
         values.append(context["domain"])
@@ -403,10 +410,12 @@ def rerank_retrieval_hits(
     Returns:
         Hits sorted by `rerank_score` with updated `rank` attributes.
     """
-    reranked = [dict(hit) for hit in hits]
-    query_tokens = query_context_tokens(query_context or {})
+    reranked: list[NormalizedRetrievalHit] = [
+        cast(NormalizedRetrievalHit, dict(hit)) for hit in hits
+    ]
+    query_tokens = query_context_tokens(query_context)
 
-    def sort_key(hit: dict) -> tuple[float, int]:
+    def sort_key(hit: NormalizedRetrievalHit) -> tuple[float, int]:
         score = hit.get("vector_distance", hit.get("score"))
         base_score = (
             float(score)
@@ -455,6 +464,8 @@ def get_vectorstore(
     create_extension: bool = True,
 ) -> Any:
     validate_index_config(config)
+    if config.postgres_dsn is None:
+        raise ValueError("Missing postgres_dsn for vectorstore.")
     embedding_client = (
         embeddings if embeddings is not None else build_embeddings(config)
     )
@@ -470,7 +481,7 @@ def get_vectorstore(
 
 def build_keyword_retriever(
     config: RuntimeConfig,
-    chunk_records: list[dict] | None = None,
+    chunk_records: Sequence[ChunkRecord] | None = None,
 ) -> BM25Retriever | None:
     if not chunk_records:
         return None
@@ -491,7 +502,7 @@ def build_keyword_retriever(
 
 def _normalized_bm25_hits(
     *,
-    retriever: BM25Retriever | None,
+    retriever: RetrieverLike | None,
     query: str,
     domain: str,
     doc_ids: list[str] | str | None,
@@ -591,9 +602,9 @@ def retrieve_chunks(
     )
     if bm25_hits:
         dense_scores = [
-            float(hit["vector_distance"])
+            float(distance)
             for hit in normalized_hits
-            if hit.get("vector_distance") is not None
+            if (distance := hit.get("vector_distance")) is not None
         ]
         keyword_base_score = min(dense_scores) if dense_scores else 0.0
         seen_chunk_ids = {hit["chunk_id"] for hit in normalized_hits}

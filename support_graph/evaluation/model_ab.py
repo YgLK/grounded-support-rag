@@ -22,7 +22,7 @@ from typing import Any
 
 from support_graph.evaluation.evaluate import evaluate_examples_async
 from support_graph.logging_utils import get_logger
-from support_graph.types import DatasetSplitLike, DomainLike
+from support_graph.types import DatasetSplitLike, DomainLike, Example
 
 __all__ = [
     "CompatibilityGateResult",
@@ -81,7 +81,7 @@ async def run_compatibility_gate_async(
     settings: Any,
     domain: DomainLike,
     split: DatasetSplitLike,
-    examples: list[dict[str, Any]],
+    examples: list[Example],
     candidate_chat_model: str,
     base_config: Any,
     limit: int = 3,

@@ -35,18 +35,47 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 class ProviderConfigLike(Protocol):
-    chat_provider_type: Provider | None
-    embedding_provider_type: Provider | None
-    ollama_base_url: str | None
-    openrouter_base_url: str | None
-    openrouter_api_key: str | None
-    chat_model: str | None
-    embedding_model: str | None
-    embedding_client: Any | None
-    chat_temperature: float
-    chat_seed: int | None
-    openrouter_provider_order: tuple[str, ...] | None
-    openrouter_allow_fallbacks: bool | None
+    """Read-only protocol for provider-backed config objects.
+
+    Attributes are declared as ``@property`` so frozen dataclasses (such as
+    ``RuntimeConfig``) satisfy the protocol without exposing mutable setters.
+    """
+
+    @property
+    def chat_provider_type(self) -> Provider | None: ...
+
+    @property
+    def embedding_provider_type(self) -> Provider | None: ...
+
+    @property
+    def ollama_base_url(self) -> str | None: ...
+
+    @property
+    def openrouter_base_url(self) -> str | None: ...
+
+    @property
+    def openrouter_api_key(self) -> str | None: ...
+
+    @property
+    def chat_model(self) -> str | None: ...
+
+    @property
+    def embedding_model(self) -> str | None: ...
+
+    @property
+    def embedding_client(self) -> Any | None: ...
+
+    @property
+    def chat_temperature(self) -> float: ...
+
+    @property
+    def chat_seed(self) -> int | None: ...
+
+    @property
+    def openrouter_provider_order(self) -> tuple[str, ...] | None: ...
+
+    @property
+    def openrouter_allow_fallbacks(self) -> bool | None: ...
 
 
 def normalize_provider_type(value: str | Provider | None) -> Provider:

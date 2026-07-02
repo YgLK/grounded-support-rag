@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
 from support_graph.retrieval.index import load_chunk_records
+from support_graph.types import ChunkRecord
 
 
 class EmbeddingsClient(Protocol):
     def embed_documents(self, texts: list[str]) -> object: ...
 
 
-def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> list[dict]:
+def select_benchmark_records(
+    chunk_records: list[ChunkRecord], sample_size: int
+) -> list[ChunkRecord]:
     if sample_size <= 0:
         raise ValueError("sample_size must be positive.")
     if sample_size >= len(chunk_records):
@@ -37,19 +40,19 @@ def select_benchmark_records(chunk_records: list[dict], sample_size: int) -> lis
     return [chunk_records[index] for index in indices[:sample_size]]
 
 
-def chunk_records_to_texts(chunk_records: list[dict]) -> list[str]:
+def chunk_records_to_texts(chunk_records: list[ChunkRecord]) -> list[str]:
     return [str(chunk_record["text"]) for chunk_record in chunk_records]
 
 
 def benchmark_embeddings(
     *,
     embedding_model: str | None,
-    chunk_records: list[dict],
+    chunk_records: list[ChunkRecord],
     embeddings: EmbeddingsClient,
     sample_size: int = 100,
     batch_size: int = 1,
     warmup: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive.")
 
@@ -87,5 +90,5 @@ def benchmark_embeddings(
     }
 
 
-def load_benchmark_chunk_records(path: str) -> list[dict]:
+def load_benchmark_chunk_records(path: str) -> list[ChunkRecord]:
     return load_chunk_records(path)

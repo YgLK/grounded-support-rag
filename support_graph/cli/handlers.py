@@ -73,11 +73,13 @@ from support_graph.providers import (
     embedding_provider as resolved_embedding_provider,
 )
 from support_graph.retrieval.index import (
+    build_embeddings,
     collection_row_count,
     index_documents,
     load_chunk_records,
 )
 from support_graph.runtime.graph import run_graph_async
+from support_graph.runtime.schemas import GraphStreamEvent
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 from support_graph.types import DomainLike
 
@@ -312,7 +314,7 @@ def load_example_record(
     raise FileNotFoundError(f"Example not found: {example_id}")
 
 
-def _log_graph_event(event: dict) -> None:
+def _log_graph_event(event: GraphStreamEvent) -> None:
     """Log a graph execution event to the console with structured formatting."""
     kind = str(event.get("kind") or "")
     run_id = str(event.get("run_id") or "unknown-run")
@@ -542,6 +544,7 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
     )
     chunk_records = load_benchmark_chunk_records(str(chunk_artifact_path))
     config = settings.runtime_for(domain)
+    embeddings = build_embeddings(config)
     logger.info(
         "Benchmarking embeddings for domain=%s sample_size=%s batch_size=%s",
         domain,
@@ -552,8 +555,9 @@ def _benchmark_embeddings(args: argparse.Namespace) -> int:
         dict,
         run_async_boundary(
             benchmark_embeddings(
-                config,
+                embedding_model=config.embedding_model,
                 chunk_records=chunk_records,
+                embeddings=embeddings,
                 sample_size=args.sample_size,
                 batch_size=args.batch_size,
                 warmup=not args.skip_warmup,
@@ -1102,47 +1106,44 @@ def _eval_variance(args: argparse.Namespace) -> int:
         len(examples),
         args.repeat,
     )
-    report = cast(
-        object,
-        run_async_boundary(
-            run_variance_study_async(
-                settings=settings,
-                domain=domain,
-                split=args.split,
-                subset=subset_name,
-                examples=examples,
-                config=config,
-                repeat=args.repeat,
-                notes=args.notes,
-                max_concurrency=args.max_concurrency,
-                desired_half_width=args.desired_half_width,
-            )
-        ),
+    report = run_async_boundary(
+        run_variance_study_async(
+            settings=settings,
+            domain=domain,
+            split=args.split,
+            subset=subset_name,
+            examples=examples,
+            config=config,
+            repeat=args.repeat,
+            notes=args.notes,
+            max_concurrency=args.max_concurrency,
+            desired_half_width=args.desired_half_width,
+        )
     )
     result = write_variance_report(
         settings=settings,
         domain=domain,
         subset=subset_name,
         repeat=args.repeat,
-        report=report,  # type: ignore[arg-type]
+        report=report,
     )
-    variance_report = result["report"]  # type: ignore[index]
+    variance_report = result["report"]
     lines = [
         "SupportGraph Eval Variance",
         f"Domain: {domain}",
         f"Subset: {subset_name}",
         f"Examples: {len(examples)}",
         f"Repeat (K): {args.repeat}",
-        f"Retrieval Deterministic: {variance_report.retrieval_deterministic}",  # type: ignore[attr-defined]
-        f"Recommended K: {variance_report.recommended_k}",  # type: ignore[attr-defined]
-        f"Report: {relative_path(result['artifact_paths']['report'], settings.paths.project_root)}",  # type: ignore[index]
+        f"Retrieval Deterministic: {variance_report.retrieval_deterministic}",
+        f"Recommended K: {variance_report.recommended_k}",
+        f"Report: {relative_path(result['artifact_paths']['report'], settings.paths.project_root)}",
     ]
-    if not variance_report.retrieval_deterministic:  # type: ignore[attr-defined]
+    if not variance_report.retrieval_deterministic:
         lines.append(
             "WARNING: retrieval was non-deterministic; attribution is invalid."
         )
     print_lines(lines)
-    return 0 if variance_report.retrieval_deterministic else 1  # type: ignore[attr-defined]
+    return 0 if variance_report.retrieval_deterministic else 1
 
 
 def _model_ab_compatibility(args: argparse.Namespace) -> int:
@@ -1186,34 +1187,31 @@ def _model_ab_compatibility(args: argparse.Namespace) -> int:
         args.candidate_chat_model,
         args.limit,
     )
-    gate = cast(
-        object,
-        run_async_boundary(
-            run_compatibility_gate_async(
-                settings=settings,
-                domain=domain,
-                split=args.split,
-                examples=examples,
-                candidate_chat_model=args.candidate_chat_model,
-                base_config=base_config,
-                limit=args.limit,
-                max_concurrency=args.max_concurrency,
-                fallback_tolerance=args.fallback_tolerance,
-            )
-        ),
+    gate = run_async_boundary(
+        run_compatibility_gate_async(
+            settings=settings,
+            domain=domain,
+            split=args.split,
+            examples=examples,
+            candidate_chat_model=args.candidate_chat_model,
+            base_config=base_config,
+            limit=args.limit,
+            max_concurrency=args.max_concurrency,
+            fallback_tolerance=args.fallback_tolerance,
+        )
     )
     lines = [
         "SupportGraph Model A/B Compatibility",
         f"Domain: {domain}",
-        f"Candidate Chat Model: {gate.chat_model}",  # type: ignore[attr-defined]
-        f"Passed: {gate.passed}",  # type: ignore[attr-defined]
-        f"Total Fallbacks: {gate.total_fallbacks}",  # type: ignore[attr-defined]
-        f"Runtime Errors: {gate.runtime_error_count}",  # type: ignore[attr-defined]
-        f"Fallback Nodes: {', '.join(gate.fallback_nodes) or 'none'}",  # type: ignore[attr-defined]
-        f"Gate Run: {gate.run_id}",  # type: ignore[attr-defined]
-        gate.reason,  # type: ignore[attr-defined]
+        f"Candidate Chat Model: {gate.chat_model}",
+        f"Passed: {gate.passed}",
+        f"Total Fallbacks: {gate.total_fallbacks}",
+        f"Runtime Errors: {gate.runtime_error_count}",
+        f"Fallback Nodes: {', '.join(gate.fallback_nodes) or 'none'}",
+        f"Gate Run: {gate.run_id}",
+        gate.reason,
     ]
-    if not gate.passed:  # type: ignore[attr-defined]
+    if not gate.passed:
         lines.extend(
             [
                 "Next",
