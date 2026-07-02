@@ -107,3 +107,5 @@ Inspect a run from the command line:
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml review-failures --run-id <run-id>
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml trace-show --run-id <run-id> --example-id <example-id>
 ```
+
+For command dispatch and handler responsibilities, see `docs/CLI_HANDLERS.md`.
