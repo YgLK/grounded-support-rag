@@ -30,7 +30,6 @@ class CliHandlers:
     review_failures: CommandHandler
     trace_show: CommandHandler
     serve_ui: CommandHandler
-    draft_eval_examples: CommandHandler
     validate_eval_examples: CommandHandler
     promote_eval_examples: CommandHandler
     eval_variance: CommandHandler
@@ -315,50 +314,6 @@ def _register_ui(subparsers: Subparsers, handlers: CliHandlers) -> None:
     ui_parser.set_defaults(func=handlers.serve_ui)
 
 
-def _register_draft_eval_examples(
-    subparsers: Subparsers, handlers: CliHandlers
-) -> None:
-    """Register the 'draft-eval-examples' command.
-
-    Drafts corpus-grounded eval example candidates by running real retrieval
-    against the live index and asking the chat model to draft grounded labels.
-    Output is appended idempotently to a candidates file for human review.
-    """
-    parser = subparsers.add_parser(
-        "draft-eval-examples",
-        help="Draft corpus-grounded eval example candidates for review.",
-    )
-    parser.add_argument(
-        "--seed-file",
-        required=True,
-        help="JSONL seed file with seed_id, question, answer_type rows.",
-    )
-    parser.add_argument(
-        "--domain",
-        default=None,
-        choices=DOMAIN_CHOICES,
-        help="Domain to draft for. Defaults to the configured MVP domain.",
-    )
-    parser.add_argument(
-        "--output",
-        default=None,
-        help=(
-            "Candidates JSONL output path. Defaults to "
-            "data/eval_subsets/<domain>/_candidates/expanded.candidates.jsonl."
-        ),
-    )
-    parser.add_argument(
-        "--top-k", type=int, default=5, help="Final retrieval top-k per seed."
-    )
-    parser.add_argument(
-        "--candidate-k",
-        type=int,
-        default=12,
-        help="Pre-rerank candidate pool size per seed.",
-    )
-    parser.set_defaults(func=handlers.draft_eval_examples)
-
-
 def _register_validate_eval_examples(
     subparsers: Subparsers, handlers: CliHandlers
 ) -> None:
@@ -573,7 +528,6 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
         _register_review_failures,
         _register_trace_show,
         _register_ui,
-        _register_draft_eval_examples,
         _register_validate_eval_examples,
         _register_promote_eval_examples,
         _register_eval_variance,

@@ -45,12 +45,6 @@ from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
     load_benchmark_chunk_records,
 )
-from support_graph.evaluation.authoring import (
-    build_default_chat_draft,
-    draft_examples,
-    load_seed_topics,
-    append_candidate_rows,
-)
 from support_graph.evaluation.eval_examples import (
     build_chunk_index,
     load_examples,
@@ -882,89 +876,6 @@ def _resolve_chunk_file(
     return settings.paths.chunks_dir / f"{settings.selected_domain(domain)}.jsonl"
 
 
-def _draft_eval_examples(args: argparse.Namespace) -> int:
-    """CLI handler for the 'draft-eval-examples' command."""
-    settings = _load_settings(args)
-    try:
-        settings.runtime.validate_for_run()
-    except ConfigValidationError as exc:
-        return _print_config_validation_error(
-            title="SupportGraph Draft Eval Examples",
-            settings=settings,
-            error=exc,
-        )
-    domain = settings.selected_domain(args.domain)
-    postgres_dsn = settings.runtime.postgres_dsn
-    if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for drafting.")
-    if not _ensure_index_ready(
-        title="SupportGraph Draft Eval Examples",
-        postgres_dsn=postgres_dsn,
-        collection_name=settings.collection_name(domain),
-        domain=domain,
-    ):
-        return 1
-
-    seeds = load_seed_topics(args.seed_file)
-    if not seeds:
-        print_lines(
-            [
-                "SupportGraph Draft Eval Examples",
-                "State: empty-seed-file",
-                "No seed topics found.",
-                f"Seed File: {args.seed_file}",
-            ]
-        )
-        return 1
-    output_path = (
-        Path(args.output)
-        if args.output
-        else settings.paths.project_root
-        / "data/eval_subsets"
-        / str(domain)
-        / "_candidates"
-        / "expanded.candidates.jsonl"
-    )
-    run_config = _run_config(settings, domain)
-    logger.info(
-        "Drafting %s eval candidates for domain=%s output=%s",
-        len(seeds),
-        domain,
-        output_path,
-    )
-    from support_graph.runtime.nodes import build_chat_model
-
-    chat_model = build_chat_model(run_config)
-    chat_draft = build_default_chat_draft(chat_model)
-    results = cast(
-        list,
-        run_async_boundary(
-            draft_examples(
-                seeds,
-                config=run_config,
-                chat_draft=chat_draft,
-                top_k=args.top_k,
-                candidate_k=args.candidate_k,
-            )
-        ),
-    )
-    appended = append_candidate_rows(results, output_path)
-    print_lines(
-        [
-            "SupportGraph Draft Eval Examples",
-            f"Domain: {domain}",
-            f"Seeds: {len(seeds)}",
-            f"Drafted: {len(results)}",
-            f"Candidates File: {output_path}",
-            f"Total Candidates (after append): {len(appended)}",
-            "Next",
-            f"Review and edit {relative_path(output_path, settings.paths.project_root)}, "
-            "then run validate-eval-examples and promote-eval-examples.",
-        ]
-    )
-    return 0
-
-
 def _validate_eval_examples(args: argparse.Namespace) -> int:
     """CLI handler for the 'validate-eval-examples' command."""
     settings = _load_settings(args)
@@ -1381,7 +1292,6 @@ def build_parser() -> argparse.ArgumentParser:
             review_failures=_review_failures,
             trace_show=_trace_show,
             serve_ui=_serve_ui,
-            draft_eval_examples=_draft_eval_examples,
             validate_eval_examples=_validate_eval_examples,
             promote_eval_examples=_promote_eval_examples,
             eval_variance=_eval_variance,

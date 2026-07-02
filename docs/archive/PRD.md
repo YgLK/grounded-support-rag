@@ -65,7 +65,7 @@ This allows SupportGraph to be built as a grounded assistant rather than a gener
 
 ### 5.2 Secondary user
 
-- A recruiter, hiring manager, or interviewer evaluating the project as evidence of practical LLM systems experience.
+- A technical reviewer evaluating the project as evidence of practical LLM systems experience.
 
 ## 6. Dataset Context
 

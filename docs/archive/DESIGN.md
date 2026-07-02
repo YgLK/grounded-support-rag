@@ -61,7 +61,7 @@ Goal:
 Audience:
 
 - hiring manager
-- interviewer
+- technical reviewer
 - future you
 
 Goal:

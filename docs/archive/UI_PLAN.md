@@ -47,7 +47,7 @@ Primary users:
 
 - the developer improving retrieval, grounding, and runtime behavior
 - the operator reviewing single runs and eval failures
-- the reviewer or interviewer trying to understand how the system works
+- the reviewer trying to understand how the system works
 
 ## Core Constraints
 

@@ -23,6 +23,9 @@ outputs/traces/*.jsonl
 logs/*
 logs/*.log
 support_graph.toml
+support_graph.pg.dump
+*.pg.dump
+todo/
 
 raw/*
 raw/kubernetes/

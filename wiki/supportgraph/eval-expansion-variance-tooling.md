@@ -5,11 +5,10 @@
 
 ## Overview
 
-The Smoke-10 Generation Variance finding showed that single-run `incomplete_answer` counts over unchanged retrieval are generation variance, not a retrieval regression, but n=10 could not separate sampling noise from generation non-determinism. A set of CLI tools now supports authoring a larger corpus-grounded eval set, validating labels against the pinned chunk corpus, and running a repeated-run variance study that asserts retrieval determinism and attributes the residual variance.
+The Smoke-10 Generation Variance finding showed that single-run `incomplete_answer` counts over unchanged retrieval are generation variance, not a retrieval regression, but n=10 could not separate sampling noise from generation non-determinism. A set of CLI tools now supports validating a larger curated corpus-grounded eval set against the pinned chunk corpus and running a repeated-run variance study that asserts retrieval determinism and attributes the residual variance.
 
 ## New CLI Commands
 
-- `draft-eval-examples` runs real retrieval per seed topic, picks the best retrieved chunk as the gold span source, and asks the chat model to draft a reference answer plus required-point alias groups constrained to the retrieved chunk text. Each candidate carries a `provenance` block (seed, retrieved chunk_ids, gold chunk/span IDs, source span text snippet) so labels are anchored to the pinned corpus. Output is appended idempotently to a candidates file.
 - `validate-eval-examples` checks declared doc/span IDs exist in the chunk corpus, each required-point alias group has at least one alias whose tokens appear in the source span text, no duplicate `example_id`, and `answer_type` is valid. Errors gate promotion.
 - `promote-eval-examples` merges verified candidates into `expanded.jsonl`, keeping existing rows and appending new `example_id`s, after running the validator.
 - `eval-variance` runs the eval harness K times on the same subset/config/index, asserts retrieval signatures are identical across runs, and produces a report with per-metric mean ± 95% bootstrap CI, between-run std, n=10 vs n=50 sampling-noise CI width comparison, a recommended-K from the pilot between-run std, and an explicit sampling-noise-vs-generation-variance attribution.
@@ -17,7 +16,15 @@ The Smoke-10 Generation Variance finding showed that single-run `incomplete_answ
 
 ## Eval Subset Tiers
 
-A new `EvalSubset.EXPANDED` tier sits between `SMOKE` and `FROZEN_EXPERIMENT` and loads from `data/eval_subsets/<domain>/expanded.jsonl` like `smoke.jsonl`. A 50-topic seed file covers definitions, procedures, and diagnoses across ConfigMap, Secret, Namespace, Ingress, StatefulSet, DaemonSet, Job/CronJob, HPA, PDB, PV/PVC, StorageClass, RBAC, probes, init containers, taints/tolerations, affinity, resource limits, QoS, rolling updates, rollbacks, scaling, debugging, CRDs, Operators, Helm, kubeadm, CNI, DNS, and troubleshooting scenarios.
+A new `EvalSubset.EXPANDED` tier sits between `SMOKE` and `FROZEN_EXPERIMENT` and loads from `data/eval_subsets/<domain>/expanded.jsonl` like `smoke.jsonl`. The curated 50-example candidate set covers definitions, procedures, and diagnoses across ConfigMap, Secret, Namespace, Ingress, StatefulSet, DaemonSet, Job/CronJob, HPA, PDB, PV/PVC, StorageClass, RBAC, probes, init containers, taints/tolerations, affinity, resource limits, QoS, rolling updates, rollbacks, scaling, debugging, CRDs, Operators, Helm, kubeadm, CNI, DNS, and troubleshooting scenarios.
+
+## Candidate Validation and Promotion
+
+Candidate files under `data/eval_subsets/<domain>/_candidates/` are staging artifacts for review. They are not used by `eval --subset expanded` until promoted into `data/eval_subsets/<domain>/expanded.jsonl`.
+
+`validate-eval-examples` is a static quality gate, not a RAG performance run. It checks that each candidate is internally consistent and grounded in the local chunk corpus: unique `example_id`, valid `answer_type`, cited `doc_id` and `span_id` exist in `data/derived/chunks/<domain>.jsonl`, and every required-point alias group has at least one phrase whose tokens appear in the cited source span text. This catches stale span IDs and ungrounded labels before they become benchmark data.
+
+`promote-eval-examples` reruns the validator, then appends only missing `example_id`s from the candidate file into `expanded.jsonl`. Promotion is the step that turns reviewed candidate rows into the real expanded eval set used by `eval --subset expanded` and `eval-variance --subset expanded`.
 
 ## Determinism-Diagnostic Knobs
 

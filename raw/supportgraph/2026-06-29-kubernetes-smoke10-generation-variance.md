@@ -12,7 +12,7 @@ Config: `support_graph.kubernetes.toml` (identical between both runs; only `crea
 
 ## What changed
 
-No code, prompt, retrieval, or config change. The verification run re-ran the same Smoke-10 eval against the same restored index to confirm the P1 dump-restore demo path. The only difference is a fresh LLM generation pass.
+No code, prompt, retrieval, or config change. The verification run re-ran the same Smoke-10 eval against the same restored index to confirm the local dump-restore path. The only difference is a fresh LLM generation pass.
 
 ## Metrics comparison
 

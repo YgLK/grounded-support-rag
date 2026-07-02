@@ -75,6 +75,18 @@ def _optional_secret(secrets: dict[str, str], key: str) -> str | None:
     return cleaned or None
 
 
+def _optional_bool(secrets: dict[str, str], key: str) -> bool | None:
+    value = _optional_secret(secrets, key)
+    if value is None:
+        return None
+    normalized = value.lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean value for {key}: {value!r}")
+
+
 class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -119,8 +131,6 @@ class RuntimeFileConfig(_FrozenModel):
 
 class LangSmithFileConfig(_FrozenModel):
     tracing_enabled: bool = False
-    project: str | None = "grounded-support-rag"
-    endpoint: str | None = None
 
 
 class ObservabilityFileConfig(_FrozenModel):
@@ -197,6 +207,7 @@ class Settings:
         provider_order = runtime_kwargs.get("openrouter_provider_order")
         if provider_order:
             runtime_kwargs["openrouter_provider_order"] = tuple(provider_order)
+        langsmith_tracing_enabled = _optional_bool(secrets, "LANGSMITH_TRACING")
 
         return cls(
             dataset=DatasetSettings(
@@ -237,16 +248,18 @@ class Settings:
                 examples_dir=derived_dir / "examples",
             ),
             runtime=RuntimeConfig(
-                langsmith_tracing_enabled=file_config.observability.langsmith.tracing_enabled,
-                langsmith_project=file_config.observability.langsmith.project,
-                langsmith_endpoint=file_config.observability.langsmith.endpoint,
+                langsmith_tracing_enabled=(
+                    langsmith_tracing_enabled
+                    if langsmith_tracing_enabled is not None
+                    else file_config.observability.langsmith.tracing_enabled
+                ),
+                langsmith_project=(_optional_secret(secrets, "LANGSMITH_PROJECT")),
+                langsmith_endpoint=(_optional_secret(secrets, "LANGSMITH_ENDPOINT")),
                 postgres_dsn=_optional_secret(secrets, "SUPPORT_GRAPH_POSTGRES_DSN"),
                 openrouter_api_key=_optional_secret(
                     secrets, "SUPPORT_GRAPH_OPENROUTER_API_KEY"
                 ),
-                langsmith_api_key=_optional_secret(
-                    secrets, "SUPPORT_GRAPH_LANGSMITH_API_KEY"
-                ),
+                langsmith_api_key=_optional_secret(secrets, "LANGSMITH_API_KEY"),
                 domain=selected_domain,
                 collection_name=f"support_graph_{selected_domain}",
                 chunk_artifact_path=derived_dir / "chunks" / f"{selected_domain}.jsonl",

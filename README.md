@@ -2,7 +2,7 @@
 
 SupportGraph is a local-first, evaluation-first RAG assistant for grounded Kubernetes troubleshooting. It turns a pinned `kubernetes/website` docs snapshot into indexed evidence, runs a LangGraph pipeline that retrieves and grades relevant context for each user turn, and returns grounded answers with citations, traces, and reproducible offline evaluation artifacts for debugging and model comparison. The CLI is `grounded-support-rag`.
 
-The system is a production-shaped modular monolith, not a production-ready SaaS: it is built to demonstrate a defensible LLM systems story (retrieval, grounding, evaluation, observability) without the auth, tenancy, retention, and SLO machinery real production traffic would require. Deferred production gaps are listed in `ROADMAP.md` (P4).
+The system is a production-shaped modular monolith, not a production-ready SaaS: it is built to demonstrate a defensible LLM systems story (retrieval, grounding, evaluation, observability) without the auth, tenancy, retention, and SLO machinery real production traffic would require.
 
 ## Scope
 
@@ -81,22 +81,24 @@ Required local config:
 - `.env`: if using OpenRouter for chat or embeddings, set `SUPPORT_GRAPH_OPENROUTER_API_KEY`
 - `support_graph.toml`: choose provider combination under `[runtime]`
 
-Fast path with the committed DB dump (skips corpus fetch + indexing):
+Full rebuild path (fetch + chunk + index from a fresh docs snapshot):
 
 ```bash
 docker compose up -d postgres
-cat support_graph.pg.dump | docker compose exec -T postgres pg_restore -U postgres -d support_graph --clean --if-exists
+uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
+uv run grounded-support-rag build-chunks --domain kubernetes
+uv run grounded-support-rag index-docs --domain kubernetes
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml doctor --domain kubernetes
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
 ```
 
-Full rebuild path (fetch + chunk + index from a fresh docs snapshot):
+Optional local fast path if you already have `support_graph.pg.dump`:
 
 ```bash
-uv run grounded-support-rag fetch-kubernetes-docs --ref main --output raw/kubernetes/current
-uv run grounded-support-rag build-chunks --domain kubernetes
-uv run grounded-support-rag index-docs --domain kubernetes
+docker compose up -d postgres
+cat support_graph.pg.dump | docker compose exec -T postgres pg_restore -U postgres -d support_graph --clean --if-exists
+uv run grounded-support-rag --config-file support_graph.kubernetes.toml doctor --domain kubernetes
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml eval --domain kubernetes --subset smoke
 uv run grounded-support-rag --config-file support_graph.kubernetes.toml ui --host 127.0.0.1 --port 8008
 ```

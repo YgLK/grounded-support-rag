@@ -146,13 +146,13 @@ Current findings:
 Eval expansion + variance attribution tooling (2026-06-30):
 
 - New `EvalSubset.EXPANDED` tier between `SMOKE` and `FROZEN_EXPERIMENT`; loads from `data/eval_subsets/<domain>/expanded.jsonl`.
-- New CLI: `draft-eval-examples` (corpus-grounded authoring with provenance), `validate-eval-examples` (doc/span ID existence, grounded alias groups, dup IDs, answer_type), `promote-eval-examples` (validator-gated merge into `expanded.jsonl`).
+- New CLI: `validate-eval-examples` (doc/span ID existence, grounded alias groups, dup IDs, answer_type), `promote-eval-examples` (validator-gated merge into `expanded.jsonl`).
 - New CLI: `eval-variance` (repeated-run K, retrieval-determinism assert, bootstrap CI, between-run std, n=10 vs n=50 sampling-noise comparison, recommended-K, explicit sampling-vs-generation attribution).
 - New CLI: `model-ab-compatibility` (blocking gate for model A/B; asserts structured-output json_schema support via fallback-event count).
 - Determinism-diagnostic config knobs: `chat_temperature`, `chat_seed`, `openrouter_provider_order`, `openrouter_allow_fallbacks` (diagnostic-only; defaults preserve today's behavior).
-- 50-topic seed file committed at `data/eval_subsets/kubernetes/_candidates/expanded.seeds.jsonl`.
-- 39 new tests; 188 passing. Detailed writeup in `wiki/supportgraph/eval-expansion-variance-tooling.md`.
-- Live operational steps (require running Postgres + OpenRouter, not executed by the agent): draft candidates, human review/edit, validate + promote, run `eval-variance --subset expanded --repeat K`, optional determinism sweep, optional model-ab-compatibility gate.
+- 50 curated candidate examples at `data/eval_subsets/kubernetes/_candidates/expanded.candidates.jsonl`.
+- Detailed writeup in `wiki/supportgraph/eval-expansion-variance-tooling.md`.
+- Live operational steps (require running Postgres + OpenRouter): validate + promote curated candidates, run `eval-variance --subset expanded --repeat K`, optional determinism sweep, optional model-ab-compatibility gate.
 
 Interview signal:
 

@@ -42,7 +42,6 @@ embedding_model = "openai/text-embedding-3-small"
 
 [observability.langsmith]
 tracing_enabled = false
-project = "grounded-support-rag"
 
 
 """.strip()
@@ -156,8 +155,6 @@ llm_retry_max_delay_seconds = 2.5
 
 [observability.langsmith]
 tracing_enabled = true
-project = "grounded-support-rag-prod"
-endpoint = "https://api.smith.langchain.com"
 
 
 """,
@@ -168,7 +165,9 @@ endpoint = "https://api.smith.langchain.com"
             [
                 "SUPPORT_GRAPH_POSTGRES_DSN=postgresql://localhost/support_graph",
                 "SUPPORT_GRAPH_OPENROUTER_API_KEY=openrouter-key",
-                "SUPPORT_GRAPH_LANGSMITH_API_KEY=langsmith-key",
+                "LANGSMITH_API_KEY=langsmith-key",
+                "LANGSMITH_ENDPOINT=https://api.smith.langchain.com",
+                "LANGSMITH_PROJECT=grounded-support-rag-prod",
             ]
         )
         + "\n",
@@ -198,6 +197,40 @@ endpoint = "https://api.smith.langchain.com"
 
     assert settings.runtime.domain is Domain.KUBERNETES
     assert settings.runtime.collection_name == "support_graph_kubernetes"
+
+
+def test_settings_accepts_standard_langsmith_api_key(tmp_path: Path) -> None:
+    settings_path = _write_settings_toml(
+        tmp_path / "support_graph.toml",
+        content="""
+[dataset]
+root = "raw/kubernetes/current"
+enabled_domains = ["kubernetes"]
+
+[observability.langsmith]
+tracing_enabled = false
+""",
+    )
+    secrets_path = tmp_path / ".env"
+    secrets_path.write_text(
+        "\n".join(
+            [
+                "LANGSMITH_TRACING=true",
+                "LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com",
+                "LANGSMITH_API_KEY=standard-langsmith-key",
+                "LANGSMITH_PROJECT=support-graph",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    settings = Settings.load(settings_path, secrets_path)
+
+    assert settings.runtime.langsmith_tracing_enabled is True
+    assert settings.runtime.langsmith_api_key == "standard-langsmith-key"
+    assert settings.runtime.langsmith_endpoint == "https://eu.api.smith.langchain.com"
+    assert settings.runtime.langsmith_project == "support-graph"
 
 
 def test_runtime_validation_requires_openrouter_key_when_provider_is_openrouter() -> (
@@ -284,7 +317,6 @@ embedding_model = "openai/text-embedding-3-small"
 
 [observability.langsmith]
 tracing_enabled = false
-project = "grounded-support-rag"
 
 
 """,
@@ -320,7 +352,6 @@ embedding_model = "openai/text-embedding-3-small"
 
 [observability.langsmith]
 tracing_enabled = false
-project = "grounded-support-rag"
 
 
 """,
@@ -354,7 +385,6 @@ embedding_model = "openai/text-embedding-3-small"
 
 [observability.langsmith]
 tracing_enabled = false
-project = "grounded-support-rag"
 
 
 """,

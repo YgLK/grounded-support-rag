@@ -150,15 +150,6 @@ sequenceDiagram
 
 ## Eval Authoring
 
-### `draft-eval-examples`
-
-- For: draft corpus-grounded eval candidate rows from seed topics.
-- Call path: `_draft_eval_examples` -> runtime config validation -> index preflight -> `load_seed_topics` -> `build_chat_model` -> `draft_examples` -> `append_candidate_rows`.
-- Reads: seed JSONL, runtime config, pgvector index.
-- Writes: candidates JSONL, default `data/eval_subsets/<domain>/_candidates/expanded.candidates.jsonl`.
-- Use when: generating candidate examples for human review before validation/promotion.
-- Requirements: chat provider with structured output, embedding provider, Postgres/pgvector index.
-
 ### `validate-eval-examples`
 
 - For: validate curated eval examples against the pinned chunk corpus.
@@ -223,7 +214,6 @@ Current parser commands:
 - `review-failures`
 - `trace-show`
 - `ui`
-- `draft-eval-examples`
 - `validate-eval-examples`
 - `promote-eval-examples`
 - `eval-variance`
