@@ -3,17 +3,31 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from langchain_core.prompts import ChatPromptTemplate
 
+from support_graph.config.runtime import RuntimeConfig
 from support_graph.runtime import nodes
 from support_graph.runtime.llm_policy import LLMCallTimeoutError
-from support_graph.runtime.schemas import Runtime, fallback_metadata
+from support_graph.runtime.prompts import PromptSet
+from support_graph.runtime.schemas import GraphState, Runtime, fallback_metadata
+
+
+def _prompt_set() -> PromptSet:
+    template = ChatPromptTemplate.from_messages([("system", "test"), ("human", "{x}")])
+    return PromptSet(
+        version="v-test",
+        route_query=template,
+        evidence_grade=template,
+        answer=template,
+        non_answer=template,
+        streaming_answer=template,
+    )
 
 
 def _runtime(*, chat_model: object, llm_timeout_seconds: float = 60.0) -> Runtime:
-    config = SimpleNamespace(
+    config = RuntimeConfig(
         chat_model="chat-model",
         llm_max_retries=1,
         llm_timeout_seconds=llm_timeout_seconds,
@@ -26,17 +40,13 @@ def _runtime(*, chat_model: object, llm_timeout_seconds: float = 60.0) -> Runtim
         keyword_retriever=None,
         chat_model=chat_model,
         chunk_records_by_doc={},
-        prompts=SimpleNamespace(
-            evidence_grade=object(),
-            answer=object(),
-            non_answer=object(),
-        ),
+        prompts=_prompt_set(),
         trace_path=Path("/tmp/run-test.jsonl"),
         run_id="run-test",
     )
 
 
-def _state(*, verdict: str = "partial") -> dict:
+def _state(*, verdict: str = "partial") -> GraphState:
     return {
         "example_id": "kubernetes::ex::turn_1",
         "domain": "kubernetes",

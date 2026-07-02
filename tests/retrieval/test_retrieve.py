@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from tests._fixtures import _hit, _query_context
 from support_graph.retrieval import retrieve
 
 
@@ -134,6 +135,7 @@ def test_build_metadata_filter_limits_domain_and_doc_ids() -> None:
         domain="kubernetes", doc_ids=["doc-a", "doc-b"]
     )
 
+    assert flt is not None
     assert flt["domain"] == "kubernetes"
     assert flt["doc_id"] == {"$in": ["doc-a", "doc-b"]}
 
@@ -248,7 +250,9 @@ def test_retrieve_chunks_merges_filtered_keyword_hits_without_duplicates() -> No
             ]
 
     class FakeKeywordRetriever:
-        def invoke(self, query):
+        k = 5
+
+        def invoke(self, query, **kwargs):
             captured["keyword_query"] = query
             return [
                 SimpleNamespace(
@@ -338,7 +342,9 @@ def test_retrieve_chunks_scores_keyword_hits_on_dense_scale_before_rerank() -> N
             ]
 
     class FakeKeywordRetriever:
-        def invoke(self, query):
+        k = 5
+
+        def invoke(self, query, **kwargs):
             return [
                 SimpleNamespace(
                     page_content="Complete Deployment manage updated replicas.",
@@ -388,41 +394,34 @@ def test_retrieve_chunks_scores_keyword_hits_on_dense_scale_before_rerank() -> N
 
 
 def test_rerank_retrieval_hits_penalizes_title_and_short_single_span_chunks() -> None:
-    context = {
-        "domain": "kubernetes",
-        "latest_user_need": "deployment rollout stalled unavailable replicas",
-        "last_agent_question": "",
-        "carry_forward_context": [],
-    }
+    context = _query_context(
+        latest_user_need="deployment rollout stalled unavailable replicas",
+    )
     hits = [
-        {
-            "rank": 1,
-            "original_rank": 1,
-            "chunk_id": "kubernetes::doc::sec::t_1::sub::0",
-            "doc_id": "doc",
-            "section_id": "t_1",
-            "section_title": "What happens if my rollout stalls?",
-            "parent_titles": [],
-            "span_ids": ["10"],
-            "token_count": 8,
-            "text": "What happens if my rollout stalls?",
-            "score": 0.20,
-            "vector_distance": 0.20,
-        },
-        {
-            "rank": 2,
-            "original_rank": 2,
-            "chunk_id": "kubernetes::doc::sec::2::sub::0",
-            "doc_id": "doc",
-            "section_id": "2",
-            "section_title": "Deployment rollout guidance",
-            "parent_titles": [],
-            "span_ids": ["11", "12"],
-            "token_count": 32,
-            "text": "If a rollout stalls, inspect Deployment conditions and unavailable replicas.",
-            "score": 0.21,
-            "vector_distance": 0.21,
-        },
+        _hit(
+            "kubernetes::doc::sec::t_1::sub::0",
+            rank=1,
+            doc_id="doc",
+            section_id="t_1",
+            section_title="What happens if my rollout stalls?",
+            span_ids=["10"],
+            token_count=8,
+            text="What happens if my rollout stalls?",
+            score=0.20,
+            vector_distance=0.20,
+        ),
+        _hit(
+            "kubernetes::doc::sec::2::sub::0",
+            rank=2,
+            doc_id="doc",
+            section_id="2",
+            section_title="Deployment rollout guidance",
+            span_ids=["11", "12"],
+            token_count=32,
+            text="If a rollout stalls, inspect Deployment conditions and unavailable replicas.",
+            score=0.21,
+            vector_distance=0.21,
+        ),
     ]
 
     reranked = retrieve.rerank_retrieval_hits(hits, query_context=context)
@@ -431,12 +430,10 @@ def test_rerank_retrieval_hits_penalizes_title_and_short_single_span_chunks() ->
 
 
 def test_query_context_tokens_uses_library_stopwords() -> None:
-    context = {
-        "domain": "kubernetes",
-        "latest_user_need": "What do I need to do for a rollout restart?",
-        "last_agent_question": "How do I complete this?",
-        "carry_forward_context": [],
-    }
+    context = _query_context(
+        latest_user_need="What do I need to do for a rollout restart?",
+        last_agent_question="How do I complete this?",
+    )
 
     tokens = retrieve.query_context_tokens(context)
 
@@ -450,41 +447,36 @@ def test_query_context_tokens_uses_library_stopwords() -> None:
 def test_rerank_retrieval_hits_uses_text_and_title_overlap_to_lift_relevant_chunk() -> (
     None
 ):
-    context = {
-        "domain": "kubernetes",
-        "latest_user_need": "deployment rollout stalled unavailable replicas",
-        "last_agent_question": "",
-        "carry_forward_context": [],
-    }
+    context = _query_context(
+        latest_user_need="deployment rollout stalled unavailable replicas",
+    )
     hits = [
-        {
-            "rank": 1,
-            "original_rank": 1,
-            "chunk_id": "kubernetes::doc::sec::1::sub::0",
-            "doc_id": "doc",
-            "section_id": "1",
-            "section_title": "Images",
-            "parent_titles": ["Containers"],
-            "span_ids": ["1", "2"],
-            "token_count": 30,
-            "text": "A container image should use an immutable tag.",
-            "score": 0.20,
-            "vector_distance": 0.20,
-        },
-        {
-            "rank": 2,
-            "original_rank": 2,
-            "chunk_id": "kubernetes::doc::sec::2::sub::0",
-            "doc_id": "doc",
-            "section_id": "2",
-            "section_title": "Deployment rollout",
-            "parent_titles": ["Workloads"],
-            "span_ids": ["3", "4"],
-            "token_count": 30,
-            "text": "If a Deployment rollout stalls, check unavailable replicas and rollout status.",
-            "score": 0.22,
-            "vector_distance": 0.22,
-        },
+        _hit(
+            "kubernetes::doc::sec::1::sub::0",
+            rank=1,
+            doc_id="doc",
+            section_id="1",
+            section_title="Images",
+            parent_titles=["Containers"],
+            span_ids=["1", "2"],
+            token_count=30,
+            text="A container image should use an immutable tag.",
+            score=0.20,
+            vector_distance=0.20,
+        ),
+        _hit(
+            "kubernetes::doc::sec::2::sub::0",
+            rank=2,
+            doc_id="doc",
+            section_id="2",
+            section_title="Deployment rollout",
+            parent_titles=["Workloads"],
+            span_ids=["3", "4"],
+            token_count=30,
+            text="If a Deployment rollout stalls, check unavailable replicas and rollout status.",
+            score=0.22,
+            vector_distance=0.22,
+        ),
     ]
 
     reranked = retrieve.rerank_retrieval_hits(hits, query_context=context)
@@ -493,46 +485,35 @@ def test_rerank_retrieval_hits_uses_text_and_title_overlap_to_lift_relevant_chun
 
 
 def test_rerank_retrieval_hits_uses_doc_path_overlap_to_lift_canonical_page() -> None:
-    context = {
-        "domain": "kubernetes",
-        "latest_user_need": "What does a Kubernetes Deployment manage?",
-        "last_agent_question": "",
-        "carry_forward_context": [],
-    }
+    context = _query_context(
+        latest_user_need="What does a Kubernetes Deployment manage?",
+    )
     hits = [
-        {
-            "rank": 1,
-            "original_rank": 1,
-            "chunk_id": "kubernetes::tutorials/hello-minikube::sec::create::sub::0",
-            "doc_id": "tutorials/hello-minikube",
-            "section_id": "create",
-            "section_title": "Create a Deployment",
-            "parent_titles": [],
-            "span_ids": ["tutorials/hello-minikube#create-a-deployment"],
-            "token_count": 40,
-            "text": "A Kubernetes Deployment checks the health of your Pod.",
-            "score": 0.37,
-            "vector_distance": 0.37,
-        },
-        {
-            "rank": 2,
-            "original_rank": 2,
-            "chunk_id": (
-                "kubernetes::concepts/workloads/controllers/deployment"
-                "::sec::complete-deployment::sub::0"
-            ),
-            "doc_id": "concepts/workloads/controllers/deployment",
-            "section_id": "complete-deployment",
-            "section_title": "Complete Deployment",
-            "parent_titles": [],
-            "span_ids": [
-                "concepts/workloads/controllers/deployment#complete-deployment"
-            ],
-            "token_count": 32,
-            "text": "A complete Deployment has updated replicas available.",
-            "score": 0.372,
-            "vector_distance": 0.372,
-        },
+        _hit(
+            "kubernetes::tutorials/hello-minikube::sec::create::sub::0",
+            rank=1,
+            doc_id="tutorials/hello-minikube",
+            section_id="create",
+            section_title="Create a Deployment",
+            span_ids=["tutorials/hello-minikube#create-a-deployment"],
+            token_count=40,
+            text="A Kubernetes Deployment checks the health of your Pod.",
+            score=0.37,
+            vector_distance=0.37,
+        ),
+        _hit(
+            "kubernetes::concepts/workloads/controllers/deployment"
+            "::sec::complete-deployment::sub::0",
+            rank=2,
+            doc_id="concepts/workloads/controllers/deployment",
+            section_id="complete-deployment",
+            section_title="Complete Deployment",
+            span_ids=["concepts/workloads/controllers/deployment#complete-deployment"],
+            token_count=32,
+            text="A complete Deployment has updated replicas available.",
+            score=0.372,
+            vector_distance=0.372,
+        ),
     ]
 
     reranked = retrieve.rerank_retrieval_hits(hits, query_context=context)

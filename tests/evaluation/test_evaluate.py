@@ -5,11 +5,13 @@ import csv
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import get_type_hints
+from typing import cast, get_type_hints
 
+from tests._fixtures import _citation, _dialogue_turn, _example, _hit
 from support_graph.evaluation import evaluate
 from support_graph.data.eval_subsets import write_subset_jsonl
 from support_graph.runtime.traces import write_trace_event
+from support_graph.types import Example, RequiredPoint
 
 
 def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded_lists(
@@ -24,17 +26,16 @@ def test_evaluate_examples_writes_required_artifacts_and_uses_ranked_vs_expanded
     now = datetime(2026, 3, 18, 14, 30, tzinfo=timezone.utc)
 
     examples = [
-        {
-            "example_id": "kubernetes::one::turn_2",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "turns_before_target": [
-                {"turn_id": 1, "role": "user", "utterance": "What should I bring?"}
+        _example(
+            "kubernetes::one::turn_2",
+            target_turn_id=2,
+            turns_before_target=[
+                _dialogue_turn(turn_id=1, utterance="What should I bring?")
             ],
-            "target_turn": {"utterance": "Bring your insurance card tomorrow."},
-            "gold_doc_ids": ["doc-a"],
-            "gold_span_ids": ["1", "2"],
-        }
+            target_turn=_dialogue_turn(utterance="Bring your insurance card tomorrow."),
+            gold_doc_ids=["doc-a"],
+            gold_span_ids=["1", "2"],
+        )
     ]
 
     def fake_run_graph(*, trace_path: Path, **kwargs):
@@ -239,24 +240,24 @@ def test_manual_review_csv_includes_follow_up_predictions_and_answer_failures(
     now = datetime(2026, 3, 18, 14, 30, tzinfo=timezone.utc)
 
     examples = [
-        {
-            "example_id": "kubernetes::followup::turn_2",
-            "target_mode": "follow_up",
-            "target_turn_id": 2,
-            "latest_user_utterance": "Do you need my plate number too?",
-            "target_turn": {"utterance": "Is your license still current?"},
-            "gold_doc_ids": ["doc-followup"],
-            "gold_span_ids": ["10"],
-        },
-        {
-            "example_id": "kubernetes::answer::turn_2",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "latest_user_utterance": "What title documents do I need?",
-            "target_turn": {"utterance": "Bring your title application."},
-            "gold_doc_ids": ["doc-answer"],
-            "gold_span_ids": ["20"],
-        },
+        _example(
+            "kubernetes::followup::turn_2",
+            target_mode="follow_up",
+            target_turn_id=2,
+            latest_user_utterance="Do you need my plate number too?",
+            target_turn=_dialogue_turn(utterance="Is your license still current?"),
+            gold_doc_ids=["doc-followup"],
+            gold_span_ids=["10"],
+        ),
+        _example(
+            "kubernetes::answer::turn_2",
+            target_mode="answer",
+            target_turn_id=2,
+            latest_user_utterance="What title documents do I need?",
+            target_turn=_dialogue_turn(utterance="Bring your title application."),
+            gold_doc_ids=["doc-answer"],
+            gold_span_ids=["20"],
+        ),
     ]
 
     def fake_run_graph(*, example, trace_path: Path, **kwargs):
@@ -423,24 +424,22 @@ def test_evaluate_examples_logs_progress_and_artifact_writes(
     )
 
     examples = [
-        {
-            "example_id": "kubernetes::one::turn_2",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "latest_user_utterance": "What should I bring?",
-            "target_turn": {"utterance": "Bring your insurance card tomorrow."},
-            "gold_doc_ids": ["doc-a"],
-            "gold_span_ids": ["1", "2"],
-        },
-        {
-            "example_id": "kubernetes::two::turn_2",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "latest_user_utterance": "Do I need the title too?",
-            "target_turn": {"utterance": "Bring your title application too."},
-            "gold_doc_ids": ["doc-b"],
-            "gold_span_ids": ["3"],
-        },
+        _example(
+            "kubernetes::one::turn_2",
+            target_turn_id=2,
+            latest_user_utterance="What should I bring?",
+            target_turn=_dialogue_turn(utterance="Bring your insurance card tomorrow."),
+            gold_doc_ids=["doc-a"],
+            gold_span_ids=["1", "2"],
+        ),
+        _example(
+            "kubernetes::two::turn_2",
+            target_turn_id=2,
+            latest_user_utterance="Do I need the title too?",
+            target_turn=_dialogue_turn(utterance="Bring your title application too."),
+            gold_doc_ids=["doc-b"],
+            gold_span_ids=["3"],
+        ),
     ]
 
     def fake_run_graph(*, example, **kwargs):
@@ -528,15 +527,15 @@ def test_text_and_retrieval_metrics_are_deterministic() -> None:
         evaluate.sacrebleu_score("bring proof of insurance", "bring proof of insurance")
         > 0.99
     )
-    assert evaluate.doc_recall_at_k(["doc-a"], [{"doc_id": "doc-a"}], k=3) == 1.0
-    assert evaluate.span_recall_at_k(["1", "2"], [{"span_ids": ["2"]}], k=5) == 0.5
+    assert evaluate.doc_recall_at_k(["doc-a"], [_hit(doc_id="doc-a")], k=3) == 1.0
+    assert evaluate.span_recall_at_k(["1", "2"], [_hit(span_ids=["2"])], k=5) == 0.5
     assert (
-        evaluate.mrr_at_k(["doc-b"], [{"doc_id": "doc-x"}, {"doc_id": "doc-b"}], k=5)
+        evaluate.mrr_at_k(["doc-b"], [_hit(doc_id="doc-x"), _hit(doc_id="doc-b")], k=5)
         == 0.5
     )
     assert evaluate.citations_map_to_retrieved(
-        [{"chunk_id": "chunk-expanded", "span_ids": ["1"]}],
-        [{"chunk_id": "chunk-expanded", "span_ids": ["1"]}],
+        [_citation(chunk_id="chunk-expanded", span_ids=["1"])],
+        [_hit(chunk_id="chunk-expanded", span_ids=["1"])],
     )
 
 
@@ -572,24 +571,22 @@ def test_evaluate_examples_async_preserves_input_order_under_concurrency(
 ) -> None:
     settings = make_settings(project_root=tmp_path)
     examples = [
-        {
-            "example_id": "kubernetes::first::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "first",
-            "target_turn": {"utterance": "First answer."},
-            "gold_doc_ids": ["doc-1"],
-            "gold_span_ids": ["span-1"],
-        },
-        {
-            "example_id": "kubernetes::second::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "second",
-            "target_turn": {"utterance": "Second answer."},
-            "gold_doc_ids": ["doc-2"],
-            "gold_span_ids": ["span-2"],
-        },
+        _example(
+            "kubernetes::first::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="first",
+            target_turn=_dialogue_turn(utterance="First answer."),
+            gold_doc_ids=["doc-1"],
+            gold_span_ids=["span-1"],
+        ),
+        _example(
+            "kubernetes::second::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="second",
+            target_turn=_dialogue_turn(utterance="Second answer."),
+            gold_doc_ids=["doc-2"],
+            gold_span_ids=["span-2"],
+        ),
     ]
 
     async def fake_run_graph(*, example, **kwargs):
@@ -636,24 +633,22 @@ def test_evaluate_examples_async_records_runtime_errors_without_aborting(
 ) -> None:
     settings = make_settings(project_root=tmp_path)
     examples = [
-        {
-            "example_id": "kubernetes::ok::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "ok",
-            "target_turn": {"utterance": "Bring proof of insurance."},
-            "gold_doc_ids": ["doc-ok"],
-            "gold_span_ids": ["span-ok"],
-        },
-        {
-            "example_id": "kubernetes::boom::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "boom",
-            "target_turn": {"utterance": "Bring your title."},
-            "gold_doc_ids": ["doc-boom"],
-            "gold_span_ids": ["span-boom"],
-        },
+        _example(
+            "kubernetes::ok::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="ok",
+            target_turn=_dialogue_turn(utterance="Bring proof of insurance."),
+            gold_doc_ids=["doc-ok"],
+            gold_span_ids=["span-ok"],
+        ),
+        _example(
+            "kubernetes::boom::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="boom",
+            target_turn=_dialogue_turn(utterance="Bring your title."),
+            gold_doc_ids=["doc-boom"],
+            gold_span_ids=["span-boom"],
+        ),
     ]
 
     async def flaky_run_graph(*, example, **kwargs):
@@ -717,24 +712,22 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
 ) -> None:
     settings = make_settings(project_root=tmp_path)
     examples = [
-        {
-            "example_id": "kubernetes::first::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "first",
-            "target_turn": {"utterance": "First answer."},
-            "gold_doc_ids": ["doc-1"],
-            "gold_span_ids": ["span-1"],
-        },
-        {
-            "example_id": "kubernetes::second::turn_1",
-            "target_mode": "answer",
-            "target_turn_id": 1,
-            "latest_user_utterance": "second",
-            "target_turn": {"utterance": "Second answer."},
-            "gold_doc_ids": ["doc-2"],
-            "gold_span_ids": ["span-2"],
-        },
+        _example(
+            "kubernetes::first::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="first",
+            target_turn=_dialogue_turn(utterance="First answer."),
+            gold_doc_ids=["doc-1"],
+            gold_span_ids=["span-1"],
+        ),
+        _example(
+            "kubernetes::second::turn_1",
+            target_turn_id=1,
+            latest_user_utterance="second",
+            target_turn=_dialogue_turn(utterance="Second answer."),
+            gold_doc_ids=["doc-2"],
+            gold_span_ids=["span-2"],
+        ),
     ]
 
     shared_resources = object()
@@ -794,9 +787,9 @@ def test_evaluate_examples_async_reuses_shared_runtime_resources_for_default_gra
 
 def test_hit_at_k_with_expected_and_acceptable_sources() -> None:
     chunks = [
-        {"doc_id": "noise"},
-        {"doc_id": "reference/glossary/pod"},
-        {"doc_id": "concepts/workloads/pods"},
+        _hit(doc_id="noise"),
+        _hit(doc_id="reference/glossary/pod"),
+        _hit(doc_id="concepts/workloads/pods"),
     ]
     assert (
         evaluate.hit_at_k(
@@ -811,19 +804,19 @@ def test_hit_at_k_with_expected_and_acceptable_sources() -> None:
         evaluate.hit_at_k(
             ["concepts/workloads/pods"],
             ["reference/glossary/pod"],
-            [{"doc_id": "noise"}],
+            [_hit(doc_id="noise")],
             k=5,
         )
         == 0.0
     )
-    assert evaluate.hit_at_k([], [], [{"doc_id": "noise"}], k=5) is None
+    assert evaluate.hit_at_k([], [], [_hit(doc_id="noise")], k=5) is None
 
 
 def test_precision_at_k_counts_expected_and_acceptable() -> None:
     chunks = [
-        {"doc_id": "concepts/workloads/pods"},
-        {"doc_id": "noise"},
-        {"doc_id": "reference/glossary/pod"},
+        _hit(doc_id="concepts/workloads/pods"),
+        _hit(doc_id="noise"),
+        _hit(doc_id="reference/glossary/pod"),
     ]
     assert (
         evaluate.precision_at_k(
@@ -838,8 +831,8 @@ def test_precision_at_k_counts_expected_and_acceptable() -> None:
 
 def test_graded_mrr_at_k_weights_expected_above_acceptable() -> None:
     chunks = [
-        {"doc_id": "reference/glossary/pod"},
-        {"doc_id": "concepts/workloads/pods"},
+        _hit(doc_id="reference/glossary/pod"),
+        _hit(doc_id="concepts/workloads/pods"),
     ]
     # Acceptable (grade 1) at rank 1 -> 1/1 / 2 = 0.5
     assert (
@@ -856,7 +849,7 @@ def test_graded_mrr_at_k_weights_expected_above_acceptable() -> None:
         evaluate.graded_mrr_at_k(
             ["concepts/workloads/pods"],
             [],
-            [{"doc_id": "concepts/workloads/pods"}],
+            [_hit(doc_id="concepts/workloads/pods")],
             k=5,
         )
         == 1.0
@@ -866,9 +859,9 @@ def test_graded_mrr_at_k_weights_expected_above_acceptable() -> None:
 def test_ndcg_at_k_with_graded_relevance() -> None:
     # Non-ideal order: acceptable (grade 1) before expected (grade 2).
     chunks = [
-        {"doc_id": "reference/glossary/pod"},
-        {"doc_id": "concepts/workloads/pods"},
-        {"doc_id": "noise"},
+        _hit(doc_id="reference/glossary/pod"),
+        _hit(doc_id="concepts/workloads/pods"),
+        _hit(doc_id="noise"),
     ]
     ndcg = evaluate.ndcg_at_k(
         ["concepts/workloads/pods"],
@@ -884,7 +877,7 @@ def test_ndcg_at_k_with_graded_relevance() -> None:
         evaluate.ndcg_at_k(
             ["concepts/workloads/pods"],
             ["reference/glossary/pod"],
-            [{"doc_id": "concepts/workloads/pods"}],
+            [_hit(doc_id="concepts/workloads/pods")],
             k=5,
         )
         == 1.0
@@ -895,8 +888,8 @@ def test_ndcg_at_k_with_graded_relevance() -> None:
             ["concepts/services-networking/service"],
             [],
             [
-                {"doc_id": "concepts/services-networking/service"},
-                {"doc_id": "concepts/services-networking/service"},
+                _hit(doc_id="concepts/services-networking/service"),
+                _hit(doc_id="concepts/services-networking/service"),
             ],
             k=5,
         )
@@ -910,10 +903,10 @@ def test_ndcg_at_k_caps_acceptable_and_repeated_sources() -> None:
         ["concepts/workloads/controllers/deployment"],
         ["tasks/run-application/update-deployment-rolling"],
         [
-            {"doc_id": "concepts/workloads/controllers/deployment"},
-            {"doc_id": "concepts/workloads/controllers/deployment"},
-            {"doc_id": "tasks/run-application/update-deployment-rolling"},
-            {"doc_id": "concepts/workloads/controllers/deployment"},
+            _hit(doc_id="concepts/workloads/controllers/deployment"),
+            _hit(doc_id="concepts/workloads/controllers/deployment"),
+            _hit(doc_id="tasks/run-application/update-deployment-rolling"),
+            _hit(doc_id="concepts/workloads/controllers/deployment"),
         ],
         k=5,
     )
@@ -926,8 +919,8 @@ def test_ndcg_at_k_caps_acceptable_and_repeated_sources() -> None:
         ],
         ["tasks/run-application/update-deployment-rolling"],
         [
-            {"doc_id": "concepts/workloads/controllers/deployment"},
-            {"doc_id": "tasks/run-application/update-deployment-rolling"},
+            _hit(doc_id="concepts/workloads/controllers/deployment"),
+            _hit(doc_id="tasks/run-application/update-deployment-rolling"),
         ],
         k=5,
     )
@@ -936,13 +929,9 @@ def test_ndcg_at_k_caps_acceptable_and_repeated_sources() -> None:
 
 def test_metric_invariants_stay_in_unit_interval() -> None:
     retrieval_chunks = [
-        {"doc_id": "expected", "chunk_id": "chunk-expected", "span_ids": ["gold"]},
-        {"doc_id": "expected", "chunk_id": "chunk-expected-2", "span_ids": ["gold"]},
-        {
-            "doc_id": "acceptable",
-            "chunk_id": "chunk-acceptable",
-            "span_ids": ["alternate"],
-        },
+        _hit(doc_id="expected", chunk_id="chunk-expected", span_ids=["gold"]),
+        _hit(doc_id="expected", chunk_id="chunk-expected-2", span_ids=["gold"]),
+        _hit(doc_id="acceptable", chunk_id="chunk-acceptable", span_ids=["alternate"]),
     ]
     metrics = [
         evaluate.hit_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
@@ -951,7 +940,7 @@ def test_metric_invariants_stay_in_unit_interval() -> None:
         evaluate.ndcg_at_k(["expected"], ["acceptable"], retrieval_chunks, k=5),
         evaluate.citation_coverage(
             ["gold"],
-            [{"chunk_id": "chunk-acceptable", "span_ids": ["alternate"]}],
+            [_citation(chunk_id="chunk-acceptable", span_ids=["alternate"])],
             acceptable_span_ids=["alternate"],
         ),
         evaluate.required_point_coverage(
@@ -976,14 +965,14 @@ def test_required_point_coverage_full_partial_and_zero() -> None:
         "A Pod is the smallest deployable compute object with shared storage "
         "and shared network resources."
     )
-    full = [
+    full: list[RequiredPoint] = [
         "smallest deployable compute object",
         "shared storage",
         "shared network resources",
     ]
     assert evaluate.required_point_coverage(full, answer) == 1.0
 
-    partial = [
+    partial: list[RequiredPoint] = [
         "smallest deployable compute object",
         "one or more containers",
     ]
@@ -1316,58 +1305,54 @@ def test_evaluate_kubernetes_smoke_emits_rag_triad_buckets_and_review_columns(
     now = datetime(2026, 6, 28, 12, 0, tzinfo=timezone.utc)
 
     examples = [
-        {
-            "example_id": "kubernetes::pods::turn_2",
-            "domain": "kubernetes",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "latest_user_utterance": "What is a Kubernetes Pod?",
-            "target_turn": {
-                "utterance": (
+        _example(
+            "kubernetes::pods::turn_2",
+            target_turn_id=2,
+            latest_user_utterance="What is a Kubernetes Pod?",
+            target_turn=_dialogue_turn(
+                utterance=(
                     "A Pod is the smallest deployable compute object in Kubernetes "
                     "and represents one or more containers with shared storage and "
                     "network resources."
                 )
-            },
-            "gold_doc_ids": ["concepts/workloads/pods"],
-            "gold_span_ids": ["concepts/workloads/pods#overview"],
-            "expected_sources": ["concepts/workloads/pods"],
-            "acceptable_sources": ["reference/glossary/pod"],
-            "required_points": [
+            ),
+            gold_doc_ids=["concepts/workloads/pods"],
+            gold_span_ids=["concepts/workloads/pods#overview"],
+            expected_sources=["concepts/workloads/pods"],
+            acceptable_sources=["reference/glossary/pod"],
+            required_points=[
                 "smallest deployable compute object",
                 "one or more containers",
                 "shared storage",
                 "shared network resources",
             ],
-            "forbidden_claims": [],
-            "answer_type": "definition",
-        },
-        {
-            "example_id": "kubernetes::deployments::turn_2",
-            "domain": "kubernetes",
-            "target_mode": "answer",
-            "target_turn_id": 2,
-            "latest_user_utterance": "What does a Kubernetes Deployment manage?",
-            "target_turn": {
-                "utterance": (
+            forbidden_claims=[],
+            answer_type="definition",
+        ),
+        _example(
+            "kubernetes::deployments::turn_2",
+            target_turn_id=2,
+            latest_user_utterance="What does a Kubernetes Deployment manage?",
+            target_turn=_dialogue_turn(
+                utterance=(
                     "A Deployment manages Pods and ReplicaSets and lets you "
                     "declaratively roll out application updates."
                 )
-            },
-            "gold_doc_ids": ["concepts/workloads/controllers/deployment"],
-            "gold_span_ids": ["concepts/workloads/controllers/deployment#overview"],
-            "expected_sources": ["concepts/workloads/controllers/deployment"],
-            "acceptable_sources": [
+            ),
+            gold_doc_ids=["concepts/workloads/controllers/deployment"],
+            gold_span_ids=["concepts/workloads/controllers/deployment#overview"],
+            expected_sources=["concepts/workloads/controllers/deployment"],
+            acceptable_sources=[
                 "tasks/run-application/run-stateless-application-deployment"
             ],
-            "required_points": [
+            required_points=[
                 "Deployment manages Pods",
                 "Deployment manages ReplicaSets",
                 "declaratively roll out application updates",
             ],
-            "forbidden_claims": [],
-            "answer_type": "definition",
-        },
+            forbidden_claims=[],
+            answer_type="definition",
+        ),
     ]
 
     def fake_run_graph(*, example, trace_path: Path, **kwargs):
@@ -1531,14 +1516,14 @@ def test_required_point_coverage_legacy_strings_unchanged() -> None:
         "A Pod is the smallest deployable compute object with shared storage "
         "and shared network resources."
     )
-    full = [
+    full: list[RequiredPoint] = [
         "smallest deployable compute object",
         "shared storage",
         "shared network resources",
     ]
     assert evaluate.required_point_coverage(full, answer) == 1.0
 
-    partial = [
+    partial: list[RequiredPoint] = [
         "smallest deployable compute object",
         "one or more containers",
     ]
@@ -1551,7 +1536,7 @@ def test_required_point_coverage_legacy_strings_unchanged() -> None:
 def test_required_point_coverage_alias_group_covered_by_any_phrase() -> None:
     """An alias group is covered when any single phrase matches."""
     answer = "A Pod is the smallest deployable object in Kubernetes."
-    points = [
+    points: list[RequiredPoint] = [
         ["smallest deployable compute object", "smallest deployable object"],
     ]
     assert evaluate.required_point_coverage(points, answer) == 1.0
@@ -1564,7 +1549,7 @@ def test_required_point_coverage_alias_group_covered_by_any_phrase() -> None:
 def test_required_point_coverage_alias_group_counts_as_one_point() -> None:
     """An alias group counts as a single required point, not multiple."""
     answer = "A Pod is the smallest deployable object with shared volumes."
-    points = [
+    points: list[RequiredPoint] = [
         ["smallest deployable compute object", "smallest deployable object"],
         ["shared storage", "shared volumes"],
         "one or more containers",  # not covered
@@ -1576,7 +1561,7 @@ def test_required_point_coverage_alias_group_counts_as_one_point() -> None:
 def test_required_point_coverage_alias_group_no_match_returns_zero() -> None:
     """When no alias phrase matches, the point is uncovered."""
     answer = "A Pod is a unit that runs one or more containers."
-    points = [
+    points: list[RequiredPoint] = [
         ["smallest deployable compute object", "smallest deployable object"],
         "one or more containers",
     ]
@@ -1585,7 +1570,7 @@ def test_required_point_coverage_alias_group_no_match_returns_zero() -> None:
 
     # No points covered at all.
     answer_bare = "A Pod is a unit."
-    points_all_miss = [
+    points_all_miss: list[RequiredPoint] = [
         ["smallest deployable compute object", "smallest deployable object"],
         ["shared storage", "shared volumes"],
     ]
@@ -1671,14 +1656,14 @@ def test_span_recall_accepts_acceptable_span_ids() -> None:
     """RAG span recall counts acceptable spans as equivalent substitutes."""
     gold = ["concepts/workloads/pods#overview"]
     acceptable = ["concepts/workloads/pods#what-is-a-pod"]
-    chunks = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    chunks = [_hit(span_ids=["concepts/workloads/pods#what-is-a-pod"])]
     # Retrieving the acceptable span gives full recall (capped at 1.0).
     assert (
         evaluate.span_recall_at_k(gold, chunks, k=5, acceptable_span_ids=acceptable)
         == 1.0
     )
     # Retrieving the gold span still gives full recall.
-    chunks_gold = [{"span_ids": ["concepts/workloads/pods#overview"]}]
+    chunks_gold = [_hit(span_ids=["concepts/workloads/pods#overview"])]
     assert (
         evaluate.span_recall_at_k(
             gold, chunks_gold, k=5, acceptable_span_ids=acceptable
@@ -1686,7 +1671,7 @@ def test_span_recall_accepts_acceptable_span_ids() -> None:
         == 1.0
     )
     # Retrieving neither gives zero.
-    chunks_miss = [{"span_ids": ["concepts/workloads/pods#other"]}]
+    chunks_miss = [_hit(span_ids=["concepts/workloads/pods#other"])]
     assert (
         evaluate.span_recall_at_k(
             gold, chunks_miss, k=5, acceptable_span_ids=acceptable
@@ -1698,7 +1683,7 @@ def test_span_recall_accepts_acceptable_span_ids() -> None:
 def test_span_recall_legacy_remains_exact_without_acceptable_spans() -> None:
     """Legacy span recall (no acceptable_span_ids) is unchanged."""
     gold = ["concepts/workloads/pods#overview"]
-    chunks = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    chunks = [_hit(span_ids=["concepts/workloads/pods#what-is-a-pod"])]
     # Without acceptable spans, the alternate section does not count.
     assert evaluate.span_recall_at_k(gold, chunks, k=5) == 0.0
     assert evaluate.span_recall_at_k(gold, chunks, k=5, acceptable_span_ids=None) == 0.0
@@ -1709,7 +1694,7 @@ def test_citation_coverage_accepts_acceptable_span_ids() -> None:
     """RAG citation coverage counts acceptable spans as equivalent."""
     gold = ["concepts/workloads/pods#overview"]
     acceptable = ["concepts/workloads/pods#what-is-a-pod"]
-    citations = [{"span_ids": ["concepts/workloads/pods#what-is-a-pod"]}]
+    citations = [_citation(span_ids=["concepts/workloads/pods#what-is-a-pod"])]
     assert (
         evaluate.citation_coverage(gold, citations, acceptable_span_ids=acceptable)
         == 1.0
@@ -1811,7 +1796,7 @@ def test_prediction_metrics_passes_acceptable_spans_for_rag_examples() -> None:
 
 
 def _kube_smoke_run(
-    examples: list[dict],
+    examples: list[Example],
     *,
     make_settings,
     tmp_path: Path,
@@ -1884,13 +1869,13 @@ def _kube_trace_and_result(
     }
 
 
-def _load_smoke_examples() -> list[dict]:
+def _load_smoke_examples() -> list[Example]:
     """Load the real Kubernetes smoke rubric from the data directory."""
     from support_graph.data.eval_subsets import load_subset_jsonl
 
     repo_root = Path(__file__).resolve().parent.parent.parent
     path = repo_root / "data/eval_subsets/kubernetes/smoke.jsonl"
-    return load_subset_jsonl(path)
+    return cast(list[Example], load_subset_jsonl(path))
 
 
 def test_smoke_pods_what_is_a_pod_span_not_right_source_wrong_section(

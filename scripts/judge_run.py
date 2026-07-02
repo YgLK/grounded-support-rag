@@ -3,6 +3,7 @@
 import asyncio
 import json
 import argparse
+from dataclasses import replace
 from pathlib import Path
 from support_graph.config.settings import Settings
 from support_graph.evaluation.judge import RAGJudge
@@ -37,7 +38,7 @@ async def main():
     # Use the config as-is unless a model override is provided
     config = settings.runtime
     if args.model:
-        config = config.with_overrides(chat_model=args.model)
+        config = replace(config, chat_model=args.model)
 
     judge = RAGJudge.from_config(config)
 

@@ -143,4 +143,7 @@ def test_fetch_kubernetes_docs_refuses_existing_output(tmp_path: Path) -> None:
     output_dir.mkdir(parents=True)
 
     with pytest.raises(FileExistsError):
-        fetch_kubernetes_docs(output_dir, runner=lambda *args, **kwargs: None)
+        fetch_kubernetes_docs(
+            output_dir,
+            runner=lambda *args, **kwargs: subprocess.CompletedProcess(args, 0),
+        )

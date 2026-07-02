@@ -1,3 +1,4 @@
+from tests._fixtures import _chunk
 from support_graph.evaluation.benchmark import (
     benchmark_embeddings,
     select_benchmark_records,
@@ -6,7 +7,8 @@ from support_graph.evaluation.benchmark import (
 
 def test_select_benchmark_records_is_deterministic_and_sized() -> None:
     records = [
-        {"chunk_id": f"chunk-{index}", "text": f"text {index}"} for index in range(20)
+        _chunk(f"chunk-{index}", text=f"text {index}", doc_id="doc")
+        for index in range(20)
     ]
 
     first = select_benchmark_records(records, 5)
@@ -27,7 +29,8 @@ def test_benchmark_embeddings_reports_throughput_and_estimate() -> None:
             return [[0.1, 0.2] for _ in texts]
 
     records = [
-        {"chunk_id": f"chunk-{index}", "text": f"text {index}"} for index in range(10)
+        _chunk(f"chunk-{index}", text=f"text {index}", doc_id="doc")
+        for index in range(10)
     ]
     embeddings = FakeEmbeddings()
 

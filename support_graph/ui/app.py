@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from support_graph.config.settings import Settings
 from support_graph.ui.dependencies import init_dependencies
 from support_graph.ui.loaders import (
     ArtifactNotFoundError,
@@ -27,7 +25,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 def create_app(loader: WorkbenchArtifactLoader | None = None) -> FastAPI:
     artifact_loader = loader or build_loader()
-    ui_settings = cast(Settings, artifact_loader.settings)
+    ui_settings = artifact_loader.settings
     templates = _build_templates()
     app = FastAPI(title="SupportGraph Workbench")
 
@@ -150,10 +148,12 @@ def _datetime_label(value: datetime | str | None) -> str:
         return "n/a"
     if isinstance(value, str):
         try:
-            value = datetime.fromisoformat(value)
+            parsed = datetime.fromisoformat(value)
         except ValueError:
             return value
-    return value.astimezone().strftime("%Y-%m-%d %H:%M")
+    else:
+        parsed = value
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def _metric_label(value: float | None, digits: int = 3) -> str:

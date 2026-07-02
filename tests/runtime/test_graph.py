@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from support_graph.runtime import graph
 from support_graph.runtime import nodes as runtime_nodes
+from support_graph.runtime.schemas import GraphStreamEvent
 from support_graph.runtime.traces import load_trace_events
 
 
@@ -473,7 +474,7 @@ def test_astream_graph_events_emits_milestones_and_response_deltas(
         graph, "_trace", lambda *args, **kwargs: asyncio.sleep(0), raising=False
     )
 
-    async def collect_events() -> list[dict]:
+    async def collect_events() -> list[GraphStreamEvent]:
         return [
             event
             async for event in graph.astream_graph_events(

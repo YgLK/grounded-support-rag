@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -224,7 +226,10 @@ def test_doctor_cli_preserves_config_file_and_secrets_in_next_commands(
 
 def test_doctor_parser_exposes_help() -> None:
     parser = build_parser()
-    subparsers_action = parser._subparsers._group_actions[0]  # type: ignore[attr-defined]
+    assert parser._subparsers is not None
+    subparsers_action = cast(
+        argparse._SubParsersAction, parser._subparsers._group_actions[0]
+    )
     subcommands = subparsers_action.choices
     assert "doctor" in subcommands
 

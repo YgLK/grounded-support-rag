@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TypeVar
 
@@ -52,6 +53,13 @@ from support_graph.ui.models import (
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+SummaryT = TypeVar(
+    "SummaryT",
+    EvalRunSummary,
+    StandaloneRunSummary,
+    EvalReportSummary,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,10 +620,10 @@ class WorkbenchArtifactLoader:
 
     def _sort_by_created_at(
         self,
-        items: list[EvalRunSummary | StandaloneRunSummary | EvalReportSummary],
+        items: Sequence[SummaryT],
         *,
         order: SortOrder,
-    ) -> list[EvalRunSummary | StandaloneRunSummary | EvalReportSummary]:
+    ) -> list[SummaryT]:
         reverse = order == "desc"
         return sorted(
             items,

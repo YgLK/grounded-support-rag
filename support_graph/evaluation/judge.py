@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
@@ -30,7 +30,7 @@ class RAGJudge:
     ) -> RAGJudge:
         """Build a judge from a runtime config."""
         if model_name:
-            config = config.with_overrides(chat_model=model_name)
+            config = replace(config, chat_model=model_name)
         model = build_chat_model(config)
         return cls(model)
 

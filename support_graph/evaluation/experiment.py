@@ -44,8 +44,12 @@ class ExperimentVariant(TypedDict):
     config_overrides: dict[str, Any]
 
 
-class ExperimentSettingsLike(Protocol):
+class ExperimentSettingsPaths(Protocol):
     project_root: Path
+
+
+class ExperimentSettingsLike(Protocol):
+    paths: ExperimentSettingsPaths
 
 
 PRIMARY_METRICS = (

@@ -4,6 +4,7 @@ import pytest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from support_graph.config.runtime import (
     ConfigValidationError,
@@ -44,7 +45,7 @@ def make_settings(repo_root: Path):
             Domain.KUBERNETES,
         )
         missing = list(missing_fields or [])
-        runtime_payload = {
+        runtime_payload: dict[str, Any] = {
             "chat_provider_type": Provider.OPENROUTER,
             "embedding_provider_type": Provider.OPENROUTER,
             "ollama_base_url": DEFAULT_OLLAMA_BASE_URL,
@@ -91,10 +92,12 @@ def make_settings(repo_root: Path):
             ),
             "runtime": None,
             "selected_domain": lambda explicit_domain=None: explicit_domain or domain,
-            "chunk_artifact_path": lambda explicit_domain=None: root
-            / "data/derived/chunks"
-            / f"{explicit_domain or domain}.jsonl",
-            "collection_name": lambda explicit_domain=None: f"support_graph_{explicit_domain or domain}",
+            "chunk_artifact_path": lambda explicit_domain=None: (
+                root / "data/derived/chunks" / f"{explicit_domain or domain}.jsonl"
+            ),
+            "collection_name": lambda explicit_domain=None: (
+                f"support_graph_{explicit_domain or domain}"
+            ),
         }
         if overrides:
             runtime_field_names = set(RuntimeConfig.__dataclass_fields__)
@@ -174,7 +177,7 @@ def runtime_example() -> dict:
 @pytest.fixture
 def make_runtime_config():
     def factory(**overrides) -> RuntimeConfig:
-        payload = {
+        payload: dict[str, Any] = {
             "domain": "kubernetes",
             "collection_name": "support_graph_kubernetes",
             "chat_provider_type": Provider.OPENROUTER,
