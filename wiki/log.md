@@ -26,3 +26,7 @@
 ## [2026-06-30] ingest | Eval Expansion and Variance Attribution Tooling
 - Created: Eval Expansion and Variance Attribution Tooling
 - Updated: Knowledge Base Index
+
+## [2026-07-02] ingest | ty Typecheck Cleanup Patterns
+- Created: ty Typecheck Cleanup Patterns
+- Updated: Knowledge Base Index
