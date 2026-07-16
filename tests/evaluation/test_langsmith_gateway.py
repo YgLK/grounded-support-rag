@@ -98,3 +98,26 @@ def test_gateway_normalizes_evaluation_rows(monkeypatch) -> None:
     assert snapshot.results[0].feedback == (
         FeedbackValue(key="doc_recall_at_3", score=1.0),
     )
+
+
+def test_gateway_lists_experiments_without_async_generator_mismatch(
+    monkeypatch,
+) -> None:
+    sdk = FakeSdkClient()
+    gateway = SdkLangSmithGateway(sdk)
+
+    monkeypatch.setattr(
+        sdk,
+        "list_projects",
+        lambda **kwargs: iter([SimpleNamespace(id="project-1")]),
+        raising=False,
+    )
+
+    async def fake_read_experiment(experiment_id: str):
+        return SimpleNamespace(id=experiment_id)
+
+    monkeypatch.setattr(gateway, "read_experiment", fake_read_experiment)
+
+    snapshots = asyncio.run(gateway.list_experiments("dataset-1"))
+
+    assert [snapshot.id for snapshot in snapshots] == ["project-1"]

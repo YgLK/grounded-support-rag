@@ -108,20 +108,21 @@ class SdkLangSmithGateway:
         runs = await asyncio.to_thread(
             lambda: tuple(self._client.list_runs(project_id=project.id))
         )
-        results = tuple(
-            await self._result_from_run(run)
-            for run in runs
-            if getattr(run, "reference_example_id", None) is not None
-        )
+        results_list: list[ExampleResult] = []
+        for run in runs:
+            if getattr(run, "reference_example_id", None) is not None:
+                results_list.append(await self._result_from_run(run))
+        results = tuple(results_list)
         return _experiment_snapshot(project, _dataset_ref(dataset), results)
 
     async def list_experiments(self, dataset_id: str) -> tuple[ExperimentSnapshot, ...]:
         projects = await asyncio.to_thread(
             lambda: tuple(self._client.list_projects(reference_dataset_id=dataset_id))
         )
-        return tuple(
-            await self.read_experiment(str(project.id)) for project in projects
-        )
+        experiments: list[ExperimentSnapshot] = []
+        for project in projects:
+            experiments.append(await self.read_experiment(str(project.id)))
+        return tuple(experiments)
 
     async def update_experiment_metadata(
         self, experiment_id: str, metadata: dict[str, Any]
