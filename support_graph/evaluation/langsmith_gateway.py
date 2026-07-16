@@ -150,7 +150,7 @@ class SdkLangSmithGateway:
             lambda: tuple(self._client.list_feedback(run_ids=[run.id]))
         )
         return ExampleResult(
-            example_id=str(example.id),
+            example_id=_example_id(example),
             run_id=str(run.id),
             inputs=_dict_value(example, "inputs"),
             reference_outputs=_dict_value(example, "outputs"),
@@ -195,7 +195,7 @@ def _experiment_snapshot(
 
 def _example_result(row: Mapping[str, Any]) -> ExampleResult:
     example = row["example"]
-    example_id = _value(example, "id")
+    example_id = _example_id(example)
     if example_id is None:
         raise ValueError("LangSmith result is missing example_id")
     run = row["run"]
@@ -220,6 +220,18 @@ def _feedback_value(feedback: Any) -> FeedbackValue:
         value=_optional_text(_value(feedback, "value")),
         error=_optional_text(_value(feedback, "error")),
     )
+
+
+def _example_id(example: Any) -> str:
+    metadata = _value(example, "metadata", {})
+    if isinstance(metadata, Mapping):
+        source_id = metadata.get("example_id")
+        if source_id:
+            return str(source_id)
+    identifier = _value(example, "id")
+    if identifier is None:
+        raise ValueError("LangSmith example is missing example_id")
+    return str(identifier)
 
 
 def _trace_record(run: Any) -> dict[str, Any]:

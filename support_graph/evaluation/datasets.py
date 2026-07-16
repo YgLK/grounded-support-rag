@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from support_graph.evaluation.contracts import DatasetRef, LangSmithGateway
 
@@ -72,7 +73,7 @@ def _validate_examples(examples: list[dict[str, Any]]) -> None:
 def _dataset_example(example: dict[str, Any]) -> dict[str, Any]:
     example_id = str(example["example_id"])
     return {
-        "id": example_id,
+        "id": str(uuid5(NAMESPACE_URL, f"support-graph/example/{example_id}")),
         "inputs": {"example": example},
         "outputs": {
             "reference_answer": example.get("reference_answer"),
