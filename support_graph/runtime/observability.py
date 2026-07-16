@@ -30,22 +30,21 @@ class Observability:
         return summary
 
 
+def build_langsmith_client(config: ObservabilityConfigLike) -> Client:
+    return Client(
+        api_key=config.langsmith_api_key or "",
+        api_url=config.langsmith_endpoint,
+    )
+
+
 def build_observability(config: ObservabilityConfigLike) -> Observability | None:
     if not config.langsmith_tracing_enabled:
         return None
 
     observability = Observability()
 
-    if config.langsmith_tracing_enabled:
-        client_kwargs: dict[str, Any] = {}
-        if config.langsmith_api_key:
-            client_kwargs["api_key"] = config.langsmith_api_key
-        if config.langsmith_endpoint:
-            client_kwargs["api_url"] = config.langsmith_endpoint
-        observability.langsmith_project = (
-            config.langsmith_project or "grounded-support-rag"
-        )
-        observability.langsmith_client = Client(**client_kwargs)
+    observability.langsmith_project = config.langsmith_project or "grounded-support-rag"
+    observability.langsmith_client = build_langsmith_client(config)
 
     return observability
 
@@ -74,6 +73,7 @@ def graph_run_context(
 __all__ = [
     "Observability",
     "ObservabilityConfigLike",
+    "build_langsmith_client",
     "build_observability",
     "graph_run_context",
 ]

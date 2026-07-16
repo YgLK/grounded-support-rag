@@ -1,6 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from support_graph.config.runtime import (
+    ConfigValidationError,
     RuntimeConfig,
     RuntimeExperimentOverrides,
     build_runtime_config,
@@ -105,3 +109,31 @@ def test_runtime_for_applies_typed_experiment_overrides() -> None:
     assert config.experiment_options == {"query_mode": "structured"}
     assert settings.runtime.retrieval_rerank is True
     assert settings.runtime.domain == Domain.KUBERNETES
+
+
+def test_validate_for_hosted_eval_requires_langsmith_configuration() -> None:
+    config = replace(
+        _make_settings().runtime,
+        langsmith_tracing_enabled=False,
+        langsmith_api_key=None,
+        langsmith_project=None,
+    )
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        config.validate_for_hosted_eval()
+
+    assert exc_info.value.scope == "hosted evaluation"
+    assert list(exc_info.value.missing_fields) == [
+        "LANGSMITH_TRACING=true",
+        "LANGSMITH_API_KEY",
+        "LANGSMITH_PROJECT",
+    ]
+
+
+def test_validate_for_run_does_not_require_langsmith() -> None:
+    replace(
+        _make_settings().runtime,
+        langsmith_tracing_enabled=False,
+        langsmith_api_key=None,
+        langsmith_project=None,
+    ).validate_for_run()

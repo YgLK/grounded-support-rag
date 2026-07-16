@@ -26,6 +26,9 @@ __all__ = [
     "DEFAULT_CONTENT_ONLY_REASONING",
     "DEFAULT_NEIGHBOR_EXPANSION",
     "DEFAULT_RETRIEVAL_RERANK",
+    "MISSING_LANGSMITH_API_KEY",
+    "MISSING_LANGSMITH_PROJECT",
+    "MISSING_LANGSMITH_TRACING",
 ]
 
 DEFAULT_RETRIEVAL_RERANK = True
@@ -35,6 +38,9 @@ MISSING_POSTGRES_DSN = ".env: SUPPORT_GRAPH_POSTGRES_DSN"
 MISSING_CHAT_MODEL = "support_graph.toml: runtime.chat_model"
 MISSING_EMBEDDING_MODEL = "support_graph.toml: runtime.embedding_model"
 MISSING_OPENROUTER_API_KEY = ".env: SUPPORT_GRAPH_OPENROUTER_API_KEY"
+MISSING_LANGSMITH_TRACING = "LANGSMITH_TRACING=true"
+MISSING_LANGSMITH_API_KEY = "LANGSMITH_API_KEY"
+MISSING_LANGSMITH_PROJECT = "LANGSMITH_PROJECT"
 
 
 class ConfigValidationError(ValueError):
@@ -102,6 +108,21 @@ class RuntimeConfig:
 
     def validate_for_run(self) -> None:
         self._validate(scope="runtime", needs_chat_model=True)
+
+    def validate_for_hosted_eval(self) -> None:
+        self._validate(scope="hosted evaluation", needs_chat_model=True)
+        missing: list[str] = []
+        if not self.langsmith_tracing_enabled:
+            missing.append(MISSING_LANGSMITH_TRACING)
+        if not self.langsmith_api_key:
+            missing.append(MISSING_LANGSMITH_API_KEY)
+        if not self.langsmith_project:
+            missing.append(MISSING_LANGSMITH_PROJECT)
+        if missing:
+            raise ConfigValidationError(
+                scope="hosted evaluation",
+                missing_fields=missing,
+            )
 
     def _validate(self, *, scope: str, needs_chat_model: bool) -> None:
         missing = self._missing_fields(needs_chat_model=needs_chat_model)
