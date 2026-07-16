@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import argparse
 import math
-from dataclasses import replace
-from datetime import datetime
+import sys
+import tempfile
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
+
+from langsmith.run_helpers import trace, tracing_context
+from langsmith.utils import LangSmithError
 
 from support_graph.cli.formatting import (
     format_experiment_output,
     format_eval_output,
+    format_baseline_output,
     format_review_failures_output,
     format_run_output,
     format_trace_show_output,
@@ -29,10 +34,9 @@ from support_graph.cli.utils import (
     run_async_boundary,
     run_output_dir,
     shorten,
-    write_json,
     eval_run_is_complete,
 )
-from support_graph.artifacts import build_standalone_run_id, standalone_run_artifacts
+from support_graph.artifacts import build_standalone_run_id
 from support_graph.config.runtime import ConfigValidationError, RuntimeConfig
 from support_graph.config.settings import Settings
 from support_graph.data.chunks import build_chunks, write_chunks_jsonl
@@ -53,7 +57,6 @@ from support_graph.evaluation.eval_examples import (
 )
 from support_graph.evaluation.evaluate import (
     build_eval_config,
-    evaluate_split_async,
     load_eval_examples,
 )
 from support_graph.evaluation.variance import (
@@ -61,11 +64,17 @@ from support_graph.evaluation.variance import (
     write_variance_report,
 )
 from support_graph.evaluation.model_ab import run_compatibility_gate_async
-from support_graph.logging_utils import configure_logging, get_logger
-from support_graph.providers import (
-    chat_provider as resolved_chat_provider,
-    embedding_provider as resolved_embedding_provider,
+from support_graph.evaluation.baselines import (
+    export_baseline,
+    find_promoted_baseline,
+    promote_baseline,
 )
+from support_graph.evaluation.langsmith_gateway import build_langsmith_gateway
+from support_graph.evaluation.hosted import run_hosted_evaluation
+from support_graph.evaluation.metadata import read_git_state
+from support_graph.evaluation.datasets import dataset_name, dataset_sha256
+from support_graph.evaluation.policy import load_policy
+from support_graph.logging_utils import configure_logging, get_logger
 from support_graph.retrieval.index import (
     build_embeddings,
     collection_row_count,
@@ -73,6 +82,7 @@ from support_graph.retrieval.index import (
     load_chunk_records,
 )
 from support_graph.runtime.graph import run_graph_async
+from support_graph.runtime.observability import build_langsmith_client
 from support_graph.runtime.schemas import GraphStreamEvent
 from support_graph.runtime.traces import load_trace_events, summarize_trace_events
 from support_graph.types import DomainLike
@@ -120,6 +130,20 @@ def _print_config_validation_error(
         settings=settings,
         missing=list(error.missing_fields),
     )
+
+
+def _validate_hosted_config(settings: Settings) -> None:
+    validator = getattr(settings.runtime, "validate_for_hosted_eval", None)
+    if validator is None:
+        raise ConfigValidationError(
+            scope="hosted evaluation",
+            missing_fields=[
+                "LANGSMITH_TRACING=true",
+                "LANGSMITH_API_KEY",
+                "LANGSMITH_PROJECT",
+            ],
+        )
+    validator()
 
 
 def _ensure_chunk_artifact(
@@ -612,55 +636,50 @@ def _run_example(args: argparse.Namespace) -> int:
         domain,
         run_config.collection_name,
     )
-    created_at = datetime.now().astimezone().isoformat()
     run_id = build_standalone_run_id()
-    artifacts = standalone_run_artifacts(settings.paths.project_root, run_id)
-    artifacts.output_dir.mkdir(parents=True, exist_ok=True)
-    result_payload = cast(
-        dict,
-        run_async_boundary(
-            run_graph_async(
-                example=example,
-                config=run_config,
-                run_id=run_id,
-                trace_path=artifacts.trace,
-                max_attempts=settings.runtime.max_retrieval_attempts,
-                _event_sink=_log_graph_event,
-            )
-        ),
-    )
-    trace_summary = dict(result_payload.get("trace_summary", {}))
-    trace_summary["trace_path"] = relative_path(
-        artifacts.trace, settings.paths.project_root
-    )
-    result_payload = {**result_payload, "trace_summary": trace_summary}
-    write_json(
-        artifacts.manifest,
-        {
-            "run_id": run_id,
-            "created_at": created_at,
-            "example_id": example.get("example_id"),
-            "domain": str(domain),
-            "provider": {
-                "type": str(resolved_chat_provider(settings.runtime)),
-                "chat_model": settings.runtime.chat_model,
-                "embedding_type": str(resolved_embedding_provider(settings.runtime)),
-                "embedding_model": settings.runtime.embedding_model,
-            },
-            "prompt_version": run_config.prompt_version,
-        },
-    )
-    write_json(artifacts.result, result_payload)
+    with tempfile.TemporaryDirectory(prefix="support-graph-run-") as temp_dir:
+        trace_path = Path(temp_dir) / f"{example['example_id']}.jsonl"
+        graph_call = run_graph_async(
+            example=example,
+            config=run_config,
+            run_id=run_id,
+            trace_path=trace_path,
+            max_attempts=settings.runtime.max_retrieval_attempts,
+            _event_sink=_log_graph_event,
+        )
+        langsmith_url: str | None = None
+        if (
+            getattr(run_config, "langsmith_tracing_enabled", False)
+            and getattr(run_config, "langsmith_api_key", None)
+            and getattr(run_config, "langsmith_project", None)
+        ):
+            client = build_langsmith_client(run_config)
+            with tracing_context(
+                project_name=run_config.langsmith_project,
+                client=client,
+                enabled=True,
+            ):
+                with trace(
+                    "support-graph-run",
+                    run_type="chain",
+                    inputs={"example_id": str(example["example_id"])},
+                    project_name=run_config.langsmith_project,
+                    client=client,
+                    run_id=run_id,
+                ) as root_run:
+                    result_payload = cast(dict, run_async_boundary(graph_call))
+            langsmith_url = root_run.get_url()
+        else:
+            result_payload = cast(dict, run_async_boundary(graph_call))
+        trace_summary = dict(result_payload.get("trace_summary", {}))
+        trace_summary.pop("trace_path", None)
+        result_payload = {**result_payload, "trace_summary": trace_summary}
     print_lines(
         format_run_output(
             {
                 **result_payload,
                 "run_id": run_id,
-                "artifact_paths": {
-                    "manifest": artifacts.manifest,
-                    "result": artifacts.result,
-                    "trace": artifacts.trace,
-                },
+                "langsmith_url": langsmith_url,
             },
             settings,
             verbose=args.verbose,
@@ -673,49 +692,113 @@ def _eval_split(args: argparse.Namespace) -> int:
     """CLI handler for the 'eval' command."""
     settings = _load_settings(args)
     try:
-        settings.runtime.validate_for_run()
+        _validate_hosted_config(settings)
     except ConfigValidationError as exc:
-        return _print_config_validation_error(
-            title="SupportGraph Eval",
-            settings=settings,
-            error=exc,
-        )
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     domain = settings.selected_domain(args.domain)
-    postgres_dsn = settings.runtime.postgres_dsn
-    if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for evaluation.")
-    if not _ensure_index_ready(
-        title="SupportGraph Eval",
-        postgres_dsn=postgres_dsn,
-        collection_name=settings.collection_name(domain),
-        domain=domain,
-    ):
-        return 1
-
-    logger.info(
-        "Running eval for domain=%s split=%s subset=%s limit=%s max_concurrency=%s",
-        domain,
-        args.split,
-        args.subset,
-        args.limit if args.limit is not None else "all",
-        args.max_concurrency,
-    )
-    result = cast(
-        dict,
-        run_async_boundary(
-            evaluate_split_async(
-                settings=settings,
-                domain=domain,
-                split=args.split,
-                subset=args.subset,
-                limit=args.limit,
-                notes=args.notes,
+    try:
+        examples, _ = load_eval_examples(
+            settings,
+            domain,
+            args.split,
+            args.subset,
+        )
+        selected_examples = (
+            examples[: args.limit] if args.limit is not None else examples
+        )
+        policy = _baseline_policy(settings, str(domain), str(args.subset))
+        gateway = build_langsmith_gateway(settings.runtime)
+        result = run_async_boundary(
+            run_hosted_evaluation(
+                gateway=gateway,
+                examples=selected_examples,
+                config=settings.runtime,
+                domain=str(domain),
+                subset=str(args.subset),
+                policy=policy,
+                corpus_ref="configured",
+                corpus_manifest_path=settings.dataset.root / "manifest.json",
+                git_state=read_git_state(settings.paths.project_root),
                 max_concurrency=args.max_concurrency,
             )
-        ),
+        )
+    except (
+        ConfigValidationError,
+        LangSmithError,
+        ValueError,
+        FileNotFoundError,
+        OSError,
+    ) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    payload = {
+        "experiment_id": result.experiment.id,
+        "status": result.gate.status,
+        "baseline_experiment_id": result.gate.baseline_experiment_id,
+        "langsmith_url": result.experiment.url,
+        "deltas": [asdict(delta) for delta in result.gate.deltas],
+        "reasons": result.gate.reasons,
+    }
+    print_lines(format_eval_output(payload, settings))
+    return {"passed": 0, "regressed": 1, "invalid": 2}[result.gate.status]
+
+
+def _baseline_policy(settings: Settings, domain: str, subset: str = "smoke"):
+    return load_policy(
+        settings.paths.project_root / "data/eval_policies" / domain / f"{subset}.toml"
     )
-    print_lines(format_eval_output(result, settings))
+
+
+def _baseline_export(args: argparse.Namespace) -> int:
+    settings = _load_settings(args)
+    try:
+        _validate_hosted_config(settings)
+        gateway = build_langsmith_gateway(settings.runtime)
+        path = run_async_boundary(
+            export_baseline(
+                gateway,
+                args.experiment_id,
+                output_dir=settings.paths.project_root / "outputs/baselines",
+            )
+        )
+    except (ConfigValidationError, LangSmithError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print_lines(
+        format_baseline_output(
+            operation="export",
+            path=path,
+        )
+    )
+    return 0
+
+
+def _baseline_promote(args: argparse.Namespace) -> int:
+    settings = _load_settings(args)
+    try:
+        _validate_hosted_config(settings)
+        gateway = build_langsmith_gateway(settings.runtime)
+        experiment = run_async_boundary(
+            promote_baseline(
+                gateway,
+                args.experiment_id,
+                reason=args.reason,
+                policy=_baseline_policy(settings, str(settings.selected_domain(None))),
+                output_dir=settings.paths.project_root / "outputs/baselines",
+            )
+        )
+    except (ConfigValidationError, LangSmithError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print_lines(
+        format_baseline_output(
+            operation="promote",
+            experiment_id=experiment.id,
+            dataset_url=experiment.dataset.url or experiment.dataset.name,
+        )
+    )
     return 0
 
 
@@ -1147,135 +1230,55 @@ def _model_ab_compatibility(args: argparse.Namespace) -> int:
     return 0 if gate.passed else 1  # type: ignore[attr-defined]
 
 
-def _global_cli_opts(args: argparse.Namespace) -> str:
-    """Build the global --config-file/--secrets-file prefix to reuse in
-    suggested commands, preserving the same setup the user invoked doctor with.
-    """
-    parts: list[str] = []
-    config_file = getattr(args, "config_file", None)
-    secrets_file = getattr(args, "secrets_file", None)
-    if config_file:
-        parts.append(f"--config-file {config_file}")
-    if secrets_file:
-        parts.append(f"--secrets-file {secrets_file}")
-    return " ".join(parts)
-
-
 def _doctor(args: argparse.Namespace) -> int:
-    """CLI handler for the 'doctor' command.
-
-    A local demo preflight. Does not run evals, call LLMs, fetch docs, or
-    mutate artifacts. Checks runtime config, local chunk/corpus artifacts,
-    pgvector index availability, and optional eval artifact completeness,
-    then prints exact next commands.
-    """
+    """Check read-only LangSmith access for the selected evaluation subset."""
     settings = _load_settings(args)
     domain = settings.selected_domain(args.domain)
     title = "SupportGraph Doctor"
 
-    # Preserve the global config/secrets options the user passed so the
-    # suggested remediation commands target the same setup doctor inspected
-    # (config file, dataset root, providers, secrets) instead of falling back
-    # to the default support_graph.toml.
-    global_opts = _global_cli_opts(args)
-
-    config_status = "ok"
-    config_missing: list[str] = []
     try:
-        settings.runtime.validate_for_run()
+        _validate_hosted_config(settings)
+        examples, _ = load_eval_examples(settings, domain, "validation", args.subset)
+        digest = dataset_sha256(examples)
+        name = dataset_name(str(domain), str(args.subset), digest)
+        gateway = build_langsmith_gateway(settings.runtime)
+        run_async_boundary(gateway.ping())
+        dataset = run_async_boundary(gateway.get_dataset(name))
+        baseline = None
+        if dataset is not None:
+            baseline = run_async_boundary(find_promoted_baseline(gateway, dataset))
+        print_lines(
+            [
+                title,
+                f"Domain: {domain}",
+                "LangSmith connectivity: ok",
+                "LangSmith project: configured",
+                f"Dataset: {'ok' if dataset is not None else 'missing'}",
+                f"Promoted baseline: {'ok' if baseline is not None else 'missing'}",
+                "State: ready" if dataset is not None else "State: needs-action",
+            ]
+        )
+        return 0 if dataset is not None else 1
     except ConfigValidationError as exc:
-        config_status = "missing"
-        config_missing = list(exc.missing_fields)
-
-    run_config = _run_config(settings, domain)
-    postgres_dsn = run_config.postgres_dsn
-    collection_name = run_config.collection_name
-
-    index_status = "skipped"
-    index_error: str | None = None
-    if config_status == "ok":
-        if postgres_dsn is None:
-            index_status = "unavailable"
-            index_error = "Missing postgres_dsn for doctor."
-        else:
-            row_count, row_count_error = _checked_collection_row_count(
-                postgres_dsn,
-                collection_name,
-            )
-            if row_count is None:
-                index_status = "unavailable"
-                index_error = row_count_error or "Unknown pgvector inspection error."
-            elif row_count == 0:
-                index_status = "missing"
-            else:
-                index_status = "ok"
-
-    chunk_path = settings.chunk_artifact_path(domain)
-    chunks_status = "present" if chunk_path.exists() else "missing"
-    corpus_path = settings.dataset.root
-    corpus_status = "present" if corpus_path.exists() else "missing"
-
-    eval_artifacts_status = "not-checked"
-    eval_artifacts_ok = True
-    if args.run_id is not None:
-        output_dir = run_output_dir(settings, args.run_id)
-        if not output_dir.exists() or not eval_run_is_complete(output_dir):
-            eval_artifacts_status = "missing"
-            eval_artifacts_ok = False
-        else:
-            eval_artifacts_status = "ok"
-
-    ready = config_status == "ok" and index_status == "ok" and eval_artifacts_ok
-    state = "ready" if ready else "needs-action"
-
-    lines = [
-        title,
-        f"Domain: {domain}",
-        f"Config: {config_status}",
-        f"Index: {index_status}",
-        f"Chunks: {chunks_status}",
-        f"Corpus: {corpus_status}",
-        f"Eval Artifacts: {eval_artifacts_status}",
-        f"State: {state}",
-    ]
-
-    next_lines: list[str] = []
-    prefix = "uv run grounded-support-rag"
-    if global_opts:
-        prefix = f"{prefix} {global_opts}"
-    if config_status == "missing":
-        next_lines.append(
-            "Inspect "
-            f"{relative_path(settings.paths.config_path, settings.paths.project_root)} and copy "
-            f".env.example to {relative_path(settings.paths.secrets_path, settings.paths.project_root)} "
-            f"(missing: {', '.join(config_missing)})."
+        print_lines(
+            [
+                title,
+                "LangSmith connectivity: blocked",
+                f"Missing config: {', '.join(exc.missing_fields)}",
+                "State: needs-action",
+            ]
         )
-    if index_status == "unavailable":
-        next_lines.append(
-            f"Verify Postgres is reachable for collection {collection_name}"
-            + (f": {index_error}" if index_error else "")
-            + "."
+        return 1
+    except (OSError, ValueError, RuntimeError) as exc:
+        print_lines(
+            [
+                title,
+                "LangSmith connectivity: unavailable",
+                str(exc),
+                "State: needs-action",
+            ]
         )
-    if index_status == "missing":
-        next_lines.append(f"Run: {prefix} index-docs --domain {domain}")
-    if chunks_status == "missing":
-        next_lines.append(f"Run: {prefix} build-chunks --domain {domain}")
-    if corpus_status == "missing":
-        next_lines.append(f"Run: {prefix} fetch-kubernetes-docs --ref main")
-    if eval_artifacts_status == "missing":
-        next_lines.append(
-            f"Run: {prefix} eval --domain {domain} --subset smoke "
-            f"to regenerate eval artifacts for {args.run_id}."
-        )
-    if ready:
-        next_lines.append(f"Run: {prefix} eval --domain {domain} --subset smoke")
-
-    if next_lines:
-        lines.append("Next")
-        lines.extend(next_lines)
-
-    print_lines(lines)
-    return 0 if ready else 1
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1296,6 +1299,8 @@ def build_parser() -> argparse.ArgumentParser:
             promote_eval_examples=_promote_eval_examples,
             eval_variance=_eval_variance,
             model_ab_compatibility=_model_ab_compatibility,
+            baseline_promote=_baseline_promote,
+            baseline_export=_baseline_export,
             doctor=_doctor,
         )
     )

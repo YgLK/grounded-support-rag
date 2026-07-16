@@ -34,6 +34,8 @@ class CliHandlers:
     promote_eval_examples: CommandHandler
     eval_variance: CommandHandler
     model_ab_compatibility: CommandHandler
+    baseline_promote: CommandHandler
+    baseline_export: CommandHandler
     doctor: CommandHandler
 
 
@@ -233,6 +235,25 @@ def _register_eval(subparsers: Subparsers, handlers: CliHandlers) -> None:
         help="Maximum number of examples to evaluate concurrently.",
     )
     eval_parser.set_defaults(func=handlers.eval_split)
+
+
+def _register_baseline_promote(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    parser = subparsers.add_parser(
+        "baseline-promote",
+        help="Promote a completed LangSmith experiment as the dataset baseline.",
+    )
+    parser.add_argument("--experiment-id", required=True)
+    parser.add_argument("--reason", required=True)
+    parser.set_defaults(func=handlers.baseline_promote)
+
+
+def _register_baseline_export(subparsers: Subparsers, handlers: CliHandlers) -> None:
+    parser = subparsers.add_parser(
+        "baseline-export",
+        help="Export and verify one LangSmith experiment.",
+    )
+    parser.add_argument("--experiment-id", required=True)
+    parser.set_defaults(func=handlers.baseline_export)
 
 
 def _register_experiment(subparsers: Subparsers, handlers: CliHandlers) -> None:
@@ -490,16 +511,10 @@ def _register_model_ab_compatibility(
 
 
 def _register_doctor(subparsers: Subparsers, handlers: CliHandlers) -> None:
-    """Register the 'doctor' command.
-
-    A local demo preflight: checks runtime config, local chunk/corpus
-    artifacts, pgvector index availability, and optional eval artifact
-    completeness. Does not run evals, call LLMs, fetch docs, or mutate
-    artifacts. Prints exact next commands.
-    """
+    """Register the read-only LangSmith doctor command."""
     doctor_parser = subparsers.add_parser(
         "doctor",
-        help="Local demo preflight: check config, files, index, eval artifacts.",
+        help="Check LangSmith connectivity, dataset, and baseline access.",
     )
     doctor_parser.add_argument(
         "--domain",
@@ -508,9 +523,9 @@ def _register_doctor(subparsers: Subparsers, handlers: CliHandlers) -> None:
         help="Domain to check. Defaults to the configured MVP domain.",
     )
     doctor_parser.add_argument(
-        "--run-id",
-        default=None,
-        help="Optional eval run-id whose artifact completeness should be verified.",
+        "--subset",
+        default=EvalSubset.SMOKE,
+        choices=EVAL_SUBSET_CHOICES,
     )
     doctor_parser.set_defaults(func=handlers.doctor)
 
@@ -524,6 +539,8 @@ def register_subcommands(subparsers: Subparsers, handlers: CliHandlers) -> None:
         _register_index_docs,
         _register_run,
         _register_eval,
+        _register_baseline_promote,
+        _register_baseline_export,
         _register_experiment,
         _register_review_failures,
         _register_trace_show,

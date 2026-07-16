@@ -25,6 +25,7 @@ Next
 {% endfor %}
 
 Trace
+LangSmith: {{ result.get('langsmith_url') or 'none' }}
 Attempts: {{ trace_summary.get('retrieval_attempts', 0) }}
 Path: {{ trace_summary.get('graph_path', []) | join(' -> ') }}
 Fallbacks: {{ trace_summary.get('fallback_count', 0) }}
@@ -39,7 +40,9 @@ Retrieved Chunks
 {% endfor %}
 {% endif %}
 
+{% if artifact_paths %}
 Artifacts
 {{ artifact_paths.manifest }}
 {{ artifact_paths.result }}
 {{ artifact_paths.trace }}
+{% endif %}

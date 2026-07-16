@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -56,23 +57,27 @@ def format_run_output(
     )
     template = env.get_template("run_output.txt.j2")
 
-    raw_artifact_paths = result["artifact_paths"]
+    raw_artifact_paths = result.get("artifact_paths")
     template_context = {
         "result": result,
         "trace_summary": result.get("trace_summary", {}),
         "next_lines": _format_next_steps_guidance(result),
         "verbose": verbose,
-        "artifact_paths": {
-            "manifest": relative_path(
-                Path(raw_artifact_paths["manifest"]), settings.paths.project_root
-            ),
-            "result": relative_path(
-                Path(raw_artifact_paths["result"]), settings.paths.project_root
-            ),
-            "trace": relative_path(
-                Path(raw_artifact_paths["trace"]), settings.paths.project_root
-            ),
-        },
+        "artifact_paths": (
+            {
+                "manifest": relative_path(
+                    Path(raw_artifact_paths["manifest"]), settings.paths.project_root
+                ),
+                "result": relative_path(
+                    Path(raw_artifact_paths["result"]), settings.paths.project_root
+                ),
+                "trace": relative_path(
+                    Path(raw_artifact_paths["trace"]), settings.paths.project_root
+                ),
+            }
+            if raw_artifact_paths
+            else None
+        ),
     }
 
     return template.render(template_context).splitlines()
@@ -97,6 +102,16 @@ def format_eval_output(result: dict, settings: Settings) -> list[str]:
         autoescape=False,
     )
     template = env.get_template("eval_output.txt.j2")
+
+    if "experiment_id" in result:
+        return template.render(
+            experiment_id=result["experiment_id"],
+            status=result.get("status"),
+            baseline_experiment_id=result.get("baseline_experiment_id"),
+            langsmith_url=result.get("langsmith_url"),
+            deltas=result.get("deltas", []),
+            reasons=result.get("reasons", []),
+        ).splitlines()
 
     retrieval = result.get("metrics", {}).get("retrieval", {}).get("answer", {})
     generation = result.get("metrics", {}).get("generation", {}).get("answer", {})
@@ -165,6 +180,28 @@ def format_eval_output(result: dict, settings: Settings) -> list[str]:
     }
 
     return template.render(template_context).splitlines()
+
+
+def format_baseline_output(
+    *,
+    operation: str,
+    path: Path | None = None,
+    experiment_id: str | None = None,
+    dataset_url: str | None = None,
+) -> list[str]:
+    """Format baseline export and promotion confirmations."""
+    env = Environment(
+        loader=FileSystemLoader(Path(__file__).parent / "templates"),
+        autoescape=False,
+    )
+    template = env.get_template("baseline_output.txt.j2")
+    return template.render(
+        operation=operation,
+        path=str(path) if path is not None else None,
+        sha256=(hashlib.sha256(path.read_bytes()).hexdigest() if path else None),
+        experiment_id=experiment_id,
+        dataset_url=dataset_url,
+    ).splitlines()
 
 
 def format_experiment_output(result: dict, settings: Settings) -> list[str]:

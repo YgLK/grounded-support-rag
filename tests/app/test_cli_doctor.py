@@ -1,239 +1,88 @@
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
-from typing import cast
-
-import pytest
-
 from support_graph.cli import handlers as cli
-from support_graph.cli.handlers import build_parser
+from support_graph.evaluation.contracts import DatasetRef
 
 
-def _stub_settings(monkeypatch, make_settings, **kwargs) -> None:
-    fake_settings = make_settings(**kwargs)
+def test_doctor_reports_missing_hosted_configuration(
+    monkeypatch, capsys, make_settings
+):
+    settings = make_settings()
     monkeypatch.setattr(
         cli.Settings,
         "load",
-        classmethod(lambda cls, config_file=None, secrets_file=None: fake_settings),
+        classmethod(lambda cls, config_file=None, secrets_file=None: settings),
         raising=False,
     )
 
+    exit_code = cli.main(["doctor", "--domain", "kubernetes"])
+    output = capsys.readouterr().out
 
-def test_doctor_cli_reports_missing_config_and_next_step(
+    assert exit_code == 1
+    assert "LangSmith connectivity: blocked" in output
+    assert "LANGSMITH_API_KEY" in output
+
+
+def test_doctor_checks_dataset_and_promoted_baseline_without_mutation(
     monkeypatch,
     capsys,
     make_settings,
-) -> None:
-    _stub_settings(
-        monkeypatch,
-        make_settings,
-        missing_fields=[
-            ".env: SUPPORT_GRAPH_POSTGRES_DSN",
-            "support_graph.toml: runtime.chat_model",
-        ],
+):
+    settings = make_settings()
+    settings.runtime.validate_for_hosted_eval = lambda: None
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, config_file=None, secrets_file=None: settings),
+        raising=False,
     )
     monkeypatch.setattr(
         cli,
-        "collection_row_count",
-        lambda *args, **kwargs: pytest.fail(
-            "collection_row_count should not be called when config is missing"
-        ),
+        "load_eval_examples",
+        lambda *args, **kwargs: ([{"example_id": "k8s-001"}], "smoke"),
         raising=False,
     )
 
-    exit_code = cli.main(["doctor", "--domain", "kubernetes"])
-    output = capsys.readouterr().out.splitlines()
+    class Gateway:
+        async def ping(self):
+            return None
 
-    assert exit_code == 1
-    assert output[0] == "SupportGraph Doctor"
-    assert "Domain: kubernetes" in output
-    assert "Config: missing" in output
-    assert "Index: skipped" in output
-    assert "State: needs-action" in output
-    assert "Next" in output
-    assert any("copy .env.example to .env" in line for line in output)
+        async def get_dataset(self, name):
+            return DatasetRef("dataset", name, "hash")
 
-
-def test_doctor_cli_reports_index_unavailable_on_row_count_exception(
-    monkeypatch,
-    capsys,
-    make_settings,
-) -> None:
-    _stub_settings(monkeypatch, make_settings, missing_fields=[])
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("database unavailable")
-
-    monkeypatch.setattr(cli, "collection_row_count", boom, raising=False)
-
-    exit_code = cli.main(["doctor", "--domain", "kubernetes"])
-    output = capsys.readouterr().out.splitlines()
-
-    assert exit_code == 1
-    assert output[0] == "SupportGraph Doctor"
-    assert "Config: ok" in output
-    assert "Index: unavailable" in output
-    assert "State: needs-action" in output
-    assert any("Verify Postgres is reachable" in line for line in output)
-
-
-def test_doctor_cli_reports_index_missing_when_collection_empty(
-    monkeypatch,
-    capsys,
-    make_settings,
-) -> None:
-    _stub_settings(monkeypatch, make_settings, missing_fields=[])
-    monkeypatch.setattr(cli, "collection_row_count", lambda *a, **k: 0, raising=False)
-
-    exit_code = cli.main(["doctor", "--domain", "kubernetes"])
-    output = capsys.readouterr().out.splitlines()
-
-    assert exit_code == 1
-    assert "Index: missing" in output
-    assert "State: needs-action" in output
-    assert any(
-        "uv run grounded-support-rag index-docs --domain kubernetes" in line
-        for line in output
-    )
-
-
-def test_doctor_cli_reports_ready_when_collection_populated(
-    monkeypatch,
-    capsys,
-    make_settings,
-) -> None:
-    _stub_settings(monkeypatch, make_settings, missing_fields=[])
+    monkeypatch.setattr(cli, "build_langsmith_gateway", lambda config: Gateway())
     monkeypatch.setattr(
-        cli, "collection_row_count", lambda *a, **k: 4316, raising=False
+        cli,
+        "find_promoted_baseline",
+        lambda *args, **kwargs: None,
+        raising=False,
     )
+    monkeypatch.setattr(cli, "dataset_sha256", lambda examples: "hash")
 
     exit_code = cli.main(["doctor", "--domain", "kubernetes"])
-    output = capsys.readouterr().out.splitlines()
+    output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert "Config: ok" in output
-    assert "Index: ok" in output
-    assert "Eval Artifacts: not-checked" in output
-    assert "State: ready" in output
-    assert any(
-        "uv run grounded-support-rag eval --domain kubernetes --subset smoke" in line
-        for line in output
-    )
+    assert "LangSmith connectivity: ok" in output
+    assert "Dataset: ok" in output
+    assert "Promoted baseline: missing" in output
 
 
-def test_doctor_cli_reports_missing_eval_artifacts_for_run_id(
+def test_doctor_does_not_create_output_directories(
     monkeypatch,
     capsys,
     make_settings,
-) -> None:
-    _stub_settings(monkeypatch, make_settings, missing_fields=[])
-    monkeypatch.setattr(
-        cli, "collection_row_count", lambda *a, **k: 4316, raising=False
-    )
-
-    exit_code = cli.main(
-        ["doctor", "--domain", "kubernetes", "--run-id", "missing-run-123"]
-    )
-    output = capsys.readouterr().out.splitlines()
-
-    assert exit_code == 1
-    assert "Eval Artifacts: missing" in output
-    assert "State: needs-action" in output
-    assert any("eval --domain kubernetes --subset smoke" in line for line in output)
-
-
-def test_doctor_cli_reports_ok_eval_artifacts_for_complete_run(
-    monkeypatch,
-    capsys,
-    make_settings,
-    tmp_path: Path,
-) -> None:
-    settings = make_settings(
-        project_root=tmp_path,
-        missing_fields=[],
-    )
+    tmp_path,
+):
+    settings = make_settings(project_root=tmp_path)
     monkeypatch.setattr(
         cli.Settings,
         "load",
         classmethod(lambda cls, config_file=None, secrets_file=None: settings),
         raising=False,
     )
-    monkeypatch.setattr(
-        cli, "collection_row_count", lambda *a, **k: 4316, raising=False
-    )
 
-    from support_graph.artifacts import EVAL_RUN_REQUIRED_FILES
+    cli.main(["doctor", "--domain", "kubernetes"])
+    capsys.readouterr()
 
-    run_id = "complete-run-456"
-    run_dir = settings.paths.eval_runs_dir / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    for name in EVAL_RUN_REQUIRED_FILES:
-        (run_dir / name).write_text("{}", encoding="utf-8")
-
-    exit_code = cli.main(["doctor", "--domain", "kubernetes", "--run-id", run_id])
-    output = capsys.readouterr().out.splitlines()
-
-    assert exit_code == 0
-    assert "Eval Artifacts: ok" in output
-    assert "State: ready" in output
-
-
-def test_doctor_cli_preserves_config_file_and_secrets_in_next_commands(
-    monkeypatch,
-    capsys,
-    make_settings,
-    tmp_path: Path,
-) -> None:
-    """Suggested remediation commands must reuse the --config-file/--secrets-file
-    the user passed to doctor, so they target the same setup doctor inspected
-    instead of falling back to the default support_graph.toml.
-    """
-    settings = make_settings(
-        project_root=tmp_path,
-        missing_fields=[],
-    )
-    monkeypatch.setattr(
-        cli.Settings,
-        "load",
-        classmethod(lambda cls, config_file=None, secrets_file=None: settings),
-        raising=False,
-    )
-    # Empty collection -> index-missing remediation command is suggested.
-    monkeypatch.setattr(cli, "collection_row_count", lambda *a, **k: 0, raising=False)
-
-    exit_code = cli.main(
-        [
-            "--config-file",
-            "support_graph.kubernetes.toml",
-            "--secrets-file",
-            ".env.kubernetes",
-            "doctor",
-            "--domain",
-            "kubernetes",
-        ]
-    )
-    output = capsys.readouterr().out.splitlines()
-
-    assert exit_code == 1
-    assert "Index: missing" in output
-    assert any(
-        "uv run grounded-support-rag --config-file support_graph.kubernetes.toml "
-        "--secrets-file .env.kubernetes index-docs --domain kubernetes" in line
-        for line in output
-    )
-
-
-def test_doctor_parser_exposes_help() -> None:
-    parser = build_parser()
-    assert parser._subparsers is not None
-    subparsers_action = cast(
-        argparse._SubParsersAction, parser._subparsers._group_actions[0]
-    )
-    subcommands = subparsers_action.choices
-    assert "doctor" in subcommands
-
-    doctor_parser = subcommands["doctor"]
-    help_text = doctor_parser.format_help()
-    assert "--domain" in help_text
-    assert "--run-id" in help_text
+    assert not (tmp_path / "outputs").exists()

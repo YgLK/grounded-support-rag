@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -50,8 +51,13 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
     monkeypatch,
     capsys,
     make_settings,
+    tmp_path: Path,
 ) -> None:
-    fake_settings = make_settings(missing_fields=[], has_index=True)
+    fake_settings = make_settings(
+        project_root=tmp_path,
+        missing_fields=[],
+        has_index=True,
+    )
     monkeypatch.setattr(
         cli.Settings,
         "load",
@@ -132,10 +138,8 @@ def test_run_cli_default_hierarchy_shows_context_then_decision_then_response(
         in line
         for line in output
     )
-    assert "Artifacts" in output
-    assert any(line.endswith("manifest.json") for line in output)
-    assert any(line.endswith("result.json") for line in output)
-    assert any(line.endswith("trace.jsonl") for line in output)
+    assert "Artifacts" not in output
+    assert not fake_settings.paths.runs_dir.exists()
 
 
 def test_run_cli_reports_index_unavailable_when_row_count_check_fails(
@@ -180,6 +184,74 @@ def test_run_cli_reports_index_unavailable_when_row_count_check_fails(
     assert output[0] == "SupportGraph Run"
     assert "State: index-unavailable" in output
     assert "Index unavailable" in output
+
+
+def test_run_cli_prints_langsmith_trace_url_without_persistent_artifacts(
+    monkeypatch,
+    capsys,
+    make_settings,
+    tmp_path: Path,
+) -> None:
+    fake_settings = make_settings(
+        project_root=tmp_path,
+        missing_fields=[],
+        has_index=True,
+        overrides={
+            "langsmith_tracing_enabled": True,
+            "langsmith_api_key": "ls-key",
+            "langsmith_project": "support-graph",
+        },
+    )
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, config_file=None, secrets_file=None: fake_settings),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "collection_row_count", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(
+        cli,
+        "load_example_record",
+        lambda *args, **kwargs: {
+            "example_id": "k8s-001",
+            "domain": "kubernetes",
+            "latest_user_utterance": "What is a pod?",
+        },
+    )
+    monkeypatch.setattr(cli, "build_langsmith_client", lambda config: object())
+    monkeypatch.setattr(cli, "tracing_context", lambda **kwargs: nullcontext())
+
+    class Root:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_url(self):
+            return "https://smith.langchain.com/o/project/run-1"
+
+    monkeypatch.setattr(cli, "trace", lambda *args, **kwargs: Root())
+    monkeypatch.setattr(
+        cli,
+        "run_graph_async",
+        lambda **kwargs: {
+            "example_id": "k8s-001",
+            "decision": "answer",
+            "response_text": "A pod is a deployable unit.",
+            "citations": [],
+            "latest_user_utterance": "What is a pod?",
+            "trace_summary": {"graph_path": []},
+        },
+    )
+
+    exit_code = cli.main(["run", "--example-id", "k8s-001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "https://smith.langchain.com/o/project/run-1" in output
+    assert not fake_settings.paths.runs_dir.exists()
+    assert not (tmp_path / "traces").exists()
 
 
 def test_run_cli_emits_pipeline_progress_logs(

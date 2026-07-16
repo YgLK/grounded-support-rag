@@ -1,0 +1,9 @@
+{% if operation == "export" %}
+baseline: {{ path }}
+sha256: {{ sha256 }}
+verified: yes
+{% else %}
+experiment: {{ experiment_id }}
+dataset: {{ dataset_url }}
+Mirror this selection with LangSmith UI: Set baseline
+{% endif %}

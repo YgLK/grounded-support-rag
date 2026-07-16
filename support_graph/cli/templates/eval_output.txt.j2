@@ -1,3 +1,15 @@
+{% if experiment_id %}
+experiment: {{ experiment_id }}
+status: {{ status }}
+baseline: {{ baseline_experiment_id or "none" }}
+langsmith: {{ langsmith_url or "none" }}
+{% for delta in deltas -%}
+{{ delta.key }}: {{ delta.candidate }} (baseline {{ delta.baseline }}, regression {{ delta.regression }}, allowed {{ delta.allowed_regression }})
+{% endfor -%}
+{% for reason in reasons -%}
+reason: {{ reason }}
+{% endfor %}
+{% else %}
 SupportGraph Eval
 Run: {{ run_id }}
 Subset: {{ subset_label }}
@@ -28,3 +40,4 @@ Artifacts
 {% for path in artifact_paths %}
 {{ path }}
 {% endfor %}
+{% endif %}
