@@ -211,6 +211,13 @@ class FakeGateway:
             sha256=kwargs["metadata"]["dataset_sha256"],
         )
 
+    async def upsert_dataset_examples(
+        self,
+        dataset: DatasetRef,
+        examples: list[dict[str, Any]],
+    ) -> None:
+        return None
+
     async def evaluate(self, **kwargs: Any) -> ExperimentSnapshot:
         raise AssertionError("evaluate is not used by baseline tests")
 

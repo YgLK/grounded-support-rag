@@ -219,6 +219,13 @@ class FakeGateway:
         )
         return self.dataset
 
+    async def upsert_dataset_examples(
+        self,
+        dataset: DatasetRef,
+        examples: list[dict[str, Any]],
+    ) -> None:
+        return None
+
     async def evaluate(self, **kwargs: Any) -> ExperimentSnapshot:
         assert self.dataset is not None
         self.snapshot = ExperimentSnapshot(
