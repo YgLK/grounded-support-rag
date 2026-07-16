@@ -540,7 +540,7 @@ def test_text_and_retrieval_metrics_are_deterministic() -> None:
 
 
 def test_prediction_metrics_mark_unavailable_ranks_above_retrieval_top_k() -> None:
-    metrics = evaluate._prediction_metrics(
+    metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {"utterance": "Bring proof of insurance."},
@@ -993,7 +993,7 @@ def test_forbidden_claims_hit_detects_present_claims() -> None:
 
 
 def test_prediction_metrics_legacy_examples_unchanged_without_rag_fields() -> None:
-    metrics = evaluate._prediction_metrics(
+    metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {"utterance": "Bring proof of insurance."},
@@ -1024,7 +1024,7 @@ def test_prediction_metrics_legacy_examples_unchanged_without_rag_fields() -> No
 
 
 def test_prediction_metrics_rag_example_emits_triad_and_graded_metrics() -> None:
-    metrics = evaluate._prediction_metrics(
+    metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {
@@ -1099,7 +1099,7 @@ def test_rag_failure_label_retrieval_miss() -> None:
         "answer_relevance": 1.0,
     }
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, metrics)
+        evaluate.failure_label(example, {"decision": "answer"}, metrics)
         == "retrieval_miss"
     )
 
@@ -1123,7 +1123,7 @@ def test_rag_failure_label_right_source_wrong_section() -> None:
         "answer_relevance": 1.0,
     }
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, metrics)
+        evaluate.failure_label(example, {"decision": "answer"}, metrics)
         == "right_source_wrong_section"
     )
 
@@ -1150,7 +1150,7 @@ def test_rag_failure_label_weak_citations_and_unfaithful() -> None:
         "citation_coverage": 0.0,
     }
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, weak)
+        evaluate.failure_label(example, {"decision": "answer"}, weak)
         == "weak_citations"
     )
     unfaithful = {
@@ -1160,7 +1160,7 @@ def test_rag_failure_label_weak_citations_and_unfaithful() -> None:
         "citation_coverage": 1.0,
     }
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, unfaithful)
+        evaluate.failure_label(example, {"decision": "answer"}, unfaithful)
         == "unfaithful_answer"
     )
 
@@ -1184,12 +1184,12 @@ def test_rag_failure_label_incomplete_and_irrelevant() -> None:
     }
     incomplete = {**base, "required_points_covered": 0.5}
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, incomplete)
+        evaluate.failure_label(example, {"decision": "answer"}, incomplete)
         == "incomplete_answer"
     )
     irrelevant = {**base, "answer_relevance": 0.5, "required_points_covered": 1.0}
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, irrelevant)
+        evaluate.failure_label(example, {"decision": "answer"}, irrelevant)
         == "irrelevant_answer"
     )
 
@@ -1209,7 +1209,7 @@ def test_legacy_failure_labels_preserved_when_no_rag_fields() -> None:
         "end_to_end_success": 0.0,
     }
     assert (
-        evaluate._failure_label(example, {"decision": "answer"}, metrics) == "wrong_doc"
+        evaluate.failure_label(example, {"decision": "answer"}, metrics) == "wrong_doc"
     )
 
 
@@ -1248,7 +1248,7 @@ def test_rag_triad_judge_enabled_overrides_deterministic_metrics() -> None:
 
     judge = evaluate.RAGTriadJudge(inner=FakeInner())
     assert judge.enabled is True
-    metrics = evaluate._prediction_metrics(
+    metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {"utterance": "A Pod is the smallest deployable object."},
@@ -1706,7 +1706,7 @@ def test_citation_coverage_accepts_acceptable_span_ids() -> None:
 def test_prediction_metrics_passes_acceptable_spans_for_rag_examples() -> None:
     """_prediction_metrics uses acceptable_span_ids for RAG examples only."""
     # RAG example: acceptable span should boost span_recall and citation_coverage.
-    rag_metrics = evaluate._prediction_metrics(
+    rag_metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {"utterance": "A Pod is the smallest deployable object."},
@@ -1750,7 +1750,7 @@ def test_prediction_metrics_passes_acceptable_spans_for_rag_examples() -> None:
     assert rag_metrics["citation_coverage"] == 1.0
 
     # Legacy example: acceptable_span_ids is ignored even if present.
-    legacy_metrics = evaluate._prediction_metrics(
+    legacy_metrics = evaluate.prediction_metrics(
         {
             "target_mode": "answer",
             "target_turn": {"utterance": "A Pod is the smallest deployable object."},

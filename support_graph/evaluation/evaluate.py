@@ -83,6 +83,10 @@ __all__ = [
     "forbidden_claims_hit",
     "has_rag_eval_fields",
     "RAGTriadJudge",
+    "aggregate_metrics",
+    "failure_label",
+    "prediction_metrics",
+    "prediction_record",
 ]
 
 
@@ -550,7 +554,7 @@ def _retrieval_metric_available(retrieval_top_k: int | None, *, k: int) -> bool:
     return retrieval_top_k is None or int(retrieval_top_k) >= k
 
 
-def _failure_label(
+def failure_label(
     example: Mapping[str, Any], prediction: dict, metrics: dict
 ) -> str | None:
     target_mode = example.get("target_mode")
@@ -731,7 +735,7 @@ def _prediction_retrieved_chunks(prediction: dict) -> list[NormalizedRetrievalHi
     )
 
 
-def _prediction_record(
+def prediction_record(
     example: Mapping[str, Any],
     prediction: dict,
     metrics: dict,
@@ -772,7 +776,7 @@ def _prediction_record(
     return record
 
 
-def _prediction_metrics(
+def prediction_metrics(
     example: Mapping[str, Any],
     prediction: dict,
     *,
@@ -994,7 +998,7 @@ def _rag_triad_metrics(records: list[dict]) -> dict:
     }
 
 
-def _aggregate_metrics(predictions: list[dict]) -> dict:
+def aggregate_metrics(predictions: list[dict]) -> dict:
     answer_predictions = [
         record for record in predictions if record.get("target_mode") == "answer"
     ]
@@ -1322,10 +1326,10 @@ def _runtime_error_record(
         "exception_type": type(exc).__name__,
         "error": str(exc),
     }
-    return _prediction_record(
+    return prediction_record(
         example,
         prediction,
-        _prediction_metrics(
+        prediction_metrics(
             example,
             prediction,
             retrieval_top_k=retrieval_top_k,
@@ -1459,7 +1463,7 @@ async def evaluate_examples_async(
                 index,
                 record,
             )
-        metrics = _prediction_metrics(
+        metrics = prediction_metrics(
             example,
             prediction,
             retrieval_top_k=resolved_config.retrieval_top_k,
@@ -1476,17 +1480,17 @@ async def evaluate_examples_async(
                 forbidden_claims=example.get("forbidden_claims", []),
             )
             if judge_verdict is not None:
-                metrics = _prediction_metrics(
+                metrics = prediction_metrics(
                     example,
                     prediction,
                     retrieval_top_k=resolved_config.retrieval_top_k,
                     judge_verdict=judge_verdict,
                 )
-        record = _prediction_record(
+        record = prediction_record(
             example,
             prediction,
             metrics,
-            failure_label=_failure_label(example, prediction, metrics),
+            failure_label=failure_label(example, prediction, metrics),
         )
         await _log_prediction_progress(example, record)
         return (
@@ -1508,7 +1512,7 @@ async def evaluate_examples_async(
         record for record in predictions if record.get("failure_label") is not None
     ]
 
-    metrics = _aggregate_metrics(predictions)
+    metrics = aggregate_metrics(predictions)
     failure_counts = dict(
         sorted(
             Counter(
