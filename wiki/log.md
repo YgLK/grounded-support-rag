@@ -34,3 +34,11 @@
 ## [2026-07-02] ingest | ty Typecheck Cleanup Patterns
 - Created: ty Typecheck Cleanup Patterns
 - Updated: Knowledge Base Index
+
+## [2026-07-08] ingest | RAG Dev Tools and Eval Diagnostics
+- Created: RAG Dev Tools and Eval Diagnostics
+- Updated: Knowledge Base Index
+
+## [2026-07-08] ingest | Retrieval Ablation Smoke Run
+- Updated: RAG Dev Tools and Eval Diagnostics
+- Updated: Knowledge Base Index

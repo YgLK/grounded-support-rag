@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from langchain_community.retrievers import BM25Retriever
 from langchain_postgres import PGVector
@@ -28,6 +28,7 @@ from support_graph.types import (
 )
 
 __all__ = [
+    "RetrievalMode",
     "build_query_context",
     "build_query",
     "build_legacy_query",
@@ -39,6 +40,7 @@ __all__ = [
     "build_keyword_retriever",
 ]
 
+RetrievalMode = Literal["dense", "keyword", "hybrid"]
 QUERY_TOKEN_STOPWORDS = frozenset(get_stop_words("en"))
 
 
@@ -539,13 +541,13 @@ def retrieve_chunks(
     query_context: QueryContext | None = None,
     domain: str | None = None,
     doc_ids: list[str] | str | None = None,
+    retrieval_mode: RetrievalMode = "hybrid",
     rerank: bool = True,
 ) -> list[NormalizedRetrievalHit]:
     """Execute the end-to-end document retrieval pipeline.
 
     Pipeline stages:
-    - Dense vector search (primary)
-    - Optional BM25 keyword search (supplementary)
+    - Dense vector search, BM25 keyword search, or hybrid retrieval
     - Hit normalization and deduplication by chunk ID
     - Optional heuristic reranking
 
@@ -560,6 +562,7 @@ def retrieve_chunks(
         query_context: Explicit context for reranking.
         domain: Domain filter (overrides example-based generation).
         doc_ids: Optional exact document ID or list of allowed document IDs.
+        retrieval_mode: Which retrieval source to use: dense, keyword, or hybrid.
         rerank: Whether to apply heuristic reranking to candidates.
 
     Returns:
@@ -579,26 +582,41 @@ def retrieve_chunks(
         domain=resolved_domain,
         doc_ids=doc_ids,
     )
+    if retrieval_mode not in ("dense", "keyword", "hybrid"):
+        raise ValueError(
+            f"Unknown retrieval_mode: {retrieval_mode}. Expected dense, keyword, or hybrid."
+        )
 
-    if vectorstore is None:
+    needs_dense = retrieval_mode in ("dense", "hybrid")
+    needs_keyword = retrieval_mode in ("keyword", "hybrid")
+
+    if vectorstore is None and needs_dense:
         if config is None:
             raise ValueError("retrieve_chunks requires either vectorstore or config.")
         vectorstore = get_vectorstore(config)
 
-    hits = vectorstore.similarity_search_with_score(
-        resolved_query,
-        k=resolved_candidate_k,
-        filter=metadata_filter,
-    )
-    normalized_hits = normalize_retrieval_hits(hits)
-    for hit in normalized_hits:
-        hit["retrieval_source"] = "dense"
+    normalized_hits: list[NormalizedRetrievalHit] = []
+    if needs_dense:
+        if vectorstore is None:
+            raise ValueError("retrieve_chunks requires vectorstore for dense mode.")
+        hits = vectorstore.similarity_search_with_score(
+            resolved_query,
+            k=resolved_candidate_k,
+            filter=metadata_filter,
+        )
+        normalized_hits = normalize_retrieval_hits(hits)
+        for hit in normalized_hits:
+            hit["retrieval_source"] = "dense"
 
-    bm25_hits = _normalized_bm25_hits(
-        retriever=keyword_retriever,
-        query=resolved_query,
-        domain=resolved_domain,
-        doc_ids=doc_ids,
+    bm25_hits = (
+        _normalized_bm25_hits(
+            retriever=keyword_retriever,
+            query=resolved_query,
+            domain=resolved_domain,
+            doc_ids=doc_ids,
+        )
+        if needs_keyword
+        else []
     )
     if bm25_hits:
         dense_scores = [

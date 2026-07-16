@@ -223,6 +223,92 @@ def test_retrieve_chunks_uses_candidate_k_before_returning_top_k() -> None:
     assert results[0]["chunk_id"] == "kubernetes::doc::sec::1::sub::0"
 
 
+def test_retrieve_chunks_dense_mode_skips_keyword_retriever() -> None:
+    captured = {"keyword_calls": 0}
+
+    class FakeVectorStore:
+        def similarity_search_with_score(self, query, k=5, filter=None):
+            return [
+                (
+                    SimpleNamespace(
+                        page_content="dense hit",
+                        metadata={
+                            "chunk_id": "dense",
+                            "domain": "kubernetes",
+                            "doc_id": "doc-a",
+                            "span_ids": ["1"],
+                        },
+                    ),
+                    0.1,
+                )
+            ]
+
+    class FakeKeywordRetriever:
+        k = 5
+
+        def invoke(self, query, **kwargs):
+            captured["keyword_calls"] += 1
+            return []
+
+    results = retrieve.retrieve_chunks(
+        example={
+            "domain": "kubernetes",
+            "latest_user_utterance": "Need pod docs.",
+        },
+        vectorstore=FakeVectorStore(),
+        keyword_retriever=FakeKeywordRetriever(),
+        retrieval_mode="dense",
+        rerank=False,
+    )
+
+    assert captured["keyword_calls"] == 0
+    assert results[0]["chunk_id"] == "dense"
+    assert results[0]["retrieval_source"] == "dense"
+
+
+def test_retrieve_chunks_keyword_mode_skips_vectorstore() -> None:
+    captured = {"dense_calls": 0}
+
+    class FakeVectorStore:
+        def similarity_search_with_score(self, query, k=5, filter=None):
+            captured["dense_calls"] += 1
+            return []
+
+    class FakeKeywordRetriever:
+        k = 5
+
+        def invoke(self, query, **kwargs):
+            return [
+                SimpleNamespace(
+                    page_content="keyword hit",
+                    metadata={
+                        "chunk_id": "keyword",
+                        "domain": "kubernetes",
+                        "doc_id": "doc-a",
+                        "section_id": "1",
+                        "section_title": "Pods",
+                        "span_ids": ["1"],
+                        "token_count": 20,
+                    },
+                )
+            ]
+
+    results = retrieve.retrieve_chunks(
+        example={
+            "domain": "kubernetes",
+            "latest_user_utterance": "Need pod docs.",
+        },
+        vectorstore=FakeVectorStore(),
+        keyword_retriever=FakeKeywordRetriever(),
+        retrieval_mode="keyword",
+        rerank=False,
+    )
+
+    assert captured["dense_calls"] == 0
+    assert results[0]["chunk_id"] == "keyword"
+    assert results[0]["retrieval_source"] == "keyword"
+
+
 def test_retrieve_chunks_merges_filtered_keyword_hits_without_duplicates() -> None:
     captured = {}
 

@@ -51,9 +51,11 @@ markers = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "plotly>=6.8.0",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.20",
     "ty>=0.0.56",
+    "umap-learn>=0.5.12",
 ]
