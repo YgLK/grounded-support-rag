@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import UUID
+
+from langsmith import Client
 
 from support_graph.evaluation.contracts import FeedbackValue
 from support_graph.evaluation.langsmith_gateway import SdkLangSmithGateway
@@ -79,7 +82,7 @@ def test_gateway_normalizes_evaluation_rows(monkeypatch) -> None:
         "support_graph.evaluation.langsmith_gateway.aevaluate",
         fake_aevaluate,
     )
-    gateway = SdkLangSmithGateway(sdk)
+    gateway = SdkLangSmithGateway(cast(Client, sdk))
 
     snapshot = asyncio.run(
         gateway.evaluate(
@@ -104,7 +107,7 @@ def test_gateway_lists_experiments_without_async_generator_mismatch(
     monkeypatch,
 ) -> None:
     sdk = FakeSdkClient()
-    gateway = SdkLangSmithGateway(sdk)
+    gateway = SdkLangSmithGateway(cast(Client, sdk))
 
     monkeypatch.setattr(
         sdk,
