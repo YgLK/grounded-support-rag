@@ -1242,7 +1242,7 @@ def _doctor(args: argparse.Namespace) -> int:
             ]
         )
         return 1
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (LangSmithError, OSError, ValueError, RuntimeError) as exc:
         print_lines(
             [
                 title,

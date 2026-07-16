@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from langsmith.utils import LangSmithError
+
 from support_graph.cli import handlers as cli
 from support_graph.evaluation.contracts import DatasetRef
 
@@ -87,3 +89,37 @@ def test_doctor_does_not_create_output_directories(
 
     assert not (tmp_path / "outputs").exists()
     assert not settings.paths.log_dir.exists()
+
+
+def test_doctor_reports_langsmith_service_errors(
+    monkeypatch,
+    capsys,
+    make_settings,
+):
+    settings = make_settings()
+    settings.runtime.validate_for_hosted_eval = lambda: None
+    monkeypatch.setattr(
+        cli.Settings,
+        "load",
+        classmethod(lambda cls, config_file=None, secrets_file=None: settings),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_eval_examples",
+        lambda *args, **kwargs: ([{"example_id": "k8s-001"}], "smoke"),
+        raising=False,
+    )
+
+    class Gateway:
+        async def ping(self):
+            raise LangSmithError("service unavailable")
+
+    monkeypatch.setattr(cli, "build_langsmith_gateway", lambda config: Gateway())
+
+    exit_code = cli.main(["doctor", "--domain", "kubernetes"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "LangSmith connectivity: unavailable" in output
+    assert "service unavailable" in output
