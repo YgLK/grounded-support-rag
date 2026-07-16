@@ -39,10 +39,12 @@ async def publish_dataset(
     _validate_examples(examples)
     digest = dataset_sha256(examples)
     name = dataset_name(domain, subset, digest)
+    dataset_examples = [_dataset_example(example) for example in examples]
     existing = await gateway.get_dataset(name)
     if existing is not None:
         if existing.sha256 != digest:
             raise ValueError(f"LangSmith dataset hash mismatch for {name}")
+        await gateway.upsert_dataset_examples(existing, dataset_examples)
         return existing
 
     return await gateway.create_dataset(
@@ -54,7 +56,7 @@ async def publish_dataset(
             "subset": subset,
             "schema_version": "1",
         },
-        examples=[_dataset_example(example) for example in examples],
+        examples=dataset_examples,
     )
 
 

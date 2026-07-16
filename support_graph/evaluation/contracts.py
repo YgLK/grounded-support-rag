@@ -85,6 +85,12 @@ class LangSmithGateway(Protocol):
         examples: list[dict[str, Any]],
     ) -> DatasetRef: ...
 
+    async def upsert_dataset_examples(
+        self,
+        dataset: DatasetRef,
+        examples: list[dict[str, Any]],
+    ) -> None: ...
+
     async def evaluate(
         self,
         *,

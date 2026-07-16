@@ -57,12 +57,21 @@ class SdkLangSmithGateway:
             description=description,
             metadata=metadata,
         )
+        dataset_ref = _dataset_ref(dataset)
+        await self.upsert_dataset_examples(dataset_ref, examples)
+        return dataset_ref
+
+    async def upsert_dataset_examples(
+        self,
+        dataset: DatasetRef,
+        examples: list[dict[str, Any]],
+    ) -> None:
+        """Idempotently reconcile deterministic example IDs through the public SDK."""
         await asyncio.to_thread(
             self._client.create_examples,
             dataset_id=dataset.id,
             examples=examples,
         )
-        return _dataset_ref(dataset)
 
     async def evaluate(
         self,
