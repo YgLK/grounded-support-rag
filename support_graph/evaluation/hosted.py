@@ -205,6 +205,10 @@ async def run_hosted_evaluation(
     )
     aggregate = _aggregate_feedback(experiment)
     candidate_reasons = _candidate_reasons(experiment, policy)
+    if baseline is None:
+        from support_graph.evaluation.baselines import find_promoted_baseline
+
+        baseline = await find_promoted_baseline(gateway, dataset)
     if candidate_reasons:
         gate = GateResult(
             status="invalid",
