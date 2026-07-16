@@ -1,0 +1,34 @@
+schema_version = 1
+metric_schema_version = "1"
+required_feedback = [
+  "doc_recall_at_3",
+  "span_recall_at_5",
+  "citation_coverage",
+  "required_points_covered",
+  "decision",
+  "failure_label",
+]
+
+[metrics.doc_recall_at_3]
+direction = "higher"
+required = true
+max_absolute_regression = 0.0
+protect_examples = true
+
+[metrics.span_recall_at_5]
+direction = "higher"
+required = true
+max_absolute_regression = 0.0
+protect_examples = true
+
+[metrics.citation_coverage]
+direction = "higher"
+required = true
+max_absolute_regression = 0.0
+protect_examples = true
+
+[metrics.required_points_covered]
+direction = "higher"
+required = true
+max_absolute_regression = 0.0
+protect_examples = true
