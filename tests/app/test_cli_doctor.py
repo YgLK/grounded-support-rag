@@ -86,3 +86,4 @@ def test_doctor_does_not_create_output_directories(
     capsys.readouterr()
 
     assert not (tmp_path / "outputs").exists()
+    assert not settings.paths.log_dir.exists()

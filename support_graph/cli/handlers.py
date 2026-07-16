@@ -1283,10 +1283,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     settings = _load_settings(args)
-    log_path = configure_logging(
-        level=settings.paths.log_level,
-        log_dir=settings.paths.log_dir,
-        command_name=args.command,
+    log_path = (
+        None
+        if args.command == "doctor"
+        else configure_logging(
+            level=settings.paths.log_level,
+            log_dir=settings.paths.log_dir,
+            command_name=args.command,
+        )
     )
     if log_path is not None:
         logger.info("Writing command logs to %s", log_path)
