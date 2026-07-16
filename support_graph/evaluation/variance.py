@@ -28,9 +28,11 @@ from statistics import mean, stdev
 from typing import Any, Callable
 
 from support_graph.artifacts import eval_report_artifacts
-from support_graph.evaluation.evaluate import evaluate_examples_async
+from support_graph.evaluation.contracts import ExperimentSnapshot
+from support_graph.evaluation.hosted import run_hosted_evaluation
 from support_graph.logging_utils import get_logger
-from support_graph.types import DatasetSplitLike, DomainLike, Example
+from support_graph.runtime.graph import run_graph_async
+from support_graph.types import DatasetSplitLike, DomainLike
 
 __all__ = [
     "bootstrap_mean_ci",
@@ -131,6 +133,9 @@ class VarianceReport:
     n10_sampling_ci_width: dict[str, float] = field(default_factory=dict)
     recommended_k: int | None = None
     attribution: str = ""
+    study_id: str = ""
+    experiment_ids: list[str] = field(default_factory=list)
+    experiment_urls: list[str] = field(default_factory=list)
 
 
 def _metric_value(result: dict, *path: str) -> Any:
@@ -288,13 +293,53 @@ def _build_report(
     return report
 
 
+def _run_metrics_from_experiment(experiment: ExperimentSnapshot) -> RunMetrics:
+    """Normalize one hosted experiment into the pure variance input shape."""
+    values: dict[str, list[float]] = {}
+    per_example_required_points: list[float] = []
+    signatures: list[str] = []
+    failure_counts: dict[str, int] = {}
+    for result in experiment.results:
+        feedback = {item.key: item for item in result.feedback}
+        for key, item in feedback.items():
+            if item.score is not None:
+                values.setdefault(key, []).append(item.score)
+        required_points = feedback.get("required_points_covered")
+        if required_points is not None and required_points.score is not None:
+            per_example_required_points.append(required_points.score)
+        chunks = result.outputs.get("retrieval_ranked_chunks", [])
+        signatures.append(
+            "|".join(
+                str(chunk.get("chunk_id"))
+                for chunk in chunks
+                if isinstance(chunk, dict) and chunk.get("chunk_id") is not None
+            )
+        )
+        failure = feedback.get("failure_label")
+        if failure is not None and failure.value:
+            failure_counts[failure.value] = failure_counts.get(failure.value, 0) + 1
+    return RunMetrics(
+        run_id=experiment.id,
+        failure_counts=failure_counts,
+        required_points_covered=_average(values.get("required_points_covered", [])),
+        citation_coverage=_average(values.get("citation_coverage", [])),
+        incomplete_answer_count=failure_counts.get("incomplete_answer", 0),
+        per_example_required_points=per_example_required_points,
+        per_example_retrieval_signature=signatures,
+    )
+
+
+def _average(values: list[float]) -> float | None:
+    return float(mean(values)) if values else None
+
+
 async def run_variance_study_async(
     *,
     settings: Any,
     domain: DomainLike,
     split: DatasetSplitLike,
     subset: str,
-    examples: list[Example],
+    examples: list[dict[str, Any]],
     config: Any,
     repeat: int,
     notes: str | None = None,
@@ -303,41 +348,53 @@ async def run_variance_study_async(
     n10_reference_values: dict[str, list[float]] | None = None,
     desired_half_width: float = 0.05,
     run_graph_func: Any = None,
+    gateway: Any = None,
+    policy: Any = None,
+    corpus_manifest_path: Any = None,
+    git_state: Any = None,
 ) -> VarianceReport:
-    """Run the eval harness ``repeat`` times and build a variance report.
-
-    Each run uses the same examples, same config, and same restored index.
-    Retrieval signatures are asserted identical across runs. Requires live
-    Postgres and a live chat model.
-    """
+    """Run repeated tagged LangSmith experiments and summarize variance."""
     if repeat < 2:
         raise ValueError("repeat must be at least 2 to measure between-run variance.")
     started_at = now or datetime.now().astimezone()
+    study_id = f"{started_at.strftime('%Y%m%d')}-{domain}-{subset}-variance"
     runs: list[RunMetrics] = []
+    experiment_ids: list[str] = []
+    experiment_urls: list[str] = []
     for index in range(repeat):
         logger.info("Variance study run %s/%s for subset=%s", index + 1, repeat, subset)
-        call_kwargs: dict[str, Any] = {
-            "settings": settings,
-            "domain": domain,
-            "split": split,
-            "subset_name": subset,
-            "limit": None,
-            "notes": notes or f"variance study run {index + 1}/{repeat}",
-            "now": started_at,
-            "config": config,
-            "run_id_slug": f"variance-{index + 1}",
-            "subset_label": f"{domain} {split} / {subset} / variance run {index + 1}",
-            "max_concurrency": max_concurrency,
-        }
-        if run_graph_func is not None:
-            call_kwargs["run_graph_func"] = run_graph_func
-        result = await evaluate_examples_async(examples, **call_kwargs)
-        runs.append(_run_metrics(result))
-    return _build_report(
+        result = await run_hosted_evaluation(
+            gateway=gateway,
+            examples=examples,
+            config=config,
+            domain=str(domain),
+            subset=str(subset),
+            policy=policy,
+            corpus_ref="configured",
+            corpus_manifest_path=corpus_manifest_path,
+            git_state=git_state,
+            max_concurrency=max_concurrency,
+            run_graph_func=run_graph_func or run_graph_async,
+            experiment_metadata={
+                "study_type": "variance",
+                "study_id": study_id,
+                "variant": "control",
+                "repetition": index + 1,
+            },
+        )
+        runs.append(_run_metrics_from_experiment(result.experiment))
+        experiment_ids.append(result.experiment.id)
+        if result.experiment.url:
+            experiment_urls.append(result.experiment.url)
+    report = _build_report(
         runs,
         n10_reference_values=n10_reference_values,
         desired_half_width=desired_half_width,
     )
+    report.study_id = study_id
+    report.experiment_ids = experiment_ids
+    report.experiment_urls = experiment_urls
+    return report
 
 
 def _format_ci(lower: float, upper: float) -> str:
@@ -353,7 +410,7 @@ def write_variance_report(
     report: VarianceReport,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Write the variance study report artifact (manifest + report.md)."""
+    """Legacy explicit report writer retained for compatibility."""
     timestamp = now or datetime.now().astimezone()
     report_id = (
         f"{timestamp.strftime('%Y%m%d-%H%M%S')}-{domain}-{subset}-variance-{repeat}"

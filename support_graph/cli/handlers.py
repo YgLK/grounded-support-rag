@@ -61,7 +61,6 @@ from support_graph.evaluation.evaluate import (
 )
 from support_graph.evaluation.variance import (
     run_variance_study_async,
-    write_variance_report,
 )
 from support_graph.evaluation.model_ab import run_compatibility_gate_async
 from support_graph.evaluation.baselines import (
@@ -706,7 +705,9 @@ def _eval_split(args: argparse.Namespace) -> int:
             args.subset,
         )
         selected_examples = (
-            examples[: args.limit] if args.limit is not None else examples
+            [dict(example) for example in examples[: args.limit]]
+            if args.limit is not None
+            else [dict(example) for example in examples]
         )
         policy = _baseline_policy(settings, str(domain), str(args.subset))
         gateway = build_langsmith_gateway(settings.runtime)
@@ -803,28 +804,16 @@ def _baseline_promote(args: argparse.Namespace) -> int:
 
 
 def _experiment_smoke10(args: argparse.Namespace) -> int:
-    """CLI handler for the 'experiment-smoke10' command."""
+    """CLI handler for the tagged LangSmith Smoke-10 study."""
     settings = _load_settings(args)
     try:
-        settings.runtime.validate_for_run()
+        _validate_hosted_config(settings)
     except ConfigValidationError as exc:
-        return _print_config_validation_error(
-            title="SupportGraph Experiment",
-            settings=settings,
-            error=exc,
-        )
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     domain = settings.selected_domain(args.domain)
-    postgres_dsn = settings.runtime.postgres_dsn
-    if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for experiment.")
-    if not _ensure_index_ready(
-        title="SupportGraph Experiment",
-        postgres_dsn=postgres_dsn,
-        collection_name=settings.collection_name(domain),
-        domain=domain,
-    ):
-        return 1
+    gateway = build_langsmith_gateway(settings.runtime)
 
     result = cast(
         dict,
@@ -834,6 +823,10 @@ def _experiment_smoke10(args: argparse.Namespace) -> int:
                 domain=domain,
                 split=args.split,
                 limit=args.limit,
+                gateway=gateway,
+                policy=_baseline_policy(settings, str(domain), "smoke"),
+                corpus_manifest_path=settings.dataset.root / "manifest.json",
+                git_state=read_git_state(settings.paths.project_root),
             )
         ),
     )
@@ -1057,27 +1050,14 @@ def _promote_eval_examples(args: argparse.Namespace) -> int:
 
 
 def _eval_variance(args: argparse.Namespace) -> int:
-    """CLI handler for the 'eval-variance' command."""
+    """CLI handler for a repeated tagged LangSmith variance study."""
     settings = _load_settings(args)
     try:
-        settings.runtime.validate_for_run()
+        _validate_hosted_config(settings)
     except ConfigValidationError as exc:
-        return _print_config_validation_error(
-            title="SupportGraph Eval Variance",
-            settings=settings,
-            error=exc,
-        )
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     domain = settings.selected_domain(args.domain)
-    postgres_dsn = settings.runtime.postgres_dsn
-    if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for variance study.")
-    if not _ensure_index_ready(
-        title="SupportGraph Eval Variance",
-        postgres_dsn=postgres_dsn,
-        collection_name=settings.collection_name(domain),
-        domain=domain,
-    ):
-        return 1
 
     examples, subset_name = load_eval_examples(
         settings, domain, args.split, args.subset
@@ -1106,62 +1086,49 @@ def _eval_variance(args: argparse.Namespace) -> int:
             domain=domain,
             split=args.split,
             subset=subset_name,
-            examples=examples,
+            examples=[dict(example) for example in examples],
             config=config,
             repeat=args.repeat,
             notes=args.notes,
             max_concurrency=args.max_concurrency,
             desired_half_width=args.desired_half_width,
+            gateway=build_langsmith_gateway(settings.runtime),
+            policy=_baseline_policy(settings, str(domain), str(args.subset)),
+            corpus_manifest_path=settings.dataset.root / "manifest.json",
+            git_state=read_git_state(settings.paths.project_root),
         )
     )
-    result = write_variance_report(
-        settings=settings,
-        domain=domain,
-        subset=subset_name,
-        repeat=args.repeat,
-        report=report,
-    )
-    variance_report = result["report"]
     lines = [
         "SupportGraph Eval Variance",
         f"Domain: {domain}",
         f"Subset: {subset_name}",
         f"Examples: {len(examples)}",
         f"Repeat (K): {args.repeat}",
-        f"Retrieval Deterministic: {variance_report.retrieval_deterministic}",
-        f"Recommended K: {variance_report.recommended_k}",
-        f"Report: {relative_path(result['artifact_paths']['report'], settings.paths.project_root)}",
+        f"Study: {report.study_id}",
+        f"Retrieval Deterministic: {report.retrieval_deterministic}",
+        f"Recommended K: {report.recommended_k}",
     ]
-    if not variance_report.retrieval_deterministic:
+    lines.extend(
+        f"Experiment: {experiment_id}" for experiment_id in report.experiment_ids
+    )
+    lines.extend(f"LangSmith: {url}" for url in report.experiment_urls)
+    if not report.retrieval_deterministic:
         lines.append(
             "WARNING: retrieval was non-deterministic; attribution is invalid."
         )
     print_lines(lines)
-    return 0 if variance_report.retrieval_deterministic else 1
+    return 0 if report.retrieval_deterministic else 1
 
 
 def _model_ab_compatibility(args: argparse.Namespace) -> int:
-    """CLI handler for the 'model-ab-compatibility' command."""
+    """CLI handler for a tagged LangSmith model compatibility study."""
     settings = _load_settings(args)
     try:
-        settings.runtime.validate_for_run()
+        _validate_hosted_config(settings)
     except ConfigValidationError as exc:
-        return _print_config_validation_error(
-            title="SupportGraph Model A/B Compatibility",
-            settings=settings,
-            error=exc,
-        )
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     domain = settings.selected_domain(args.domain)
-    postgres_dsn = settings.runtime.postgres_dsn
-    if postgres_dsn is None:
-        raise ValueError("Missing postgres_dsn for compatibility gate.")
-    if not _ensure_index_ready(
-        title="SupportGraph Model A/B Compatibility",
-        postgres_dsn=postgres_dsn,
-        collection_name=settings.collection_name(domain),
-        domain=domain,
-    ):
-        return 1
 
     examples, _ = load_eval_examples(settings, domain, args.split, args.subset)
     if not examples:
@@ -1186,12 +1153,17 @@ def _model_ab_compatibility(args: argparse.Namespace) -> int:
             settings=settings,
             domain=domain,
             split=args.split,
-            examples=examples,
+            examples=[dict(example) for example in examples],
             candidate_chat_model=args.candidate_chat_model,
             base_config=base_config,
+            subset=str(args.subset),
             limit=args.limit,
             max_concurrency=args.max_concurrency,
             fallback_tolerance=args.fallback_tolerance,
+            gateway=build_langsmith_gateway(settings.runtime),
+            policy=_baseline_policy(settings, str(domain), str(args.subset)),
+            corpus_manifest_path=settings.dataset.root / "manifest.json",
+            git_state=read_git_state(settings.paths.project_root),
         )
     )
     lines = [
@@ -1202,7 +1174,8 @@ def _model_ab_compatibility(args: argparse.Namespace) -> int:
         f"Total Fallbacks: {gate.total_fallbacks}",
         f"Runtime Errors: {gate.runtime_error_count}",
         f"Fallback Nodes: {', '.join(gate.fallback_nodes) or 'none'}",
-        f"Gate Run: {gate.run_id}",
+        f"Experiment: {gate.experiment_id}",
+        f"LangSmith: {gate.experiment_url or 'none'}",
         gate.reason,
     ]
     if not gate.passed:
@@ -1239,7 +1212,7 @@ def _doctor(args: argparse.Namespace) -> int:
     try:
         _validate_hosted_config(settings)
         examples, _ = load_eval_examples(settings, domain, "validation", args.subset)
-        digest = dataset_sha256(examples)
+        digest = dataset_sha256([dict(example) for example in examples])
         name = dataset_name(str(domain), str(args.subset), digest)
         gateway = build_langsmith_gateway(settings.runtime)
         run_async_boundary(gateway.ping())

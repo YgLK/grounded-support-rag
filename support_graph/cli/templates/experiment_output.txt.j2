@@ -1,10 +1,20 @@
 SupportGraph Experiment
 Scope: {{ scope }}
+{% if study_id %}
+Study: {{ study_id }}
+{% endif %}
 
 Variants
 {% for item in results %}
-- {{ item.title }}: {{ item.status }} | Span Recall@5 {{ '%.3f'|format(item.span) }} | Citation {{ '%.3f'|format(item.citation) }} | E2E {{ '%.3f'|format(item.e2e) }}
+- {{ item.title }}: {{ item.status }} | Span Recall@5 {{ '%.3f'|format(item.span) }} | Citation {{ '%.3f'|format(item.citation) }} | E2E {{ '%.3f'|format(item.e2e) }}{% if item.experiment_id %} | Experiment {{ item.experiment_id }}{% endif %}{% if item.experiment_url %} | {{ item.experiment_url }}{% endif %}
 {% endfor %}
+
+{% if experiment_urls %}
+LangSmith Experiments
+{% for url in experiment_urls %}
+{{ url }}
+{% endfor %}
+{% endif %}
 
 Recommendation
 {{ recommendation }}: {{ recommendation_line }}
@@ -16,5 +26,7 @@ ran: {{ frozen_result }}
 skipped: Smoke-10 gate not met
 {% endif %}
 
+{% if report_path %}
 Artifacts
 {{ report_path }}
+{% endif %}

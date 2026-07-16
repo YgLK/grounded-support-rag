@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 import pytest
 
 from support_graph.evaluation.variance import (
@@ -9,7 +13,82 @@ from support_graph.evaluation.variance import (
     recommended_k,
     retrieval_determinism_check,
     retrieval_signature,
+    run_variance_study_async,
 )
+from support_graph.evaluation.contracts import (
+    DatasetRef,
+    ExampleResult,
+    ExperimentSnapshot,
+    FeedbackValue,
+)
+
+
+def test_variance_study_tags_each_hosted_repetition(monkeypatch, make_settings) -> None:
+    calls: list[dict] = []
+    settings = make_settings()
+    snapshot = ExperimentSnapshot(
+        id="exp-1",
+        name="variance",
+        dataset=DatasetRef("dataset", "dataset", "hash"),
+        metadata={"status": "completed"},
+        results=(
+            ExampleResult(
+                example_id="ex-1",
+                run_id="run-1",
+                inputs={},
+                reference_outputs={},
+                outputs={"retrieval_ranked_chunks": [{"chunk_id": "chunk-1"}]},
+                feedback=(
+                    FeedbackValue("required_points_covered", score=1.0),
+                    FeedbackValue("citation_coverage", score=1.0),
+                    FeedbackValue("failure_label", value="none"),
+                ),
+            ),
+        ),
+        url="https://smith/exp-1",
+    )
+
+    async def fake_hosted(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(experiment=snapshot)
+
+    monkeypatch.setattr(
+        "support_graph.evaluation.variance.run_hosted_evaluation", fake_hosted
+    )
+
+    report = asyncio.run(
+        run_variance_study_async(
+            settings=settings,
+            domain="kubernetes",
+            split="validation",
+            subset="smoke",
+            examples=[{"example_id": "ex-1"}],
+            config=SimpleNamespace(),
+            repeat=2,
+            now=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            gateway=object(),
+            policy=object(),
+            corpus_manifest_path=settings.dataset.root / "manifest.json",
+            git_state=SimpleNamespace(),
+        )
+    )
+
+    assert len(calls) == 2
+    assert [call["experiment_metadata"] for call in calls] == [
+        {
+            "study_type": "variance",
+            "study_id": "20260716-kubernetes-smoke-variance",
+            "variant": "control",
+            "repetition": 1,
+        },
+        {
+            "study_type": "variance",
+            "study_id": "20260716-kubernetes-smoke-variance",
+            "variant": "control",
+            "repetition": 2,
+        },
+    ]
+    assert report.experiment_ids == ["exp-1", "exp-1"]
 
 
 def test_mean_std_handles_empty_and_single_value() -> None:

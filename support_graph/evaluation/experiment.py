@@ -10,19 +10,19 @@ from typing import Any, Literal, Protocol, TypedDict, assert_never, cast
 
 from support_graph.artifacts import eval_report_artifacts
 from support_graph.config.runtime import RuntimeExperimentOverrides
+from support_graph.evaluation.contracts import ExperimentSnapshot
 from support_graph.evaluation.evaluate import (
     build_eval_config,
-    evaluate_examples_async,
     load_eval_examples,
     with_config_overrides,
 )
+from support_graph.evaluation.hosted import run_hosted_evaluation
 from support_graph.runtime.graph import run_graph_async
 from support_graph.types import (
     DatasetSplit,
     DatasetSplitLike,
     Domain,
     DomainLike,
-    Example,
 )
 
 
@@ -218,7 +218,7 @@ def _variant_manifest(variant: ExperimentVariant, *, scope: str) -> dict:
 async def _run_variant(
     *,
     settings: Any,
-    examples: list[Example],
+    examples: list[dict[str, Any]],
     domain: DomainLike,
     split: DatasetSplitLike,
     subset_name: str,
@@ -231,6 +231,12 @@ async def _run_variant(
     run_id_slug: str,
     subset_label: str,
     manifest_scope: str,
+    gateway: Any,
+    policy: Any,
+    corpus_manifest_path: Path = Path("manifest.json"),
+    git_state: Any,
+    study_id: str,
+    max_concurrency: int = 1,
 ) -> dict[str, Any]:
     config_overrides = dict(variant["config_overrides"])
     experiment = RuntimeExperimentOverrides(
@@ -242,23 +248,75 @@ async def _run_variant(
     )
     config = replace(base_config, **config_overrides)
     config = with_config_overrides(config, experiment)
-    result = await evaluate_examples_async(
-        examples,
-        settings=settings,
-        domain=domain,
-        split=split,
-        subset_name=subset_name,
-        limit=None,
-        notes=notes,
-        now=started_at,
+    hosted = await run_hosted_evaluation(
+        gateway=gateway,
+        examples=examples,
         config=config,
-        run_id_slug=run_id_slug,
-        subset_label=subset_label,
-        run_graph_func=run_graph_func,
-        manifest_overrides=_variant_manifest(variant, scope=manifest_scope),
+        domain=str(domain),
+        subset=str(subset_name),
+        policy=policy,
+        corpus_ref="configured",
+        corpus_manifest_path=corpus_manifest_path,
+        git_state=git_state,
+        max_concurrency=max_concurrency,
+        run_graph_func=run_graph_func or run_graph_async,
+        experiment_metadata={
+            "study_type": "retrieval_ablation",
+            "study_id": study_id,
+            "variant": variant["id"],
+            "repetition": 1,
+        },
     )
+    result = _snapshot_result(hosted.experiment, hosted.aggregate_metrics)
     result["variant"] = variant
     return result
+
+
+def _snapshot_result(
+    experiment: ExperimentSnapshot, aggregate: dict[str, float]
+) -> dict:
+    retrieval = {
+        key: aggregate.get(key)
+        for key in (
+            "doc_recall_at_3",
+            "span_recall_at_5",
+            "doc_recall_at_1",
+            "doc_recall_at_5",
+            "doc_recall_at_10",
+        )
+    }
+    generation = {
+        key: aggregate.get(key)
+        for key in (
+            "citation_coverage",
+            "rouge_l",
+            "token_f1",
+        )
+    }
+    generation["end_to_end_success_rate"] = aggregate.get("end_to_end_success")
+    failures: dict[str, int] = {}
+    for item in experiment.results:
+        failure = next(
+            (
+                feedback.value
+                for feedback in item.feedback
+                if feedback.key == "failure_label"
+            ),
+            None,
+        )
+        if failure and failure != "none":
+            failures[failure] = failures.get(failure, 0) + 1
+    return {
+        "experiment_id": experiment.id,
+        "experiment_url": experiment.url,
+        "run_id": experiment.id,
+        "metrics": {
+            "retrieval": {"answer": retrieval},
+            "generation": {"answer": generation},
+        },
+        "failure_counts": failures,
+        "metadata": dict(experiment.metadata),
+    }
 
 
 def _variant_score(result: dict) -> tuple[float, float, float, float, float]:
@@ -466,12 +524,17 @@ async def run_smoke10_experiment_async(
     limit: int = 10,
     run_graph_func: Any | None = None,
     now: datetime | None = None,
+    gateway: Any = None,
+    policy: Any = None,
+    corpus_manifest_path: Path = Path("manifest.json"),
+    git_state: Any = None,
 ) -> dict:
     examples, _ = load_eval_examples(settings, domain, split, "smoke")
-    selected_examples = examples[:limit]
+    selected_examples = [dict(example) for example in examples[:limit]]
     started_at = now or datetime.now().astimezone()
     base_config = build_eval_config(settings, domain)
     graph_runner = run_graph_func or run_graph_async
+    study_id = f"{started_at.strftime('%Y%m%d')}-{domain}-smoke-retrieval-ablation"
     results: list[dict] = []
 
     for variant in VARIANTS:
@@ -490,6 +553,11 @@ async def run_smoke10_experiment_async(
             run_id_slug=variant["id"],
             subset_label=f"{domain} {split} / smoke first {limit} / {variant['title']}",
             manifest_scope=f"first {limit} examples from committed smoke subset",
+            gateway=gateway,
+            policy=policy,
+            corpus_manifest_path=corpus_manifest_path,
+            git_state=git_state,
+            study_id=study_id,
         )
         results.append(result)
 
@@ -505,6 +573,7 @@ async def run_smoke10_experiment_async(
         frozen_examples, frozen_subset = load_eval_examples(
             settings, domain, split, "frozen_experiment"
         )
+        frozen_examples = [dict(example) for example in frozen_examples]
         variant = cast(ExperimentVariant, best["variant"])
         frozen_result = await _run_variant(
             settings=settings,
@@ -521,17 +590,12 @@ async def run_smoke10_experiment_async(
             run_id_slug=f"{variant['id']}-frozen200",
             subset_label=f"{domain} {split} / frozen 200 / {variant['title']}",
             manifest_scope="Frozen-200 follow-through after Smoke-10 gate",
+            gateway=gateway,
+            policy=policy,
+            corpus_manifest_path=corpus_manifest_path,
+            git_state=git_state,
+            study_id=study_id,
         )
-
-    report = write_experiment_summary(
-        settings=settings,
-        domain=domain,
-        split=split,
-        limit=limit,
-        results=results,
-        summary_timestamp=started_at,
-        frozen_result=frozen_result,
-    )
     recommendation, recommendation_line = _final_recommendation(results)
     return {
         "domain": domain,
@@ -539,8 +603,11 @@ async def run_smoke10_experiment_async(
         "results": results,
         "best_result": best,
         "frozen_result": frozen_result,
-        "report_id": report["report_id"],
-        "report_artifact_paths": report["artifact_paths"],
+        "study_id": study_id,
+        "experiment_ids": [item["experiment_id"] for item in results],
+        "experiment_urls": [
+            item["experiment_url"] for item in results if item.get("experiment_url")
+        ],
         "recommendation": recommendation,
         "recommendation_line": recommendation_line,
     }

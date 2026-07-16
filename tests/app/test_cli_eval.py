@@ -67,7 +67,7 @@ def test_eval_cli_reports_missing_hosted_config(monkeypatch, capsys, make_settin
 
 
 def test_eval_cli_reports_hosted_success(monkeypatch, capsys, make_settings):
-    settings = _configure_hosted(monkeypatch, make_settings)
+    _configure_hosted(monkeypatch, make_settings)
     snapshot = _snapshot()
     delta = MetricDelta("doc_recall_at_3", 0.8, 0.75, 0.05, 0.1)
     hosted = HostedResult(

@@ -236,20 +236,27 @@ def format_experiment_output(result: dict, settings: Settings) -> list[str]:
                 "span": (retrieval.get("span_recall_at_5") or 0.0),
                 "citation": (generation.get("citation_coverage") or 0.0),
                 "e2e": (generation.get("end_to_end_success_rate") or 0.0),
+                "experiment_id": item.get("experiment_id"),
+                "experiment_url": item.get("experiment_url"),
             }
         )
 
     frozen_result = result.get("frozen_result") or {}
 
+    report_artifacts = result.get("report_artifact_paths") or {}
     template_context = {
         "scope": f"{result.get('domain')} smoke / first {result.get('limit')}",
         "results": results_context,
         "recommendation": result.get("recommendation"),
         "recommendation_line": result.get("recommendation_line"),
         "frozen_result": frozen_result.get("variant", {}).get("title"),
-        "report_path": relative_path(
-            Path(result["report_artifact_paths"]["report"]),
-            settings.paths.project_root,
+        "study_id": result.get("study_id"),
+        "experiment_ids": result.get("experiment_ids", []),
+        "experiment_urls": result.get("experiment_urls", []),
+        "report_path": (
+            relative_path(Path(report_artifacts["report"]), settings.paths.project_root)
+            if report_artifacts.get("report")
+            else None
         ),
     }
 

@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from support_graph.cli import handlers as cli
 from support_graph.evaluation import experiment
+from support_graph.evaluation.contracts import DatasetRef, ExperimentSnapshot
 
 
 def _smoke10_examples() -> list[dict]:
@@ -109,12 +111,13 @@ def _run_graph_variant(*, example: dict, config: Any, **kwargs) -> dict:
     }
 
 
-def test_smoke10_variant_run_ids_and_artifact_paths(
+def test_smoke10_variants_are_tagged_hosted_experiments(
     monkeypatch,
     tmp_path: Path,
     make_settings,
 ) -> None:
     settings = make_settings(project_root=tmp_path)
+    settings.runtime.validate_for_hosted_eval = lambda: None
     fixed_now = datetime(2026, 3, 18, 14, 30, tzinfo=timezone.utc)
 
     monkeypatch.setattr(
@@ -123,42 +126,61 @@ def test_smoke10_variant_run_ids_and_artifact_paths(
         lambda *args, **kwargs: (_smoke10_examples(), "smoke"),
         raising=False,
     )
+    calls: list[dict] = []
+
+    async def fake_hosted(**kwargs):
+        calls.append(kwargs)
+        variant = kwargs["experiment_metadata"]["variant"]
+        snapshot = ExperimentSnapshot(
+            id=f"exp-{variant}",
+            name=variant,
+            dataset=DatasetRef("dataset", "dataset", "hash"),
+            metadata=kwargs["experiment_metadata"],
+            results=(),
+            url=f"https://smith/{variant}",
+        )
+        return SimpleNamespace(
+            experiment=snapshot,
+            aggregate_metrics={
+                "doc_recall_at_3": 0.6,
+                "span_recall_at_5": 0.2,
+                "citation_coverage": 0.1,
+                "end_to_end_success": 0.2,
+            },
+        )
+
+    monkeypatch.setattr(experiment, "run_hosted_evaluation", fake_hosted)
     result = asyncio.run(
         experiment.run_smoke10_experiment_async(
             settings=settings,
             domain="kubernetes",
             limit=10,
-            run_graph_func=_run_graph_variant,
             now=fixed_now,
+            gateway=object(),
+            policy=object(),
+            corpus_manifest_path=tmp_path / "manifest.json",
+            git_state=SimpleNamespace(),
         )
     )
 
-    assert (
-        result["report_id"] == "20260318-143000-kubernetes-smoke10-experiment-summary"
-    )
-    assert (
-        result["report_artifact_paths"]["manifest"]
-        == tmp_path
-        / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/manifest.json"
-    )
-    assert (
-        result["report_artifact_paths"]["report"]
-        == tmp_path
-        / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/report.md"
-    )
     assert len(result["results"]) == 4
-    for item in result["results"]:
-        expected_run_id = f"20260318-143000-kubernetes-smoke10-{item['variant']['id']}"
-        expected_dir = tmp_path / "outputs/evals/runs" / expected_run_id
-        assert item["run_id"] == expected_run_id
-        assert item["output_dir"] == expected_dir
-        assert item["artifact_paths"]["manifest"] == expected_dir / "manifest.json"
-        assert item["artifact_paths"]["metrics"] == expected_dir / "metrics.json"
-        assert (
-            item["artifact_paths"]["predictions"] == expected_dir / "predictions.jsonl"
-        )
-        assert item["artifact_paths"]["failures"] == expected_dir / "failures.jsonl"
-        assert item["artifact_paths"]["summary"] == expected_dir / "summary.md"
+    assert result["study_id"] == "20260318-kubernetes-smoke-retrieval-ablation"
+    assert result["experiment_ids"] == [
+        "exp-control",
+        "exp-structured-query",
+        "exp-structured-query-rerank",
+        "exp-structured-query-rerank-neighbors",
+    ]
+    assert [call["experiment_metadata"] for call in calls] == [
+        {
+            "study_type": "retrieval_ablation",
+            "study_id": "20260318-kubernetes-smoke-retrieval-ablation",
+            "variant": item["variant"]["id"],
+            "repetition": 1,
+        }
+        for item in result["results"]
+    ]
+    assert not (tmp_path / "outputs").exists()
 
 
 def test_smoke10_comparison_summary_classification_and_guardrails() -> None:
@@ -239,15 +261,16 @@ def test_experiment_cli_output_hierarchy(
     make_settings,
 ) -> None:
     settings = make_settings(project_root=tmp_path)
+    settings.runtime.validate_for_hosted_eval = lambda: None
     monkeypatch.setattr(
         cli.Settings,
         "load",
         classmethod(lambda cls, config_file=None, secrets_file=None: settings),
         raising=False,
     )
-    monkeypatch.setattr(
-        cli, "collection_row_count", lambda *args, **kwargs: 4316, raising=False
-    )
+    monkeypatch.setattr(cli, "build_langsmith_gateway", lambda config: object())
+    monkeypatch.setattr(cli, "_baseline_policy", lambda *args: object())
+    monkeypatch.setattr(cli, "read_git_state", lambda root: SimpleNamespace())
     monkeypatch.setattr(
         cli,
         "run_smoke10_experiment_async",
@@ -285,12 +308,12 @@ def test_experiment_cli_output_hierarchy(
             "recommendation": "keep",
             "recommendation_line": "Promote Structured Query + Rerank to the Frozen-200 check next.",
             "frozen_result": None,
-            "report_artifact_paths": {
-                "manifest": tmp_path
-                / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/manifest.json",
-                "report": tmp_path
-                / "outputs/evals/reports/20260318-143000-kubernetes-smoke10-experiment-summary/report.md",
-            },
+            "study_id": "20260318-kubernetes-smoke-retrieval-ablation",
+            "experiment_ids": ["exp-control", "exp-rerank"],
+            "experiment_urls": [
+                "https://smith/exp-control",
+                "https://smith/exp-rerank",
+            ],
         },
         raising=False,
     )
@@ -307,5 +330,5 @@ def test_experiment_cli_output_hierarchy(
     assert any(line.startswith("keep:") for line in output)
     assert "Frozen-200" in output
     assert any(line.startswith("skipped:") for line in output)
-    assert "Artifacts" in output
-    assert any(line.endswith("report.md") for line in output)
+    assert "Artifacts" not in output
+    assert "https://smith/exp-control" in output

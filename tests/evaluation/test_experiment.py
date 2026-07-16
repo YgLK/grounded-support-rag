@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from support_graph.evaluation import experiment
+from support_graph.evaluation.contracts import DatasetRef, ExperimentSnapshot
 
 
 def _result(
@@ -83,6 +86,62 @@ def test_classify_variant_rejects_latency_without_material_gain() -> None:
     status, _ = experiment.classify_variant(control, candidate)
 
     assert status == "didn't work"
+
+
+def test_variant_run_uses_tagged_hosted_experiment(monkeypatch, make_runtime_config):
+    calls: list[dict] = []
+    snapshot = ExperimentSnapshot(
+        id="exp-variant",
+        name="variant",
+        dataset=DatasetRef("dataset", "dataset", "hash"),
+        metadata={},
+        results=(),
+        url="https://smith/exp-variant",
+    )
+
+    async def fake_hosted(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(experiment=snapshot, aggregate_metrics={})
+
+    monkeypatch.setattr(experiment, "run_hosted_evaluation", fake_hosted)
+    variant = next(item for item in experiment.VARIANTS if item["id"] == "control")
+
+    result = asyncio.run(
+        experiment._run_variant(
+            settings=SimpleNamespace(),
+            examples=[{"example_id": "ex-1"}],
+            domain="kubernetes",
+            split="validation",
+            subset_name="smoke",
+            started_at=datetime(2026, 7, 16, tzinfo=timezone.utc),
+            base_config=make_runtime_config(
+                postgres_dsn="dsn",
+                chat_model="chat",
+                embedding_model="embed",
+            ),
+            variant=variant,
+            run_graph_func=None,
+            experiment_variant="control",
+            notes="control",
+            run_id_slug="control",
+            subset_label="smoke",
+            manifest_scope="smoke",
+            gateway=object(),
+            policy=object(),
+            corpus_manifest_path=Path("manifest.json"),
+            git_state=SimpleNamespace(),
+            study_id="20260716-kubernetes-smoke-retrieval-ablation",
+        )
+    )
+
+    assert calls[0]["experiment_metadata"] == {
+        "study_type": "retrieval_ablation",
+        "study_id": "20260716-kubernetes-smoke-retrieval-ablation",
+        "variant": "control",
+        "repetition": 1,
+    }
+    assert result["experiment_id"] == "exp-variant"
+    assert result["experiment_url"] == "https://smith/exp-variant"
 
 
 def test_write_experiment_summary_creates_markdown_note(
