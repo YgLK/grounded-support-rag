@@ -66,11 +66,22 @@ class SdkLangSmithGateway:
         dataset: DatasetRef,
         examples: list[dict[str, Any]],
     ) -> None:
-        """Idempotently reconcile deterministic example IDs through the public SDK."""
+        """Create only deterministic dataset examples absent from LangSmith."""
+        existing_ids = await asyncio.to_thread(
+            lambda: {
+                str(example.id)
+                for example in self._client.list_examples(dataset_id=dataset.id)
+            }
+        )
+        missing_examples = [
+            example for example in examples if str(example["id"]) not in existing_ids
+        ]
+        if not missing_examples:
+            return
         await asyncio.to_thread(
             self._client.create_examples,
             dataset_id=dataset.id,
-            examples=examples,
+            examples=missing_examples,
         )
 
     async def evaluate(

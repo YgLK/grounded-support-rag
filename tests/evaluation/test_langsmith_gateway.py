@@ -8,7 +8,7 @@ from uuid import UUID
 
 from langsmith import Client
 
-from support_graph.evaluation.contracts import FeedbackValue
+from support_graph.evaluation.contracts import DatasetRef, FeedbackValue
 from support_graph.evaluation.langsmith_gateway import SdkLangSmithGateway
 
 
@@ -124,3 +124,32 @@ def test_gateway_lists_experiments_without_async_generator_mismatch(
     snapshots = asyncio.run(gateway.list_experiments("dataset-1"))
 
     assert [snapshot.id for snapshot in snapshots] == ["project-1"]
+
+
+def test_gateway_does_not_recreate_existing_dataset_examples(monkeypatch) -> None:
+    sdk = FakeSdkClient()
+    gateway = SdkLangSmithGateway(cast(Client, sdk))
+    example_id = UUID("00000000-0000-0000-0000-000000000004")
+    create_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        sdk,
+        "list_examples",
+        lambda **kwargs: iter([SimpleNamespace(id=example_id)]),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sdk,
+        "create_examples",
+        lambda **kwargs: create_calls.append(kwargs),
+        raising=False,
+    )
+
+    asyncio.run(
+        gateway.upsert_dataset_examples(
+            DatasetRef("dataset-1", "dataset", "hash"),
+            [{"id": str(example_id)}],
+        )
+    )
+
+    assert create_calls == []
