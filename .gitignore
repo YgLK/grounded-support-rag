@@ -16,6 +16,9 @@ data/derived/examples/*.jsonl
 
 outputs/evals/*
 !outputs/evals/.gitkeep
+outputs/dev_tools/*
+outputs/baselines/*
+!outputs/baselines/.gitkeep
 outputs/runs/*
 !outputs/runs/.gitkeep
 outputs/traces/*.jsonl

@@ -28,5 +28,3 @@ llm_retry_max_delay_seconds = 4.0
 
 [observability.langsmith]
 tracing_enabled = false
-project = "support-graph"
-endpoint = ""
